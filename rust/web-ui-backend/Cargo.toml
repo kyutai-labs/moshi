@@ -22,7 +22,7 @@ hf-hub = "0.3.0"
 http = "1.1.0"
 lazy_static = "1.5.0"
 log = "0.4.20"
-mimi = { path = "../mimi-core" }
+moshi = { path = "../moshi-core" }
 ogg = { version = "0.9.1", features = ["async"] }
 opus = "0.3.0"
 prometheus = "0.13.4"
@@ -52,8 +52,8 @@ vergen = { version = "8.3.1", features = ["build", "cargo", "git", "gitcl", "rus
 
 [features]
 default = []
-cuda = ["mimi/cuda", "candle/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
-metal = ["mimi/metal", "candle/metal", "candle-nn/metal", "candle-transformers/metal"]
+cuda = ["moshi/cuda", "candle/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["moshi/metal", "candle/metal", "candle-nn/metal", "candle-transformers/metal"]
 
 [profile.release]
 debug = true

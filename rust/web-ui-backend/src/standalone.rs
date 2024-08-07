@@ -58,10 +58,10 @@ impl stream_both::AppStateInner {
     pub fn new(args: &StandaloneArgs, config: &stream_both::Config) -> Result<Self> {
         let device = device(args.cpu)?;
         let dtype = if device.is_cuda() { candle::DType::BF16 } else { candle::DType::F32 };
-        let lm_model = mimi::lm::load_streaming(&config.lm_model_file, dtype, &device)?;
+        let lm_model = moshi::lm::load_streaming(&config.lm_model_file, dtype, &device)?;
         let encodec_device =
             if config.use_cpu_for_encodec { &candle::Device::Cpu } else { &device };
-        let encodec_model = mimi::encodec::load(
+        let encodec_model = moshi::encodec::load(
             &config.encodec_model_file,
             Some(config.encodec_num_codebooks),
             encodec_device,

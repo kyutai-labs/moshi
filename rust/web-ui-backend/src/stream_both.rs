@@ -14,7 +14,7 @@ pub struct Config {
     pub text_tokenizer_file: String,
     pub encodec_model_file: String,
     pub encodec_num_codebooks: usize,
-    pub lm_config: Option<mimi::lm_generate_multistream::Config>,
+    pub lm_config: Option<moshi::lm_generate_multistream::Config>,
     #[serde(default = "default_false")]
     pub use_cpu_for_encodec: bool,
 }
@@ -37,8 +37,8 @@ impl Config {
 
 pub type AppState = Arc<AppStateInner>;
 pub struct AppStateInner {
-    pub lm_model: mimi::lm::LmModel,
-    pub encodec_model: mimi::encodec::Encodec,
+    pub lm_model: moshi::lm::LmModel,
+    pub encodec_model: moshi::encodec::Encodec,
     pub text_tokenizer: sentencepiece::SentencePieceProcessor,
     pub device: candle::Device,
     pub config: Config,
@@ -49,7 +49,7 @@ impl AppStateInner {
         &self,
         prev_text_token: u32,
         text_token: u32,
-        config: &mimi::lm_generate_multistream::Config,
+        config: &moshi::lm_generate_multistream::Config,
     ) -> Option<String> {
         if text_token != config.text_start_token
             && text_token != config.text_pad_token
@@ -117,7 +117,7 @@ struct SessionSummary<'a> {
     lm_model_file: &'a str,
     encodec_model_file: &'a str,
     #[serde(flatten)]
-    lm_config: &'a Option<mimi::lm_generate_multistream::Config>,
+    lm_config: &'a Option<moshi::lm_generate_multistream::Config>,
 }
 
 impl SessionConfigReq {
@@ -307,14 +307,14 @@ impl MsgSender {
 pub struct StreamingModel {
     state: AppState,
     device: candle::Device,
-    config: mimi::lm_generate_multistream::Config,
+    config: moshi::lm_generate_multistream::Config,
     session_config: SessionConfig,
 }
 
 impl StreamingModel {
     fn run_with_state(
         &self,
-        state: &mut mimi::lm_generate_multistream::State,
+        state: &mut moshi::lm_generate_multistream::State,
         receiver: std::sync::mpsc::Receiver<Vec<f32>>,
         sender: tokio::sync::mpsc::UnboundedSender<StreamOut>,
     ) -> Result<()> {
@@ -377,7 +377,7 @@ impl StreamingModel {
 
     fn run_with_state_mt(
         &self,
-        state: &mut mimi::lm_generate_multistream::State,
+        state: &mut moshi::lm_generate_multistream::State,
         receiver: std::sync::mpsc::Receiver<Vec<f32>>,
         sender: tokio::sync::mpsc::UnboundedSender<StreamOut>,
     ) -> Result<()> {
@@ -481,7 +481,7 @@ impl StreamingModel {
 
     pub fn new(state: &AppState, session_config: SessionConfigReq) -> Self {
         let config = match state.config.lm_config.as_ref() {
-            None => mimi::lm_generate_multistream::Config::v0_1(),
+            None => moshi::lm_generate_multistream::Config::v0_1(),
             Some(config) => config.clone(),
         };
         let session_config = session_config.into_session_config();
@@ -526,7 +526,7 @@ impl StreamingModel {
                 temperature: self.session_config.text_temperature,
             },
         );
-        let mut state = mimi::lm_generate_multistream::State::new(
+        let mut state = moshi::lm_generate_multistream::State::new(
             lm_model,
             self.session_config.max_steps,
             audio_lp,
@@ -549,7 +549,7 @@ impl StreamingModel {
                     .iter()
                     .filter_map(|v| {
                         let v = *v;
-                        if v != mimi::lm_generate_multistream::UNGENERATED
+                        if v != moshi::lm_generate_multistream::UNGENERATED
                             && v != self.config.text_pad_token
                             && v != self.config.text_eop_token
                             && v != self.config.text_start_token

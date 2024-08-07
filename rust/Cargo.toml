@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "mimi-core",
+    "moshi-core",
     "web-ui-backend",
 ]
 resolver = "2"
