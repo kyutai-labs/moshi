@@ -29,7 +29,7 @@ byteorder = "1.5.0"
 color-eyre = "0.6.2"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
 ratatui = "0.27.0"
-tui-logger = "0.11.1"
+tui-logger = "0.11.2"
 futures = "0.3.28"
 
 [profile.release]
