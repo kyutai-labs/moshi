@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "mimi-core",
+    "web-ui-backend",
 ]
 resolver = "2"
 
