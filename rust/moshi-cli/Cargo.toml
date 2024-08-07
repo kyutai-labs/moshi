@@ -1,5 +1,5 @@
 [package]
-name = "mimi-cli"
+name = "moshi-cli"
 version = "0.1.0"
 edition = "2021"
 
@@ -16,8 +16,6 @@ tokio = { version = "1.0", features = ["full"] }
 env_logger = "0.10.1"
 log = "0.4.20"
 futures-util = "0.3.30"
-
-moshi = { path = "../moshi-core" }
 serde_json = "1.0.115"
 tokio-tungstenite = { version = "0.21.0", features = ["rustls", "native-tls"] }
 opus = "0.3.0"
