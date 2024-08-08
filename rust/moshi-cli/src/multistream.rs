@@ -109,7 +109,7 @@ pub mod client {
     }
 
     pub async fn run(host: String, port: usize) -> Result<()> {
-        let uri = format!("wss://{host}:{port}/api/stream_both_test");
+        let uri = format!("wss://{host}:{port}/api/chat");
         tracing::info!("connecting to {uri}");
         let (_stream, ad) = crate::audio_io::setup_output_stream(true)?;
         let (_in_stream, input_audio) = crate::audio_io::setup_input_stream()?;
@@ -494,7 +494,7 @@ pub mod client_tui {
     }
 
     pub async fn run(host: String, port: usize) -> Result<()> {
-        let uri = format!("wss://{host}:{port}/api/stream_both_test");
+        let uri = format!("wss://{host}:{port}/api/chat");
         tracing::info!("connecting to {uri}");
         let subs = Arc::new(Mutex::new(vec![]));
         let (_out_stream, output_audio) = crate::audio_io::setup_output_stream(true)?;
