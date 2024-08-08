@@ -11,3 +11,11 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pe
 ```bash
 cargo run --features cuda --bin web-ui-backend -r -- --config web-ui-backend/config.json standalone
 ```
+
+Once the server is running, you can connect to it either via the web UI or using
+the command line interface.
+
+For the CLI, run.
+```bash
+cargo run --bin cli -r -- tui --host localhost
+```
