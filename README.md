@@ -17,5 +17,8 @@ either via the web UI or using the command line interface.
 
 For the CLI, run.
 ```bash
-cargo run --bin cli -r -- tui --host localhost
+cargo run --bin moshi-cli -r -- tui --host localhost
 ```
+
+Multiple sessions can be run one after another without having to restart the
+server.
