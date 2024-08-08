@@ -16,15 +16,19 @@ struct Args {
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
+    Client {
+        #[arg(long)]
+        host: String,
+
+        #[arg(long, default_value_t = 9999)]
+        port: usize,
+    },
     Tui {
         #[arg(long)]
         host: String,
 
         #[arg(long, default_value_t = 9999)]
         port: usize,
-
-        #[arg(long)]
-        tui: bool,
     },
 }
 
@@ -42,14 +46,13 @@ async fn main() -> Result<()> {
         None
     };
     match args.command {
-        Command::Tui { host, port, tui } => {
-            if tui {
-                tui_logger::init_logger(log::LevelFilter::Trace).unwrap();
-                multistream::client_tui::run(host, port).await?
-            } else {
-                tracing_subscriber::fmt::init();
-                multistream::client::run(host, port).await?
-            }
+        Command::Client { host, port } => {
+            tracing_subscriber::fmt::init();
+            multistream::client::run(host, port).await?
+        }
+        Command::Tui { host, port } => {
+            tracing_subscriber::fmt::init();
+            multistream::client_tui::run(host, port).await?
         }
     }
     Ok(())
