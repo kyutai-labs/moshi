@@ -51,6 +51,9 @@ transformer_kwargs = {
 
 lm_kwargs = {
     "dim": 4096,
+    "text_card": 32000,
+    "existing_text_padding_id": 3,
+    "n_q": 16,
     "card": quantizer_kwargs["bins"],
     "num_heads": 32,
     "num_layers": 32,
@@ -75,7 +78,8 @@ lm_kwargs = {
     "depformer_max_period": 10000,
     "depformer_cross_attention": False,
     "depformer_gating": "silu",
-    "depformer_positional_embedding": "none",
+    "depformer_pos_emb": "none",
+    "depformer_weights_per_step": True,
 }
 
 
@@ -119,8 +123,7 @@ def get_lm():
     )
     safetensors.torch.load_model(
         model,
-        "/home/laurent/tmp/mimi_rs_0abbed5f@100.safetensors",
-        strict=False,  # TODO: avoid requiring this.
+        "/home/laurent/tmp/mimi_0abbed5f@100.safetensors",
     )
     return model
 
