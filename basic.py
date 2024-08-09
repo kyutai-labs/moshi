@@ -42,18 +42,16 @@ transformer_kwargs = {
     "norm": "layer_norm",
     "positional_embedding": "rope",
     "dim_feedforward": 2048,
-    "conv_layout": True,
     "input_dimension": seanet_kwargs["dimension"],
     "output_dimensions": [seanet_kwargs["dimension"]],
 }
 
 lm_kwargs = {
-    "d_model": 4096,
+    "dim": 4096,
     "num_heads": 32,
     "num_layers": 32,
-    "dim_feedforward": 4096 * 4,
+    "hidden_scale": 4,
     "causal": True,
-    "norm_first": True,
     "layer_scale": None,
     "context": 3000,
     "max_period": 10000,
@@ -61,45 +59,53 @@ lm_kwargs = {
     "gating": "silu",
     "norm": "rms_norm",
     "positional_embedding": "rope",
-    "conv_layout": False,
-    "conv_kernel_size": 3,
-    "kv_repeat": 1,
-    "max_seq_len": 4096,
-}
-depformer_kwargs = {
-    "d_model": 1024,
-    "num_heads": 16,
-    "num_layers": 6,
-    "dim_feedforward": 1024 * 4,
-    "causal": True,
-    "norm_first": True,
-    "layer_scale": None,
-    "context": 8,
-    "max_period": 10000,
-    "cross_attention": False,
-    "gating": "silu",
-    "norm": "rms_norm",
-    "positional_embedding": "none",
-    "conv_layout": False,
-    "conv_kernel_size": 3,
-    "kv_repeat": 1,
-    "max_seq_len": 4096,
+    "depformer": bool,
+    "depformer_dim": 1024,
+    "depformer_num_heads": 16,
+    "depformer_num_layers": 6,
+    "depformer_causal": True,
+    "depformer_layer_scale": None,
+    "depformer_context": 8,
+    "depformer_max_period": 10000,
+    "depformer_cross_attention": False,
+    "depformer_gating": "silu",
+    "depformer_positional_embedding": "none",
 }
 
-encoder = msh.modules.SEANetEncoder(**seanet_kwargs)
-decoder = msh.modules.SEANetDecoder(**seanet_kwargs)
-encoder_transformer = msh.modules.transformer.ProjectedTransformer(**transformer_kwargs)
-decoder_transformer = msh.modules.transformer.ProjectedTransformer(**transformer_kwargs)
-quantizer = msh.quantization.SplitResidualVectorQuantizer()
-model = msh.models.EncodecModel(
-    encoder,
-    decoder,
-    quantizer,
-    channels=1,
-    sample_rate=SAMPLE_RATE,
-    frame_rate=FRAME_RATE,
-    encoder_frame_rate=SAMPLE_RATE / encoder.hop_length,
-    renormalize=True,
-    encoder_transformer=encoder_transformer,
-    decoder_transformer=decoder_transformer,
-)
+
+def get_encodec():
+    encoder = msh.modules.SEANetEncoder(**seanet_kwargs)
+    decoder = msh.modules.SEANetDecoder(**seanet_kwargs)
+    encoder_transformer = msh.modules.transformer.ProjectedTransformer(
+        **transformer_kwargs
+    )
+    decoder_transformer = msh.modules.transformer.ProjectedTransformer(
+        **transformer_kwargs
+    )
+    quantizer = msh.quantization.SplitResidualVectorQuantizer()
+    model = msh.models.EncodecModel(
+        encoder,
+        decoder,
+        quantizer,
+        channels=1,
+        sample_rate=SAMPLE_RATE,
+        frame_rate=FRAME_RATE,
+        encoder_frame_rate=SAMPLE_RATE / encoder.hop_length,
+        renormalize=True,
+        encoder_transformer=encoder_transformer,
+        decoder_transformer=decoder_transformer,
+    )
+    return model
+
+
+def get_lm():
+    model = msh.models.LMModel(
+        **lm_kwargs,
+        condition_provider=msh.conditioners.ConditionProvider([]),
+        fuser=msh.conditioners.ConditionFuser({}),
+    )
+    return model
+
+
+ec = get_encodec()
+lm = get_lm()

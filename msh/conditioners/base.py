@@ -356,10 +356,7 @@ class ConditionProvider(nn.Module):
         super().__init__()
         self.device = device
         self.conditioners = nn.ModuleDict(conditioners).to(device)
-        # Hack for making sure we always return the dtype that will be expected by FSDP.
-        from ..optim.fsdp import get_fsdp_dtype
-
-        self._fsdp_dtype = get_fsdp_dtype()
+        self._fsdp_dtype = "bfloat16"
 
     @property
     def text_conditions(self):
