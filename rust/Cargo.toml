@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "moshi-cli",
+    "moshi-core",
+    "web-ui-backend",
+]
+resolver = "2"
+
+[workspace.dependencies]
+candle = { version = "0.6.0", package = "candle-core" }
+candle-nn = "0.6.0"
+candle-transformers = "0.6.0"
+candle-flash-attn = "0.6.0"

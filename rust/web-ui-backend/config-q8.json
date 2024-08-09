@@ -1,0 +1,13 @@
+{
+  "instance_name": "foo",
+  "lm_model_file": "$HOME/tmp/mimi_rs_0abbed5f@100.q8.gguf",
+  "text_tokenizer_file": "$HOME/tmp/tokenizer_spm_32k_3.model",
+  "log_dir": "$HOME/tmp/moshi-logs",
+  "encodec_model_file": "$HOME/tmp/tokenizer-de0e421d-checkpoint40.safetensors",
+  "encodec_num_codebooks": 8,
+  "static_dir": "foo",
+  "addr": "0.0.0.0",
+  "port": 8080,
+  "cert_dir": "."
+}
+
