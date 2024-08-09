@@ -35,9 +35,6 @@ class TransposedLayerNorm(nn.Module):
 def apply_parametrization_norm(module: nn.Module, norm: str = "none"):
     assert norm in CONV_NORMALIZATIONS
     if norm == "weight_norm":
-        # TODO(laurent): Here we assume that we're in inference mode and the weights have already been processed
-        # to reflect the weight-norm.
-        # return weight_norm(module)
         return module
     elif norm == "spectral_norm":
         return spectral_norm(module)
