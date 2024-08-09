@@ -1,4 +1,5 @@
 import msh
+import safetensors
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
@@ -82,7 +83,9 @@ def get_encodec():
     decoder_transformer = msh.modules.transformer.ProjectedTransformer(
         **transformer_kwargs
     )
-    quantizer = msh.quantization.SplitResidualVectorQuantizer()
+    quantizer = msh.quantization.SplitResidualVectorQuantizer(
+        **quantizer_kwargs,
+    )
     model = msh.models.EncodecModel(
         encoder,
         decoder,
@@ -94,6 +97,9 @@ def get_encodec():
         renormalize=True,
         encoder_transformer=encoder_transformer,
         decoder_transformer=decoder_transformer,
+    )
+    safetensors.torch.load_model(
+        model, "/home/laurent/tmp/tokenizer-de0e421d-checkpoint40.safetensors"
     )
     return model
 
@@ -108,4 +114,6 @@ def get_lm():
 
 
 ec = get_encodec()
+print("encodec loaded")
 lm = get_lm()
+print("lm loaded")
