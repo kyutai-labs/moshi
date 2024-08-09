@@ -12,6 +12,9 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pe
 cargo run --features cuda --bin web-ui-backend -r -- --config web-ui-backend/config.json standalone
 ```
 
+Alternatively you can use `config-q8.json` rather than `config.json` to use the
+quantified q8 model.
+
 Once the server has printed 'standalone worker listening', you can connect to it
 either via the web UI or using the command line interface.
 
