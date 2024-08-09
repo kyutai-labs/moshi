@@ -104,13 +104,13 @@ def get_encodec():
         frame_rate=FRAME_RATE,
         encoder_frame_rate=SAMPLE_RATE / encoder.hop_length,
         renormalize=True,
+        resample_method="conv",
         encoder_transformer=encoder_transformer,
         decoder_transformer=decoder_transformer,
     )
     safetensors.torch.load_model(
         model,
         "/home/laurent/tmp/tokenizer-de0e421d-checkpoint40.safetensors",
-        strict=False,  # TODO: avoid requiring this.
     )
     return model
 
