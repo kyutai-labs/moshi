@@ -15,7 +15,6 @@ import logging
 from pathlib import Path
 import typing as tp
 
-import omegaconf
 import torch
 
 from .compile import torch_compile_lazy, no_compile  # noqa
@@ -34,19 +33,6 @@ def model_hash(model: torch.nn.Module) -> str:
     return hasher.hexdigest()
 
 
-def dict_from_config(cfg: omegaconf.DictConfig) -> dict:
-    """Convenience function to map an omegaconf configuration to a dictionary.
-
-    Args:
-        cfg (omegaconf.DictConfig): Original configuration to map to dict.
-    Returns:
-        dict: Config as dictionary object.
-    """
-    dct = omegaconf.OmegaConf.to_container(cfg, resolve=True)
-    assert isinstance(dct, dict)
-    return dct
-
-
 def random_subset(dataset, max_samples: int, seed: int = 42) -> torch.utils.data.Subset:
     if max_samples >= len(dataset):
         return dataset
@@ -56,8 +42,14 @@ def random_subset(dataset, max_samples: int, seed: int = 42) -> torch.utils.data
     return torch.utils.data.Subset(dataset, perm[:max_samples].tolist())
 
 
-def get_loader(dataset, num_samples: tp.Optional[int], batch_size: int,
-               num_workers: int, seed: int, **kwargs) -> torch.utils.data.DataLoader:
+def get_loader(
+    dataset,
+    num_samples: tp.Optional[int],
+    batch_size: int,
+    num_workers: int,
+    seed: int,
+    **kwargs,
+) -> torch.utils.data.DataLoader:
     """Convenience function to load dataset into a dataloader with optional subset sampling.
 
     Args:
@@ -71,10 +63,7 @@ def get_loader(dataset, num_samples: tp.Optional[int], batch_size: int,
         dataset = random_subset(dataset, num_samples, seed)
 
     dataloader = flashy.distrib.loader(
-        dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        **kwargs
+        dataset, batch_size=batch_size, num_workers=num_workers, **kwargs
     )
     return dataloader
 
@@ -89,8 +78,12 @@ def get_dataset_from_loader(dataloader):
 
 @torch_compile_lazy
 def cross_entropy(
-        logits: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor, dtype=torch.float32,
-        logits_soft_clip: float | None = None) -> torch.Tensor:
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    mask: torch.Tensor,
+    dtype=torch.float32,
+    logits_soft_clip: float | None = None,
+) -> torch.Tensor:
     """Compute cross entropy between multi-codebook targets and model's logits.
     The cross entropy is computed per codebook to provide codebook-level cross entropy.
     Valid timesteps for each of the codebook are pulled from the mask, where invalid
@@ -121,22 +114,30 @@ def cross_entropy(
 
     # Chunking the conversion to float32 to avoid OOMs.
     ce_chunks = []
-    for logits_chunk, targets_chunk in zip(torch.chunk(logits, 4), torch.chunk(safe_targets, 4)):
+    for logits_chunk, targets_chunk in zip(
+        torch.chunk(logits, 4), torch.chunk(safe_targets, 4)
+    ):
         logits_chunk = logits_chunk.to(dtype)
         if logits_soft_clip is not None:
-            logits_chunk = logits_soft_clip * torch.tanh(logits_chunk / logits_soft_clip)
+            logits_chunk = logits_soft_clip * torch.tanh(
+                logits_chunk / logits_soft_clip
+            )
         log_partition = torch.logsumexp(logits_chunk, dim=-1, keepdim=True)
 
         # For some reason, the PyTorch cross entropy is super slow with inputs with large cardinality (e.g. 32000)
         # so we reimplement the cross entropy ourselves...
-        ce_chunks.append(log_partition - logits_chunk.gather(-1, targets_chunk[..., None]))
+        ce_chunks.append(
+            log_partition - logits_chunk.gather(-1, targets_chunk[..., None])
+        )
     ce = torch.cat(ce_chunks, dim=0)
     ce = ce[..., 0]
     ce = torch.where(mask, ce, torch.zeros(1, device=ce.device, dtype=ce.dtype))
     return ce.view(output_shape)
 
 
-def multinomial(input: torch.Tensor, num_samples: int, replacement=False, *, generator=None):
+def multinomial(
+    input: torch.Tensor, num_samples: int, replacement=False, *, generator=None
+):
     """torch.multinomial with arbitrary number of dimensions, and number of candidates on the last dimension.
 
     Args:
@@ -152,7 +153,9 @@ def multinomial(input: torch.Tensor, num_samples: int, replacement=False, *, gen
     """
     input_ = input.reshape(-1, input.shape[-1])
     # TODO one day: the following leads to a sync point, which slows down a bit generation.
-    output_ = torch.multinomial(input_, num_samples=num_samples, replacement=replacement, generator=generator)
+    output_ = torch.multinomial(
+        input_, num_samples=num_samples, replacement=replacement, generator=generator
+    )
     output = output_.reshape(*list(input.shape[:-1]), -1)
     return output
 
@@ -195,6 +198,7 @@ class DummyPoolExecutor(Executor):
     """Dummy pool executor to use when we actually have only 1 worker.
     (e.g. instead of ProcessPoolExecutor).
     """
+
     def __init__(self) -> None:
         pass
 
@@ -224,7 +228,9 @@ class DummyPoolExecutor(Executor):
         return
 
 
-def get_pool_executor(num_workers: int, mp_context=None, use_threads: bool = False) -> Executor:
+def get_pool_executor(
+    num_workers: int, mp_context=None, use_threads: bool = False
+) -> Executor:
     """Convenience wrapper for easily switching between threads, process, or no pool at all."""
     if num_workers == 0:
         return DummyPoolExecutor()
@@ -234,7 +240,9 @@ def get_pool_executor(num_workers: int, mp_context=None, use_threads: bool = Fal
         return ProcessPoolExecutor(num_workers, mp_context)
 
 
-def length_to_mask(lengths: torch.Tensor, max_len: tp.Optional[int] = None) -> torch.Tensor:
+def length_to_mask(
+    lengths: torch.Tensor, max_len: tp.Optional[int] = None
+) -> torch.Tensor:
     """Utility function to convert a tensor of sequence lengths to a mask (useful when working on padded sequences).
     For example: [3, 5] => [[1, 1, 1, 0, 0], [1, 1, 1, 1, 1]]
 
@@ -246,7 +254,9 @@ def length_to_mask(lengths: torch.Tensor, max_len: tp.Optional[int] = None) -> t
     """
     assert len(lengths.shape) == 1, "Length shape should be 1 dimensional."
     final_length = lengths.max().item() if not max_len else max_len
-    final_length = max(final_length, 1)  # if all seqs are of len zero we don't want a zero-size tensor
+    final_length = max(
+        final_length, 1
+    )  # if all seqs are of len zero we don't want a zero-size tensor
     return torch.arange(final_length, device=lengths.device)[None, :] < lengths[:, None]
 
 
@@ -263,10 +273,12 @@ def hash_trick(word: str, vocab_size: int) -> int:
     return hash % vocab_size
 
 
-
 # TODO: Move to flashy?
-def copy_state(state: tp.Any, device: tp.Union[torch.device, str] = 'cpu',
-               dtype: tp.Optional[torch.dtype] = None) -> tp.Any:
+def copy_state(
+    state: tp.Any,
+    device: tp.Union[torch.device, str] = "cpu",
+    dtype: tp.Optional[torch.dtype] = None,
+) -> tp.Any:
     if isinstance(state, torch.Tensor):
         if dtype is None or not state.is_floating_point():
             dtype = state.dtype
@@ -320,8 +332,9 @@ def load_clap_state_dict(clap_model, path: tp.Union[str, Path]):
     See: https://github.com/LAION-AI/CLAP/issues/118
     """
     from clap_module.factory import load_state_dict  # type: ignore
+
     pkg = load_state_dict(path)
-    pkg.pop('text_branch.embeddings.position_ids', None)
+    pkg.pop("text_branch.embeddings.position_ids", None)
     clap_model.model.load_state_dict(pkg)
 
 
@@ -332,12 +345,20 @@ class GradNormGetter:
         categories: dict mapping from the name of the category of weights, to the list of weights
             in that category.
         fsdp_used: if True, will do one step of all reduce at the end.
-        """
-    def __init__(self, categories: tp.Dict[str, tp.Iterator[torch.Tensor]],
-                 fsdp_used: bool = True):
+    """
+
+    def __init__(
+        self,
+        categories: tp.Dict[str, tp.Iterator[torch.Tensor]],
+        fsdp_used: bool = True,
+    ):
         self.fsdp_used = fsdp_used
-        self._categories_for_tensor: tp.Dict[torch.Tensor, tp.List[str]] = defaultdict(list)
-        self._categories = {category: idx for idx, category in enumerate(sorted(categories.keys()))}
+        self._categories_for_tensor: tp.Dict[torch.Tensor, tp.List[str]] = defaultdict(
+            list
+        )
+        self._categories = {
+            category: idx for idx, category in enumerate(sorted(categories.keys()))
+        }
         device = None
         for name, tensors in categories.items():
             for tensor in tensors:
@@ -350,7 +371,9 @@ class GradNormGetter:
         """
         Returns the L2 norm of the gradient per category of weights, along with the list of gradients.
         """
-        grad_norm2 = torch.zeros(len(self._categories), device=self.device, dtype=torch.float32)
+        grad_norm2 = torch.zeros(
+            len(self._categories), device=self.device, dtype=torch.float32
+        )
         grads = []
         params = []
         norms = []
@@ -368,7 +391,9 @@ class GradNormGetter:
         if self.fsdp_used:
             torch.distributed.all_reduce(grad_norm2)
         grad_norm = grad_norm2.sqrt()
-        grad_norms = {category: grad_norm[index] for category, index in self._categories.items()}
+        grad_norms = {
+            category: grad_norm[index] for category, index in self._categories.items()
+        }
         return grad_norms, grads
 
 
@@ -382,7 +407,7 @@ def get_seed_from_string(seed_str: str, n_bytes: int = 8) -> int:
     Returns:
         int: Seed.
     """
-    return int(hashlib.sha1(seed_str.encode()).hexdigest()[:n_bytes * 2], 16)
+    return int(hashlib.sha1(seed_str.encode()).hexdigest()[: n_bytes * 2], 16)
 
 
 def product_dict(**kwargs):
