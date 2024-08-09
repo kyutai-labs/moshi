@@ -1,8 +1,12 @@
 import msh
+import sentencepiece
+import torch
+import torchaudio
 import safetensors
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
+DEVICE = "cuda:0"
 
 seanet_kwargs = {
     "channels": 1,
@@ -21,7 +25,7 @@ seanet_kwargs = {
     # We train using weight_norm but then the weights are pre-processed for inference so
     # that we can use a normal convolution.
     "norm": "none",
-    "pad_mode": "Constant",
+    "pad_mode": "constant",
     "ratios": [8, 6, 5, 4],
     "true_skip": True,
 }
@@ -39,6 +43,7 @@ transformer_kwargs = {
     "causal": True,
     "layer_scale": 0.01,
     "context": 250,
+    "conv_layout": True,
     "cross_attention": False,
     "max_period": 10000,
     "gating": "none",
@@ -107,11 +112,14 @@ def get_encodec():
         resample_method="conv",
         encoder_transformer=encoder_transformer,
         decoder_transformer=decoder_transformer,
-    )
+    ).to(device=DEVICE)
     safetensors.torch.load_model(
         model,
         "/home/laurent/tmp/tokenizer-de0e421d-checkpoint40.safetensors",
     )
+    model.eval()
+    model.set_num_codebooks(8)
+    model = msh.models.MultistreamCompressionModel(model, num_sources=2)
     return model
 
 
@@ -119,16 +127,54 @@ def get_lm():
     model = msh.models.LMModel(
         **lm_kwargs,
         condition_provider=msh.conditioners.ConditionProvider([]),
-        fuser=msh.conditioners.ConditionFuser({}),
-    )
+        fuser=msh.conditioners.ConditionFuser(
+            {
+                "sum": [],
+                "prepend": [],
+                "cross": [],
+            }
+        ),
+    ).to(device=DEVICE)
     safetensors.torch.load_model(
         model,
         "/home/laurent/tmp/mimi_0abbed5f@100.safetensors",
     )
+    model.eval()
     return model
 
+
+text_tokenizer = sentencepiece.SentencePieceProcessor(
+    "/home/laurent/tmp/tokenizer_spm_32k_3.model"
+)
 
 ec = get_encodec()
 print("encodec loaded")
 lm = get_lm()
 print("lm loaded")
+
+
+def cb(step, total):
+    print(f"{step:06d} / {total:06d}", end="\r")
+
+
+batch_size = 8
+max_gen_len_s = 10
+with torch.no_grad():
+    res = lm.generate(
+        prompt=None,
+        num_samples=batch_size,
+        callback=cb,
+        text_or_audio="both",
+        max_gen_len=int(12.5 * max_gen_len_s),
+        top_k=250,
+        temp=0.8,
+        strip=0,
+    )
+outputs = []
+for single_res in res:
+    print(single_res.shape)
+    outputs.append(ec.decode_sources(single_res[None, 1:]))
+for idx, output in enumerate(outputs):
+    output = output[0, :, 0].cpu()
+    print(idx, output.shape)
+    torchaudio.save(f"output_{idx}.wav", output, 24000)
