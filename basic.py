@@ -49,9 +49,10 @@ transformer_kwargs = {
 
 lm_kwargs = {
     "dim": 4096,
+    "card": quantizer_kwargs["bins"],
     "num_heads": 32,
     "num_layers": 32,
-    "hidden_scale": 4,
+    "hidden_scale": 4.125,
     "causal": True,
     "layer_scale": None,
     "context": 3000,
@@ -62,10 +63,12 @@ lm_kwargs = {
     "positional_embedding": "rope",
     "depformer": bool,
     "depformer_dim": 1024,
+    "depformer_dim_feedforward": int(4.125 * 1024),
     "depformer_num_heads": 16,
     "depformer_num_layers": 6,
     "depformer_causal": True,
     "depformer_layer_scale": None,
+    "depformer_multi_linear": True,
     "depformer_context": 8,
     "depformer_max_period": 10000,
     "depformer_cross_attention": False,
@@ -99,7 +102,9 @@ def get_encodec():
         decoder_transformer=decoder_transformer,
     )
     safetensors.torch.load_model(
-        model, "/home/laurent/tmp/tokenizer-de0e421d-checkpoint40.safetensors"
+        model,
+        "/home/laurent/tmp/tokenizer-de0e421d-checkpoint40.safetensors",
+        strict=False,  # TODO: avoid requiring this.
     )
     return model
 
@@ -109,6 +114,11 @@ def get_lm():
         **lm_kwargs,
         condition_provider=msh.conditioners.ConditionProvider([]),
         fuser=msh.conditioners.ConditionFuser({}),
+    )
+    safetensors.torch.load_model(
+        model,
+        "/home/laurent/tmp/mimi_rs_0abbed5f@100.safetensors",
+        strict=False,  # TODO: avoid requiring this.
     )
     return model
 
