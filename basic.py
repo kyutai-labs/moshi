@@ -47,6 +47,44 @@ transformer_kwargs = {
     "output_dimensions": [seanet_kwargs["dimension"]],
 }
 
+lm_kwargs = {
+    "d_model": 4096,
+    "num_heads": 32,
+    "num_layers": 32,
+    "dim_feedforward": 4096 * 4,
+    "causal": True,
+    "norm_first": True,
+    "layer_scale": None,
+    "context": 3000,
+    "max_period": 10000,
+    "cross_attention": False,
+    "gating": "silu",
+    "norm": "rms_norm",
+    "positional_embedding": "rope",
+    "conv_layout": False,
+    "conv_kernel_size": 3,
+    "kv_repeat": 1,
+    "max_seq_len": 4096,
+}
+depformer_kwargs = {
+    "d_model": 1024,
+    "num_heads": 16,
+    "num_layers": 6,
+    "dim_feedforward": 1024 * 4,
+    "causal": True,
+    "norm_first": True,
+    "layer_scale": None,
+    "context": 8,
+    "max_period": 10000,
+    "cross_attention": False,
+    "gating": "silu",
+    "norm": "rms_norm",
+    "positional_embedding": "none",
+    "conv_layout": False,
+    "conv_kernel_size": 3,
+    "kv_repeat": 1,
+    "max_seq_len": 4096,
+}
 
 encoder = msh.modules.SEANetEncoder(**seanet_kwargs)
 decoder = msh.modules.SEANetDecoder(**seanet_kwargs)
