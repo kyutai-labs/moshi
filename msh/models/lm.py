@@ -37,112 +37,21 @@ ConditionTensors = tp.Dict[str, ConditionType]
 CFGConditions = tp.Union[ConditionTensors, tp.Tuple[ConditionTensors, ConditionTensors]]
 
 
-def get_init_fn(method: str, input_dim: int, init_depth: tp.Optional[int] = None):
-    """LM layer initialization.
-    Inspired from xlformers: https://github.com/fairinternal/xlformers
-
-    Args:
-        method (str): Method name for init function. Valid options are:
-            'gaussian', 'uniform'.
-        input_dim (int): Input dimension of the initialized module.
-        init_depth (int, optional): Optional init depth value used to rescale
-            the standard deviation if defined.
-    """
-    # Compute std
-    std = 1 / math.sqrt(input_dim)
-    # Rescale with depth
-    if init_depth is not None:
-        std = std / math.sqrt(2 * init_depth)
-
-    if method == "gaussian":
-        return partial(
-            torch.nn.init.trunc_normal_, mean=0.0, std=std, a=-3 * std, b=3 * std
-        )
-    elif method == "uniform":
-        bound = math.sqrt(3) * std  # ensure the standard deviation is `std`
-        return partial(torch.nn.init.uniform_, a=-bound, b=bound)
-    else:
-        raise ValueError("Unsupported layer initialization method")
-
-
-def init_layer(
-    m: nn.Module,
-    method: str,
-    init_depth: tp.Optional[int] = None,
-    zero_bias_init: bool = False,
-):
-    """Wrapper around ``get_init_fn`` for proper initialization of LM modules.
-
-    Args:
-        m (nn.Module): Module to initialize.
-        method (str): Method name for the init function.
-        init_depth (int, optional): Optional init depth value used to rescale
-            the standard deviation if defined.
-        zero_bias_init (bool): Whether to initialize the bias to 0 or not.
-    """
-    if isinstance(m, nn.Linear):
-        init_fn = get_init_fn(method, m.in_features, init_depth=init_depth)
-        if m.weight.device.type == "cpu" and m.weight.dtype == torch.float16:
-            weight = m.weight.float()
-            init_fn(weight)
-            m.weight.data[:] = weight.half()
-        else:
-            init_fn(m.weight)
-        if zero_bias_init and m.bias is not None:
-            nn.init.constant_(m.bias, 0)
-    elif isinstance(m, nn.Embedding):
-        init_fn = get_init_fn(method, m.embedding_dim, init_depth=None)
-        if m.weight.device.type == "cpu" and m.weight.dtype == torch.float16:
-            weight = m.weight.float()
-            init_fn(weight)
-            m.weight.data[:] = weight.half()
-        else:
-            init_fn(m.weight)
-
-
-class ScaledLinear(nn.Linear):
-    """Boost learning rate for linear layer (with `scale`).
-
-    Args:
-        lr (float or None): Learning rate for the linear layer if provided.
-    """
-
-    def __init__(self, *args, lr=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.lr = lr
-
-    def make_optim_group(self):
-        group = {"params": list(self.parameters())}
-        if self.lr is not None:
-            group["lr"] = self.lr
-        return group
-
-
 class ScaledEmbedding(nn.Embedding):
     """Boost learning rate for embeddings (with `scale`).
 
     Args:
-        lr (float or None): Learning rate for the embedding layer if provided.
         norm (bool): if True, uses a layer norm after the embedding.
         zero_idx (int): special value indicating that the output should be exactly 0.
     """
 
-    def __init__(
-        self, *args, lr=None, norm: bool = False, zero_idx: int = -1, **kwargs
-    ):
+    def __init__(self, *args, norm: bool = False, zero_idx: int = -1, **kwargs):
         super().__init__(*args, **kwargs)
-        self.lr = lr
         self.norm = None
         if norm:
             self.norm = create_norm_fn("layer_norm", self.embedding_dim)
         assert zero_idx < 0, "Please use negative values for the zero_idx."
         self.zero_idx = zero_idx
-
-    def make_optim_group(self):
-        group = {"params": list(self.parameters())}
-        if self.lr is not None:
-            group["lr"] = self.lr
-        return group
 
     def forward(self, input, *args, **kwargs):
         is_zero = input == self.zero_idx
@@ -259,9 +168,6 @@ class LMModel(StreamingModule):
         hidden_scale: int = 4,
         norm: str = "layer_norm",
         norm_emb: bool = False,
-        emb_lr: tp.Optional[float] = None,
-        transformer_lr: tp.Optional[float] = None,
-        text_lr: tp.Optional[float] = None,
         bias_proj: bool = False,
         weight_init: tp.Optional[str] = None,
         depthwise_init: tp.Optional[str] = None,
@@ -316,7 +222,6 @@ class LMModel(StreamingModule):
             ScaledEmbedding,
             norm=norm_emb,
             device=device,
-            lr=emb_lr,
             dtype=dtype,
             zero_idx=self.zero_token_id,
         )
@@ -327,18 +232,8 @@ class LMModel(StreamingModule):
             # Text card + padding token (if not in the original tokenizer)
             extra_text = self.existing_text_padding_id is None
             # Unlike for audio, here we authorize the model to output the special token.
-            self.text_linear: tp.Union[nn.Linear, ScaledLinear]
-            if text_lr is not None:
-                # We also have the 'initial' token in the embedding table, but not in the linear.
-                self.text_emb = EmbeddingFactory(text_card + 1, dim, lr=text_lr)
-                self.text_linear = ScaledLinear(
-                    dim, text_card + extra_text, bias=bias_proj, lr=text_lr
-                )
-            else:
-                self.text_emb = EmbeddingFactory(text_card + 1, dim)
-                self.text_linear = nn.Linear(
-                    dim, text_card + extra_text, bias=bias_proj
-                )
+            self.text_emb = EmbeddingFactory(text_card + 1, dim)
+            self.text_linear = nn.Linear(dim, text_card + extra_text, bias=bias_proj)
         depformer_prefix = "depformer_"
         main_kwargs = {
             k: v for k, v in kwargs.items() if not k.startswith(depformer_prefix)
@@ -350,7 +245,6 @@ class LMModel(StreamingModule):
             norm=norm,
             device=device,
             dtype=dtype,
-            lr=transformer_lr,
             **main_kwargs,
         )
         self.out_norm = create_norm_fn(norm, dim)
@@ -400,93 +294,6 @@ class LMModel(StreamingModule):
         self.linears = nn.ModuleList(
             [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(n_q)]
         )
-        self._init_weights(weight_init, depthwise_init, zero_bias_init)
-        self._fsdp: tp.Optional[nn.Module]
-        self.__dict__["_fsdp"] = None
-
-    def _init_weights(
-        self,
-        weight_init: tp.Optional[str],
-        depthwise_init: tp.Optional[str],
-        zero_bias_init: bool,
-    ):
-        """Initialization of the transformer module weights.
-
-        Args:
-            weight_init (str, optional): Weight initialization strategy. See ``get_init_fn`` for valid options.
-            depthwise_init (str, optional): Depthwise initialization strategy. The following options are valid:
-                'current' where the depth corresponds to the current layer index or 'global' where the total number
-                of layer is used as depth. If not set, no depthwise initialization strategy is used.
-            zero_bias_init (bool): Whether to initialize bias to zero or not.
-        """
-        assert depthwise_init is None or depthwise_init in ["current", "global"]
-        assert (
-            depthwise_init is None or weight_init is not None
-        ), "If 'depthwise_init' is defined, a 'weight_init' method should be provided."
-        assert (
-            not zero_bias_init or weight_init is not None
-        ), "If 'zero_bias_init', a 'weight_init' method should be provided"
-
-        if weight_init is None:
-            return
-
-        for emb_layer in self.emb:
-            init_layer(
-                emb_layer,
-                method=weight_init,
-                init_depth=None,
-                zero_bias_init=zero_bias_init,
-            )
-        if self.depformer is not None:
-            for emb_layer in self.depformer_emb:
-                init_layer(
-                    emb_layer,
-                    method=weight_init,
-                    init_depth=None,
-                    zero_bias_init=zero_bias_init,
-                )
-        if self.has_text:
-            init_layer(
-                self.text_emb,
-                method=weight_init,
-                init_depth=None,
-                zero_bias_init=zero_bias_init,
-            )
-            if self.depformer is not None:
-                init_layer(
-                    self.depformer_text_emb,
-                    method=weight_init,
-                    init_depth=None,
-                    zero_bias_init=zero_bias_init,
-                )
-            init_layer(
-                self.text_linear,
-                method=weight_init,
-                init_depth=None,
-                zero_bias_init=zero_bias_init,
-            )
-
-        for layer_idx, tr_layer in enumerate(self.transformer.layers):
-            depth = None
-            if depthwise_init == "current":
-                depth = layer_idx + 1
-            elif depthwise_init == "global":
-                depth = len(self.transformer.layers)
-            init_fn = partial(
-                init_layer,
-                method=weight_init,
-                init_depth=depth,
-                zero_bias_init=zero_bias_init,
-            )
-            tr_layer.apply(init_fn)
-
-        for linear in self.linears:
-            init_layer(
-                linear,
-                method=weight_init,
-                init_depth=None,
-                zero_bias_init=zero_bias_init,
-            )
 
     @property
     def initial_token_id(self) -> int:
@@ -839,7 +646,7 @@ class LMModel(StreamingModule):
         delayed_codes = torch.cat([initial, delayed_codes], dim=2)
 
         # apply model on pattern sequence
-        model = self if self._fsdp is None else self._fsdp
+        model = self
         if condition_tensors is None:
             assert (
                 len(conditions) == B
@@ -908,7 +715,7 @@ class LMModel(StreamingModule):
         """
         B = sequence.shape[0]
         cfg_coef = self.cfg_coef if cfg_coef is None else cfg_coef
-        model = self if self._fsdp is None else self._fsdp
+        model = self
         two_step_cfg = self.two_step_cfg if two_step_cfg is None else two_step_cfg
         kwargs = {"text_or_audio": text_or_audio}
         logits = None
