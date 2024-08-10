@@ -11,9 +11,6 @@ Models for EnCodec, AudioGen, MusicGen, as well as the generic LMModel.
 from .encodec import (
     CompressionModel,
     EncodecModel,
-    DAC,
-    HFEncodecModel,
-    HFEncodecCompressionModel,
     MultistreamCompressionModel,
 )
 from .lm import LMModel

@@ -10,18 +10,13 @@ Also defines the main interface that a model must follow to be usable as an audi
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 import logging
-import math
-from pathlib import Path
 import typing as tp
 
 import einops
-import numpy as np
 import torch
 import torchaudio
 from torch import nn
 from torch.nn import functional as F
-from transformers import EncodecModel as HFEncodecModel
-from transformers import WavLMModel
 
 
 from .. import quantization as qt
@@ -86,44 +81,6 @@ class CompressionModel(ABC, nn.Module):
         """Set the active number of codebooks used by the quantizer."""
         ...
 
-    @staticmethod
-    def get_pretrained(
-        name: str, device: tp.Union[torch.device, str] = "cpu"
-    ) -> "CompressionModel":
-        """Instantiate a CompressionModel from a given pretrained model.
-
-        Args:
-            name (Path or str): name of the pretrained model. See after.
-            device (torch.device or str): Device on which the model is loaded.
-
-        Pretrained models:
-            - dac_44khz (https://github.com/descriptinc/descript-audio-codec)
-            - dac_24khz (same)
-            - facebook/encodec_24khz (https://huggingface.co/facebook/encodec_24khz)
-            - facebook/encodec_32khz (https://huggingface.co/facebook/encodec_32khz)
-            - your own model on HugginFace. Export instructions to come...
-        """
-
-        from . import builders, loaders
-
-        model: CompressionModel
-        if name in ["dac_44khz", "dac_24khz"]:
-            model_type = name.split("_")[1]
-            logger.info("Getting pretrained compression model from DAC %s", model_type)
-            model = DAC(model_type)
-        elif name in ["debug_compression_model"]:
-            logger.info("Getting pretrained compression model for debug")
-            model = builders.get_debug_compression_model()
-        elif Path(name).exists():
-            # We assume here if the paths exist that it is in fact an AC checkpoint
-            # that was exported using `audiocraft.utils.export` functions.
-            model = loaders.load_compression_model(name, device=device)
-        else:
-            logger.info("Getting pretrained compression model from HF %s", name)
-            hf_model = HFEncodecModel.from_pretrained(name)
-            model = HFEncodecCompressionModel(hf_model).to(device)
-        return model.to(device).eval()
-
 
 class EncodecModel(CompressionModel):
     """Encodec model operating on the raw waveform.
@@ -151,7 +108,6 @@ class EncodecModel(CompressionModel):
         freeze_encoder: whether to freeze the encoder weights.
         freeze_quantizer: whether to freeze the quantizer weights.
         freeze_quantizer_level: If positive, freeze the quantizer up to this level.
-        distill_wavlm (bool): whether to use distillation from wavlm.
         torch_compile_encoder_decoder (bool): if True, uses torch.compile on the encoder / decoder.
             Deactivated by default for training as this is incompatible at the moment with weight norm.
             See https://github.com/pytorch/pytorch/issues/121902
@@ -188,7 +144,6 @@ class EncodecModel(CompressionModel):
         freeze_encoder: bool = False,
         freeze_quantizer: bool = False,
         freeze_quantizer_level: int = -1,
-        distill_wavlm: bool = False,
         torch_compile_encoder_decoder: bool = False,
     ):
         super().__init__()
@@ -201,7 +156,6 @@ class EncodecModel(CompressionModel):
         self.quantizer = quantizer
         self.frame_rate = frame_rate
         self.encoder_frame_rate = encoder_frame_rate
-        self.distill_wavlm = distill_wavlm
         self.torch_compile_encoder_decoder = torch_compile_encoder_decoder
 
         if freeze_encoder:
@@ -293,28 +247,6 @@ class EncodecModel(CompressionModel):
             assert not (
                 self.mae_post or self.mae_pre
             ), "MAE not supported with mask after conv."
-        if self.distill_wavlm:
-            assert self.channels == 1
-            self.wavlm_input_resample = (
-                torchaudio.transforms.Resample(self.sample_rate, 16000)
-                if self.sample_rate != 16000
-                else torch.nn.Identity()
-            )
-            self.wavlm_proj = nn.Linear(self.quantizer.dimension, 1024, bias=False)
-            # This allows not storing the wavlm model in the encodec model's state dict.
-            self.__dict__["wavlm"] = WavLMModel.from_pretrained("microsoft/wavlm-large")
-            for p in self.wavlm.parameters():
-                p.requires_grad_(False)
-            assert 50 % self.frame_rate == 0, "Frame rate should be a divisor of 50."
-            self.wavlm_emb_downsample = None
-            downsample_stride = int(50 / self.frame_rate)
-            if downsample_stride > 1:
-                self.wavlm_emb_downsample = ConvDownsample1d(
-                    int(downsample_stride),
-                    dimension=dimension,
-                    learnt=False,
-                    causal=False,
-                )
 
     @property
     def total_codebooks(self):
@@ -399,40 +331,6 @@ class EncodecModel(CompressionModel):
         mae_loss /= unmasked.var()
         return mae_loss
 
-    def _distillation_loss(
-        self, x: torch.Tensor, emb: torch.Tensor, codes: torch.Tensor
-    ) -> torch.Tensor:
-        """Computes the distillation loss from wavlm.
-
-        When not downsampling we need to pad with 80 values along time to avoid a missing frame at the end.
-
-        Args:
-            x (torch.Tensor): Input waveform of shape [B, 1, T].
-            emb (torch.Tensor): Unquantized embedding of shape [B, C, T * self.frame_rate / self.sample_rate].
-            q_res (qt.QuantizedResult): The output of the quantizer. Used to recompute the first quantizer.
-        """
-        quantizer = self.quantizer.semantic_quantizer
-        emb = quantizer.input_proj(emb)
-        wavlm_inputs = self.wavlm_input_resample(x)
-        self.wavlm.to(wavlm_inputs.device)
-        if self.wavlm_emb_downsample is None:
-            # We need to pad with 80 values along time to avoid a missing frame at the end.
-            wavlm_inputs = F.pad(wavlm_inputs, (0, 80), mode="constant", value=0)
-            teacher_embs = self.wavlm(wavlm_inputs[:, 0])[0].transpose(1, 2).detach()
-        else:
-            teacher_embs = self.wavlm(wavlm_inputs[:, 0])[0].transpose(1, 2)
-            teacher_embs = self.wavlm_emb_downsample(teacher_embs).detach()
-        semantic_codes = codes[:, : quantizer.total_codebooks, :]
-        semantic_codes = semantic_codes.transpose(0, 1)
-        semantic_quantized = quantizer.vq.decode(semantic_codes)
-        semantic_quantized = emb + (semantic_quantized - emb).detach()
-        proj_quantized = semantic_quantized.transpose(1, 2)
-        proj_quantized = self.wavlm_proj(proj_quantized)
-        proj_quantized = proj_quantized.transpose(1, 2)
-        return (
-            1.0 - torch.nn.functional.cosine_similarity(proj_quantized, teacher_embs)
-        ).mean()
-
     @property
     def _context_for_encoder_decoder(self):
         if self.torch_compile_encoder_decoder:
@@ -486,9 +384,6 @@ class EncodecModel(CompressionModel):
             expected_length,
         )
         q_res = self.quantizer(emb, self.frame_rate)
-        if self.distill_wavlm and self.training:
-            distillation_loss = self._distillation_loss(x, emb, q_res.codes)
-            extra_metrics["distill"] = distillation_loss
         emb = q_res.x
         emb = self._to_encoder_framerate(emb)
         if self.mask_fn is not None and self.mask_position == "after_quantizer":
@@ -597,148 +492,6 @@ class EncodecModel(CompressionModel):
         return self.quantizer.decode(codes)
 
 
-class DAC(CompressionModel):
-    def __init__(self, model_type: str = "44khz"):
-        super().__init__()
-        try:
-            import dac.utils
-        except ImportError:
-            raise RuntimeError(
-                "Could not import dac, make sure it is installed, "
-                "please run `pip install descript-audio-codec`"
-            )
-        self.model = dac.utils.load_model(model_type=model_type)
-        self.n_quantizers = self.total_codebooks
-        self.model.eval()
-
-    def forward(self, x: torch.Tensor) -> qt.QuantizedResult:
-        # We don't support training with this.
-        raise NotImplementedError("Forward and training with DAC not supported.")
-
-    def encode(
-        self, x: torch.Tensor
-    ) -> tp.Tuple[torch.Tensor, tp.Optional[torch.Tensor]]:
-        codes = self.model.encode(x, self.n_quantizers)[1]
-        return codes[:, : self.n_quantizers], None
-
-    def decode(self, codes: torch.Tensor, scale: tp.Optional[torch.Tensor] = None):
-        assert scale is None
-        z_q = self.decode_latent(codes)
-        return self.model.decode(z_q)
-
-    def decode_latent(self, codes: torch.Tensor):
-        """Decode from the discrete codes to continuous latent space."""
-        return self.model.quantizer.from_codes(codes)[0]
-
-    @property
-    def channels(self) -> int:
-        return 1
-
-    @property
-    def frame_rate(self) -> float:
-        return self.model.sample_rate / self.model.hop_length
-
-    @property
-    def sample_rate(self) -> int:
-        return self.model.sample_rate
-
-    @property
-    def cardinality(self) -> int:
-        return self.model.codebook_size
-
-    @property
-    def num_codebooks(self) -> int:
-        return self.n_quantizers
-
-    @property
-    def total_codebooks(self) -> int:
-        return self.model.n_codebooks
-
-    def set_num_codebooks(self, n: int):
-        """Set the active number of codebooks used by the quantizer."""
-        assert n >= 1
-        assert n <= self.total_codebooks
-        self.n_quantizers = n
-
-
-class HFEncodecCompressionModel(CompressionModel):
-    """Wrapper around HuggingFace Encodec."""
-
-    def __init__(self, model: HFEncodecModel):
-        super().__init__()
-        self.model = model
-        bws = self.model.config.target_bandwidths
-        num_codebooks = [
-            bw * 1000 / (self.frame_rate * math.log2(self.cardinality)) for bw in bws
-        ]
-        deltas = [nc - int(nc) for nc in num_codebooks]
-        # Checking we didn't do some bad maths and we indeed have integers!
-        assert all(deltas) <= 1e-3, deltas
-        self.possible_num_codebooks = [int(nc) for nc in num_codebooks]
-        self.set_num_codebooks(max(self.possible_num_codebooks))
-
-    def forward(self, x: torch.Tensor) -> qt.QuantizedResult:
-        # We don't support training with this.
-        raise NotImplementedError(
-            "Forward and training with HF EncodecModel not supported."
-        )
-
-    def encode(
-        self, x: torch.Tensor
-    ) -> tp.Tuple[torch.Tensor, tp.Optional[torch.Tensor]]:
-        bandwidth_index = self.possible_num_codebooks.index(self.num_codebooks)
-        bandwidth = self.model.config.target_bandwidths[bandwidth_index]
-        res = self.model.encode(x, None, bandwidth)
-        assert len(res[0]) == 1
-        assert len(res[1]) == 1
-        return res[0][0], res[1][0]
-
-    def decode(self, codes: torch.Tensor, scale: tp.Optional[torch.Tensor] = None):
-        if scale is None:
-            scales = [None]  # type: ignore
-        else:
-            scales = scale  # type: ignore
-        res = self.model.decode(codes[None], scales)
-        return res[0]
-
-    def decode_latent(self, codes: torch.Tensor):
-        """Decode from the discrete codes to continuous latent space."""
-        return self.model.quantizer.decode(codes.transpose(0, 1))
-
-    @property
-    def channels(self) -> int:
-        return self.model.config.audio_channels
-
-    @property
-    def frame_rate(self) -> float:
-        hop_length = int(np.prod(self.model.config.upsampling_ratios))
-        return self.sample_rate / hop_length
-
-    @property
-    def sample_rate(self) -> int:
-        return self.model.config.sampling_rate
-
-    @property
-    def cardinality(self) -> int:
-        return self.model.config.codebook_size
-
-    @property
-    def num_codebooks(self) -> int:
-        return self._num_codebooks
-
-    @property
-    def total_codebooks(self) -> int:
-        return max(self.possible_num_codebooks)
-
-    def set_num_codebooks(self, n: int):
-        """Set the active number of codebooks used by the quantizer."""
-        if n not in self.possible_num_codebooks:
-            raise ValueError(
-                f"Allowed values for num codebooks: {self.possible_num_codebooks}"
-            )
-        self._num_codebooks = n
-
-
 class WrapperCompressionModel(CompressionModel):
     """Base API for CompressionModel wrappers that do not depend on external frameworks."""
 
@@ -790,122 +543,6 @@ class WrapperCompressionModel(CompressionModel):
     @property
     def total_codebooks(self) -> int:
         return self.model.total_codebooks
-
-
-class InterleaveStereoCompressionModel(WrapperCompressionModel):
-    """Wraps a CompressionModel to support stereo inputs. The wrapped model
-    will be applied independently to the left and right channels, and both codebooks
-    will be interleaved. If the wrapped model returns a representation `[B, K ,T]` per
-    channel, then the output will be `[B, K * 2, T]`  or `[B, K, T * 2]` depending on
-    `per_timestep`.
-
-    Args:
-        model (CompressionModel): Compression model to wrap.
-        per_timestep (bool): Whether to interleave on the timestep dimension
-            or on the codebooks dimension.
-    """
-
-    def __init__(self, model: CompressionModel, per_timestep: bool = False):
-        super().__init__(model=model)
-        self.per_timestep = per_timestep
-        assert (
-            self.model.channels == 1
-        ), "Wrapped model is expected to be for monophonic audio"
-
-    @property
-    def num_codebooks(self):
-        """Active number of codebooks used by the quantizer.
-
-        ..Warning:: this reports the number of codebooks after the interleaving
-        of the codebooks!
-        """
-        return (
-            self.model.num_codebooks
-            if self.per_timestep
-            else self.model.num_codebooks * 2
-        )
-
-    def set_num_codebooks(self, n: int):
-        """Set the active number of codebooks used by the quantizer.
-
-        ..Warning:: this sets the number of codebooks before the interleaving!
-        """
-        self.model.set_num_codebooks(n)
-
-    @property
-    def num_virtual_steps(self) -> float:
-        """Return the number of virtual steps, e.g. one real step
-        will be split into that many steps.
-        """
-        return 2 if self.per_timestep else 1
-
-    @property
-    def frame_rate(self) -> float:
-        return self.model.frame_rate * self.num_virtual_steps
-
-    @property
-    def channels(self) -> int:
-        return 2
-
-    def forward(self, x: torch.Tensor) -> qt.QuantizedResult:
-        raise NotImplementedError("Not supported, use encode and decode.")
-
-    def encode(
-        self, x: torch.Tensor
-    ) -> tp.Tuple[torch.Tensor, tp.Optional[torch.Tensor]]:
-        B, C, T = x.shape
-        assert (
-            C == self.channels
-        ), f"Expecting stereo audio but audio num channels is {C}"
-
-        indices_c0, scales_c0 = self.model.encode(x[:, 0, ...].unsqueeze(1))
-        indices_c1, scales_c1 = self.model.encode(x[:, 1, ...].unsqueeze(1))
-        indices = torch.stack([indices_c0, indices_c1], dim=0)
-        scales: tp.Optional[torch.Tensor] = None
-        if scales_c0 is not None and scales_c1 is not None:
-            scales = torch.stack([scales_c0, scales_c1], dim=1)
-
-        if self.per_timestep:
-            indices = einops.rearrange(indices, "c b k t -> b k (t c)", c=2)
-        else:
-            indices = einops.rearrange(indices, "c b k t -> b (k c) t", c=2)
-
-        return (indices, scales)
-
-    def get_left_right_codes(
-        self, codes: torch.Tensor
-    ) -> tp.Tuple[torch.Tensor, torch.Tensor]:
-        if self.per_timestep:
-            codes = einops.rearrange(codes, "b k (t c) -> c b k t", c=2)
-        else:
-            codes = einops.rearrange(codes, "b (k c) t -> c b k t", c=2)
-        return codes[0], codes[1]
-
-    def decode(self, codes: torch.Tensor, scale: tp.Optional[torch.Tensor] = None):
-        B, K, T = codes.shape
-        assert (
-            T % self.num_virtual_steps == 0
-        ), "Provided codes' number of timesteps does not match"
-        assert (
-            K == self.num_codebooks
-        ), "Provided codes' number of codebooks does not match"
-
-        scale_c0, scale_c1 = None, None
-        if scale is not None:
-            assert (
-                scale.size(0) == B and scale.size(1) == 2
-            ), f"Scale has unexpected shape: {scale.shape}"
-            scale_c0 = scale[0, ...]
-            scale_c1 = scale[1, ...]
-
-        codes_c0, codes_c1 = self.get_left_right_codes(codes)
-        audio_c0 = self.model.decode(codes_c0, scale_c0)
-        audio_c1 = self.model.decode(codes_c1, scale_c1)
-        return torch.cat([audio_c0, audio_c1], dim=1)
-
-    def decode_latent(self, codes: torch.Tensor):
-        """Decode from the discrete codes to continuous latent space."""
-        raise NotImplementedError("Not supported by interleaved stereo wrapped models.")
 
 
 class EOSCompressionModel(WrapperCompressionModel):
