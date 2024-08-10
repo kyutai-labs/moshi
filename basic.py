@@ -126,14 +126,6 @@ def get_encodec():
 def get_lm():
     model = msh.models.LMModel(
         **lm_kwargs,
-        condition_provider=msh.conditioners.ConditionProvider([]),
-        fuser=msh.conditioners.ConditionFuser(
-            {
-                "sum": [],
-                "prepend": [],
-                "cross": [],
-            }
-        ),
     ).to(device=DEVICE)
     safetensors.torch.load_model(
         model,

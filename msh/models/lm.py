@@ -7,7 +7,6 @@
 from dataclasses import dataclass
 from functools import partial
 import logging
-import math
 import typing as tp
 
 from einops import rearrange
@@ -16,14 +15,6 @@ from torch import nn
 
 from ..utils import utils
 from ..utils.autocast import TorchAutocast
-from ..conditioners.base import (
-    ClassifierFreeGuidanceDropout,
-    AttributeDropout,
-    ConditionProvider,
-    ConditionFuser,
-    ConditionAttributes,
-    ConditionType,
-)
 from ..modules.streaming import StreamingModule, State
 from ..modules.transformer import (
     StreamingTransformer,
@@ -33,8 +24,6 @@ from ..modules.transformer import (
 
 
 logger = logging.getLogger(__name__)
-ConditionTensors = tp.Dict[str, ConditionType]
-CFGConditions = tp.Union[ConditionTensors, tp.Tuple[ConditionTensors, ConditionTensors]]
 
 
 class ScaledEmbedding(nn.Embedding):
@@ -115,8 +104,6 @@ class LMModel(StreamingModule):
     """Transformer-based language model on multiple streams of codes.
 
     Args:
-        condition_provider (MusicConditionProvider): Conditioning provider from metadata.
-        fuser (ConditionFuser): Fuser handling the fusing of conditions with language model input.
         n_q (int): Number of parallel streams to model.
         card (int): Cardinality, vocabulary size.
         text_card (int): Cardinality of the text vocabulary. Activates text support
@@ -130,10 +117,6 @@ class LMModel(StreamingModule):
         weight_init (str, optional): Method for weight initialization.
         depthwise_init (str, optional): Method for depthwise weight initialization.
         zero_bias_init (bool): If true and bias in Linears, initialize bias to zeros.
-        cfg_dropout (float): Classifier-free guidance dropout.
-        cfg_coef (float): Classifier-free guidance coefficient.
-        attribute_dropouts (dict): Attribute dropout probabilities.
-        two_step_cfg (bool): Whether to run classifier free-guidance with 2 distinct steps.
         depformer (bool): whether to use a smaller Transformer along the codebooks for predicting them.
         depformer_*: params used for the Depformer Transformer, all the other will be shared.
         depformer_multi_linear (bool): if True, uses one linear layer per codebook to project the
@@ -157,8 +140,6 @@ class LMModel(StreamingModule):
 
     def __init__(
         self,
-        condition_provider: ConditionProvider,
-        fuser: ConditionFuser,
         delays: tp.List[int] = [0],
         n_q: int = 8,
         card: int = 1024,
@@ -172,10 +153,6 @@ class LMModel(StreamingModule):
         weight_init: tp.Optional[str] = None,
         depthwise_init: tp.Optional[str] = None,
         zero_bias_init: bool = False,
-        cfg_dropout: float = 0,
-        cfg_coef: float = 1.0,
-        attribute_dropouts: tp.Dict[str, float] = {},
-        two_step_cfg: bool = False,
         depformer: bool = False,
         depformer_dim: int = 256,
         depformer_dim_feedforward: int | list[int] | None = None,
@@ -194,8 +171,6 @@ class LMModel(StreamingModule):
         **kwargs,
     ):
         super().__init__()
-        self.condition_provider = condition_provider
-        self.fuser = fuser
         self.n_q = n_q
         self.card = card
         self.text_card = text_card
@@ -205,11 +180,7 @@ class LMModel(StreamingModule):
             delays = delays + [delays[-1]] * (self.num_codebooks - len(delays))
             logger.info("Extended delay to %r", delays)
         self.delays = delays
-        self.cfg_coef = cfg_coef
-        self.cfg_dropout = ClassifierFreeGuidanceDropout(p=cfg_dropout)
-        self.att_dropout = AttributeDropout(dropouts=attribute_dropouts)
         self.dim = dim
-        self.two_step_cfg = two_step_cfg
         self.repeat_penalty_coef = repeat_penalty_coef
         self.repeat_penalty_length = repeat_penalty_length
         self.existing_text_padding_id = existing_text_padding_id
@@ -383,11 +354,9 @@ class LMModel(StreamingModule):
     def forward(
         self,
         sequence: torch.Tensor,
-        conditions: tp.List[ConditionAttributes],
-        condition_tensors: tp.Optional[ConditionTensors] = None,
         text_or_audio: str = "audio",
     ) -> tp.Tuple[tp.Optional[torch.Tensor], tp.Optional[torch.Tensor]]:
-        """Apply language model on sequence and conditions.
+        """Apply language model on sequence.
         Given a tensor of sequence of shape [B, Kt + Ka, S] with `Kt = 1` if text is supported, `0` otherwise,
         and `Ka` the number of audio codebooks, S the sequence steps.
         Returns a tuple with either the audio logits or the text logits, or both.
@@ -398,11 +367,6 @@ class LMModel(StreamingModule):
 
         Args:
             sequence (torch.Tensor): Tokens to model.
-            conditions (list of ConditioningAttributes): Conditions to use when modeling
-                the given codes. Note that when evaluating multiple time with the same conditioning
-                you should pre-compute those and pass them as `condition_tensors`.
-            condition_tensors (dict[str, ConditionType], optional): Pre-computed conditioning
-                tensors, see `conditions`.
             text_or_audio (str): controls whether to generate only text, audio, or both.
         Returns:
             torch.Tensor or None: audio logits when audio is generated. Shape `[B, Ka, S, card]`
@@ -450,31 +414,9 @@ class LMModel(StreamingModule):
                 input_ = text_emb if input_ is None else input_ + text_emb
             assert input_ is not None
 
-            if condition_tensors is None:
-                assert (
-                    not self._is_streaming
-                ), "Conditions tensors should be precomputed when streaming."
-                # apply dropout modules
-                conditions = self.cfg_dropout(conditions)
-                conditions = self.att_dropout(conditions)
-                prepared = self.condition_provider.prepare(conditions)
-                # encode conditions and fuse, both have a streaming cache to not recompute when generating.
-                condition_tensors = self.condition_provider(prepared)
-            else:
-                assert (
-                    not conditions
-                ), "Shouldn't pass both conditions and condition_tensors."
-
-            input_, cross_attention_input = self.fuser(input_, condition_tensors)
-            transformer_out = self.transformer(
-                input_, cross_attention_src=cross_attention_input
-            )
+            transformer_out = self.transformer(input_)
             if self.out_norm:
                 transformer_out = self.out_norm(transformer_out)
-            # remove the prefix from the model outputs
-            if len(self.fuser.fuse2cond["prepend"]) > 0:
-                assert transformer_out is not None
-                transformer_out = transformer_out[:, -input_sequence.shape[2] :]
 
         assert isinstance(transformer_out, torch.Tensor)
 
@@ -608,22 +550,15 @@ class LMModel(StreamingModule):
     def compute_predictions(
         self,
         codes: torch.Tensor,
-        conditions: tp.List[ConditionAttributes],
-        condition_tensors: tp.Optional[ConditionTensors] = None,
         text_or_audio: str = "audio",
     ) -> LMOutput:
-        """Given an input tensor of codes [B, K, T] and list of conditions, runs the model
+        """Given an input tensor of codes [B, K, T], runs the model
         forward using the specified codes interleaving pattern.
 
         Args:
             codes (torch.Tensor): Input codes of shape [B, K, T] with B the batch size,
                 K the number of codebooks and T the number of timesteps. When text is supported,
                 the first 'codebook' corresponds to the text, and the remaining codebooks are for the  audio.
-            conditions (list of ConditioningAttributes): conditionings to use when modeling
-                the given codes. Note that when evaluating multiple time with the same conditioning
-                you should pre-compute those and pass them as `condition_tensors`.
-            condition_tensors (dict[str, ConditionType], optional): pre-computed conditioning
-                tensors, see `conditions`.
             text_or_audio (str): one of 'text', 'audio' or 'both' to control whether to generate
                 text, audio, or both.
         Returns:
@@ -647,19 +582,11 @@ class LMModel(StreamingModule):
 
         # apply model on pattern sequence
         model = self
-        if condition_tensors is None:
-            assert (
-                len(conditions) == B
-            ), f"Wrong number of condition with attributes {len(conditions)} != {B}"
-            prepared = self.condition_provider.prepare(conditions)
-            condition_tensors = self.condition_provider(prepared)
 
         context = self.text_context if text_or_audio == "text" else self.context
         set_attention_context(self.transformer, context)
         with self.autocast:
-            logits, text_logits = model(
-                delayed_codes, [], condition_tensors, text_or_audio
-            )  # [B, K, S, card]
+            logits, text_logits = model(delayed_codes, text_or_audio)  # [B, K, S, card]
         # map back the logits on pattern sequence to logits on original codes: [B, K, S, card] -> [B, K, T, card]
         # and provide the corresponding mask over invalid positions of tokens
         logits_mask = None
@@ -679,14 +606,11 @@ class LMModel(StreamingModule):
     def _sample_next_token(
         self,
         sequence: torch.Tensor,
-        cfg_conditions: CFGConditions,
         unconditional_state: State,
         use_sampling: bool = False,
         temp: float = 1.0,
         top_k: int = 0,
         top_p: float = 0.0,
-        cfg_coef: tp.Optional[float] = None,
-        two_step_cfg: tp.Optional[bool] = None,
         text_or_audio: str = "both",
     ) -> tp.Tuple[
         torch.Tensor, tp.Tuple[tp.Optional[torch.Tensor], tp.Optional[torch.Tensor]]
@@ -698,91 +622,21 @@ class LMModel(StreamingModule):
             sequence (torch.Tensor): Current sequence of shape [B, K, S]
                 with K corresponding to the number of codebooks and S the number of sequence steps.
                 S = 1 in streaming mode, except for the first step that contains a bigger prompt.
-            cfg_conditions (CFGCondition): Set of conditions. Exact type will depend on whether CFG is used,
-                and whether `two_step_cfg` is True or not.
             use_sampling (bool): Whether to use a sampling strategy or not.
             temp (float): Sampling temperature.
             top_k (int): K for "top-k" sampling.
             top_p (float): P for "top-p" sampling.
-            cfg_coef (float, optional): classifier free guidance coefficient
-            two_step_cfg (bool, optional): if True, does two forward passes to compute the
-                logits for the classifier free guidance, otherwise,
-                a single one with a batch size doubled (and some extra padding).
             text_or_audio (str): one of 'text', 'audio' or 'both', to control whether to generate
                 text, audio, or both.
         Returns:
             next_token (torch.Tensor): Next token tensor of shape [B, K, 1].
         """
         B = sequence.shape[0]
-        cfg_coef = self.cfg_coef if cfg_coef is None else cfg_coef
         model = self
-        two_step_cfg = self.two_step_cfg if two_step_cfg is None else two_step_cfg
         kwargs = {"text_or_audio": text_or_audio}
         logits = None
         text_logits = None
-        if cfg_coef == 1.0:
-            # We have conditioning but no CFG.
-            assert isinstance(cfg_conditions, dict)
-            condition_tensors = cfg_conditions
-            logits, text_logits = model(
-                sequence, conditions=[], condition_tensors=condition_tensors, **kwargs
-            )
-        else:
-            # We have two versions, either with two forward pass, or with a single and
-            # stacking the version with and without conditioning.
-            if two_step_cfg:
-                assert isinstance(cfg_conditions, tuple), type(cfg_conditions)
-                condition_tensors, null_condition_tensors = cfg_conditions
-                cond_logits, cond_text_logits = model(
-                    sequence,
-                    conditions=[],
-                    condition_tensors=condition_tensors,
-                    **kwargs,
-                )
-                state = self.get_streaming_state()
-                self.set_streaming_state(unconditional_state)
-                uncond_logits, uncond_text_logits = model(
-                    sequence,
-                    conditions=[],
-                    condition_tensors=null_condition_tensors,
-                    **kwargs,
-                )
-                unconditional_state.update(self.get_streaming_state())
-                self.set_streaming_state(state)
-                if uncond_logits is not None:
-                    assert cond_logits is not None
-                    logits = uncond_logits + (cond_logits - uncond_logits) * cfg_coef
-                if uncond_text_logits is not None:
-                    assert cond_text_logits is not None
-                    text_logits = (
-                        uncond_text_logits
-                        + (cond_text_logits - uncond_text_logits) * cfg_coef
-                    )
-            else:
-                assert isinstance(cfg_conditions, dict)
-                condition_tensors = cfg_conditions
-                assert condition_tensors
-                # repeating the token sequence.
-                sequence = torch.cat([sequence, sequence], dim=0)
-                all_logits, all_text_logits = model(
-                    sequence,
-                    conditions=[],
-                    condition_tensors=condition_tensors,
-                    **kwargs,
-                )
-                if all_logits is not None:
-                    cond_logits, uncond_logits = all_logits.split(
-                        B, dim=0
-                    )  # [B, K, T, card]
-                    logits = uncond_logits + (cond_logits - uncond_logits) * cfg_coef
-                if all_text_logits is not None:
-                    cond_text_logits, uncond_text_logits = all_text_logits.split(
-                        B, dim=0
-                    )  # [B, K, T, card]
-                    text_logits = (
-                        uncond_text_logits
-                        + (cond_text_logits - uncond_text_logits) * cfg_coef
-                    )
+        logits, text_logits = model(sequence, **kwargs)
 
         # Repeat penalty for the first codebook.
         # When `logits` corresponds to the codebook 0, `depformer_cb_index` will already be updated to 1.
@@ -834,7 +688,6 @@ class LMModel(StreamingModule):
     def generate(
         self,
         prompt: tp.Optional[torch.Tensor] = None,
-        conditions: tp.List[ConditionAttributes] = [],
         num_samples: tp.Optional[int] = None,
         max_gen_len: int = 256,
         use_sampling: bool = True,
@@ -842,17 +695,9 @@ class LMModel(StreamingModule):
         top_k: int = 250,
         top_p: float = 0.0,
         strip: int = 0,
-        cfg_coef: tp.Optional[float] = None,
-        two_step_cfg: tp.Optional[bool] = None,
         check: bool = False,
         min_start_offset: tp.Optional[int] = None,
         callback: tp.Optional[tp.Callable[[int, int], None]] = None,
-        postprocess_conditions: tp.Optional[
-            tp.Callable[[CFGConditions], CFGConditions]
-        ] = None,
-        get_null_conditions: tp.Optional[
-            tp.Callable[[tp.List[ConditionAttributes]], tp.List[ConditionAttributes]]
-        ] = None,
         text_or_audio: str = "audio",
     ) -> torch.Tensor:
         """Generate tokens sampling from the model given a prompt or unconditionally. Generation can
@@ -861,7 +706,6 @@ class LMModel(StreamingModule):
         Args:
             prompt (torch.Tensor, optional): Prompt tokens of shape [B, Kt + Ka, T]. When the model supports text,
                 `Kt` is 1. The text token is at index 0. `Ka` is the number of audio codebooks.
-            conditions_tensors (list of ConditioningAttributes, optional): List of conditions.
             num_samples (int, optional): Number of samples to generate when no prompt and no conditions are given.
             max_gen_len (int): Maximum generation length.
             use_sampling (bool): Whether to use a sampling strategy or not.
@@ -869,18 +713,12 @@ class LMModel(StreamingModule):
             top_k (int): K for "top-k" sampling.
             top_p (float): P for "top-p" sampling.
             strip (int): number of time steps to strip from the prompt to avoid padding artifacts. 1 should be enough.
-            cfg_coef (float, optional): Classifier-free guidance coefficient.
-            two_step_cfg (bool, optional): Whether to perform classifier-free guidance with two steps generation.
             check (bool): Whether to apply further checks on generated sequence.
             min_start_offset (int or None): if provided, always replays the generation at least from that offset,
                 even if the prompt is longer. This is to ensure the same number of steps on different GPUs with varying
                 prompt, to remove any chance of deadlock with FSDP in the case where it might OOM (and ask again
                 for the other shards).
             callback (Callback, optional): Callback function to report generation progress.
-            postprocess_conditions (Callable, optional): This will get called with the condition tensors
-                (potentially with CFG stacking) and is currently the only way to mess up with the conditioning.
-            get_null_conditions (Callable, optional): override how to obtain the null conditions when CFG is used.
-                Takes as input a list of ConditionAttributes, and returns the same.
             text_or_audio (str): controls whether to generate only text, only audio, or both.
          Returns:
             torch.Tensor: Generated tokens, with shape `[B, Kt + Ka, T]`. Note that even if only one modality
@@ -897,8 +735,6 @@ class LMModel(StreamingModule):
             possible_num_samples.append(num_samples)
         elif prompt is not None:
             possible_num_samples.append(prompt.shape[0])
-        elif conditions:
-            possible_num_samples.append(len(conditions))
         else:
             possible_num_samples.append(1)
         assert [
@@ -906,47 +742,6 @@ class LMModel(StreamingModule):
         ], "Inconsistent inputs shapes"
         num_samples = possible_num_samples[0]
         assert isinstance(num_samples, int)
-
-        # below we create set of conditions: one conditional and one unconditional
-        # to do that we merge the regular condition together with the null condition
-        # we then do 1 forward pass instead of 2.
-        # the reason for that is two-fold:
-        # 1. it is about x2 faster than doing 2 forward passes
-        # 2. avoid the streaming API treating the 2 passes as part of different time steps
-        # We also support doing two different passes, in particular to ensure that
-        # the padding structure is exactly the same between train and test.
-        # With a batch size of 1, this can be slower though.
-        cfg_conditions: CFGConditions
-        two_step_cfg = self.two_step_cfg if two_step_cfg is None else two_step_cfg
-        cfg_coef = self.cfg_coef if cfg_coef is None else cfg_coef
-        if conditions:
-            if cfg_coef == 1.0:
-                prepared = self.condition_provider.prepare(conditions)
-
-                cfg_conditions = self.condition_provider(prepared)
-            else:
-                if get_null_conditions is None:
-                    null_conditions = ClassifierFreeGuidanceDropout(p=1.0)(conditions)
-                else:
-                    null_conditions = get_null_conditions(conditions)
-                if two_step_cfg:
-                    cfg_conditions = (
-                        self.condition_provider(
-                            self.condition_provider.prepare(conditions)
-                        ),
-                        self.condition_provider(
-                            self.condition_provider.prepare(null_conditions)
-                        ),
-                    )
-                else:
-                    conditions = conditions + null_conditions
-                    prepared = self.condition_provider.prepare(conditions)
-                    cfg_conditions = self.condition_provider(prepared)
-        else:
-            cfg_conditions = {}
-
-        if postprocess_conditions is not None:
-            cfg_conditions = postprocess_conditions(cfg_conditions)
 
         initial = self._get_initial_token(text_or_audio).expand(num_samples, -1, -1)
         max_delay = max(
@@ -1018,14 +813,11 @@ class LMModel(StreamingModule):
 
                 next_token, _ = self._sample_next_token(
                     input_,
-                    cfg_conditions,
                     unconditional_state,
                     use_sampling,
                     temp,
                     top_k,
                     top_p,
-                    cfg_coef=cfg_coef,
-                    two_step_cfg=two_step_cfg,
                     text_or_audio=text_or_audio,
                 )
                 assert next_token.shape[-1] == 1
@@ -1096,14 +888,11 @@ class LMModel(StreamingModule):
                                     assert (input_ <= self.card).all()
                             next_token, _ = self._sample_next_token(
                                 input_,
-                                cfg_conditions,
                                 unconditional_state,
                                 use_sampling,
                                 temp,
                                 top_k,
                                 top_p,
-                                cfg_coef=cfg_coef,
-                                two_step_cfg=two_step_cfg,
                                 text_or_audio=text_or_audio,
                             )
                             assert next_token.shape[-1] == 1

@@ -14,13 +14,12 @@ from einops import rearrange
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from torch.utils.checkpoint import checkpoint as torch_checkpoint
 from xformers import ops
 
 from .gating import make_gating
 from .rope import RotaryEmbedding
 from .streaming import StreamingModule
-from ..utils.compile import simple_checkpoint, torch_compile_lazy
+from ..utils.compile import torch_compile_lazy
 
 from xformers.ops.fmha.attn_bias import (
     LowerTriangularFromBottomRightMask,
