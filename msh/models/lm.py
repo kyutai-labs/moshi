@@ -231,7 +231,6 @@ class LMModel(StreamingModule):
                 }
             )
             kwargs_dep["positional_embedding"] = depformer_pos_emb
-            kwargs_dep["cross_attention"] = False
             kwargs_dep["context"] = None
             if depformer_weights_per_step:
                 kwargs_dep["weights_per_step"] = n_q

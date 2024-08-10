@@ -330,10 +330,6 @@ class StreamingMultiheadAttention(StreamingModule):
             When causal, can access `context` time steps into the past, and when non causal,
             can access `context // 2` steps in the past, and the same in the future.
         rope (`RotaryEmbedding`, optional): Rope embedding to use.
-        cross_attention: Should be true when used as a cross attention.
-            All keys and values must be available at once, streaming is only for the queries.
-            Cannot be used with `causal` or `rope` (as it wouldn't make sens to
-            interpret the time steps in the keys relative to those in the queries).
         kv_repeat (int): If > 1, will repeat keys and queries multiple times (need to divide num_heads).
             This will lead to faster decoding time on A100 or other GPUs with tensorcore.
         weights_per_step (int): use different weights per time step. If non zero, should correspond to the
@@ -351,7 +347,6 @@ class StreamingMultiheadAttention(StreamingModule):
         causal: bool = False,
         context: tp.Optional[int] = None,
         rope: tp.Optional[RotaryEmbedding] = None,
-        cross_attention: bool = False,
         weights_per_step: int = 0,
         device=None,
         dtype=None,
@@ -363,13 +358,7 @@ class StreamingMultiheadAttention(StreamingModule):
         self.causal = causal
         self.context = context
         self.rope = rope
-        self.cross_attention = cross_attention
         self.num_heads = num_heads
-
-        if cross_attention:
-            assert not causal, "Causal cannot work with cross attention."
-            assert not context, "Context cannot work with cross attention."
-            assert rope is None, "Rope cannot work with cross attention."
 
         out_dim = embed_dim
         out_dim = 3 * embed_dim
@@ -400,11 +389,6 @@ class StreamingMultiheadAttention(StreamingModule):
                 None
 
     def _complete_kv(self, k, v):
-        if self.cross_attention:
-            # With cross attention we assume all keys and values
-            # are already available, and streaming is with respect
-            # to the queries only.
-            return k, v
         if self._is_streaming:
             if "kv_cache" not in self._streaming_state:
                 initial_size = self.weights_per_step or 100
@@ -441,33 +425,16 @@ class StreamingMultiheadAttention(StreamingModule):
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
         streaming_offset = self._streaming_offset
         if self._is_streaming:
-            assert (
-                self.causal or self.cross_attention
-            ), "Streaming only available for causal or cross attention"
+            assert self.causal, "Streaming only available for causal"
 
-        if self.cross_attention:
-            # Different queries, keys, values, we have to spit manually the weights
-            # before applying the linear.
-            dim = self.in_proj_weight.shape[0] // 3
-            q = nn.functional.linear(query, self.in_proj_weight[:dim])
-            # todo: when streaming, we could actually save k, v and check the shape actually match.
-            k = nn.functional.linear(key, self.in_proj_weight[dim : 2 * dim])
-            v = nn.functional.linear(value, self.in_proj_weight[2 * dim :])
-            q, k, v = [
-                rearrange(x, "b t (h d) -> b t h d", h=self.num_heads)
-                for x in [q, k, v]
-            ]
-        else:
-            if self.weights_per_step:
-                projected = multi_linear(
-                    self.weights_per_step, self.in_proj_weight, query, streaming_offset
-                )
-            else:
-                projected = nn.functional.linear(query, self.in_proj_weight)
-            packed = rearrange(
-                projected, "b t (p h d) -> b t p h d", p=3, h=self.num_heads
+        if self.weights_per_step:
+            projected = multi_linear(
+                self.weights_per_step, self.in_proj_weight, query, streaming_offset
             )
-            q, k, v = ops.unbind(packed, dim=2)
+        else:
+            projected = nn.functional.linear(query, self.in_proj_weight)
+        packed = rearrange(projected, "b t (p h d) -> b t p h d", p=3, h=self.num_heads)
+        q, k, v = ops.unbind(packed, dim=2)
 
         if self.rope:
             q, k = self._apply_rope(q, k)
@@ -509,8 +476,6 @@ class StreamingMultiheadAttention(StreamingModule):
 
 class StreamingTransformerLayer(StreamingModule):
     """TransformerLayer with Streaming / Causal support.
-    This also integrates cross_attention, when passing `cross_attention=True`,
-    rather than having two separate classes like in PyTorch.
 
     Args:
         d_model (int): Dimension of the data.
@@ -519,9 +484,6 @@ class StreamingTransformerLayer(StreamingModule):
         causal (bool): Causal mask applied automatically.
         context (int, optional): Receptive field for the causal mask, infinite if None.
         custom (bool): Use custom MHA implementation, for testing / benchmarking.
-        cross_attention (bool): If True, expect to get secondary input for cross-attention.
-            Cross attention will use the default MHA, as it typically won't require
-            special treatment.
         rope (`RotaryEmbedding`, optional): Rope embedding to use.
         norm (str): Normalization to use. Currently, only 'layer_norm' is supported.
         layer_scale (float, optional): If not None, LayerScale will be used with the given value as initial scale.
@@ -542,7 +504,6 @@ class StreamingTransformerLayer(StreamingModule):
         dim_feedforward: int | list[int] = 2048,
         causal: bool = False,
         context: tp.Optional[int] = None,
-        cross_attention: bool = False,
         rope: tp.Optional[RotaryEmbedding] = None,
         norm: str = "layer_norm",
         layer_scale: tp.Optional[float] = None,
@@ -617,28 +578,14 @@ class StreamingTransformerLayer(StreamingModule):
                     gating, d_model, dim_feedforward, **factory_kwargs
                 )
 
-        self.cross_attention: tp.Optional[StreamingMultiheadAttention] = None
-        if cross_attention:
-            self.cross_attention = StreamingMultiheadAttention(
-                cross_attention=True, **attn_kwargs, **factory_kwargs
-            )
-            self.norm_cross = nn.LayerNorm(d_model, eps=1e-5, **factory_kwargs)
-
         self.layer_scale_1: nn.Module
         self.layer_scale_2: nn.Module
-        self.layer_scale_cross: nn.Module
         if layer_scale is None:
             self.layer_scale_1 = nn.Identity()
             self.layer_scale_2 = nn.Identity()
-            if cross_attention:
-                self.layer_scale_cross = nn.Identity()
         else:
             self.layer_scale_1 = LayerScale(d_model, layer_scale, **factory_kwargs)
             self.layer_scale_2 = LayerScale(d_model, layer_scale, **factory_kwargs)
-            if cross_attention:
-                self.layer_scale_cross = LayerScale(
-                    d_model, layer_scale, **factory_kwargs
-                )
 
     # feed forward block
     def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
@@ -664,16 +611,6 @@ class StreamingTransformerLayer(StreamingModule):
                 update = self.gating(x)
         return x_orig + self.layer_scale_2(update)
 
-    def _cross_attention_block(
-        self, x: torch.Tensor, cross_attention_src: torch.Tensor
-    ) -> torch.Tensor:
-        assert self.cross_attention is not None
-        x_orig = x
-        x = self.norm_cross(x)
-        # queries are from src, keys and values from cross_attention_src.
-        update = self.cross_attention(x, cross_attention_src, cross_attention_src)
-        return x_orig + self.layer_scale_cross(update)
-
     def _sa_block(self, x: torch.Tensor):
         if self.skip_self_attn:
             return x
@@ -682,19 +619,12 @@ class StreamingTransformerLayer(StreamingModule):
         update = self.self_attn(x, x, x)
         return x_orig + self.layer_scale_1(update)
 
-    def forward(
-        self, x: torch.Tensor, cross_attention_src: tp.Optional[torch.Tensor] = None
-    ):
+    def forward(self, x: torch.Tensor):
         if self._is_streaming:
             if "offset" not in self._streaming_state:
                 self._streaming_state["offset"] = torch.tensor(0)
 
         x = self._sa_block(x)
-        if self.cross_attention is not None:
-            assert cross_attention_src is not None
-            x = self._cross_attention_block(x, cross_attention_src)
-        else:
-            assert cross_attention_src is None
         x = self._ff_block(x)
         if self._is_streaming:
             self._streaming_state["offset"] += x.shape[1]
@@ -710,15 +640,11 @@ class StreamingTransformer(StreamingModule):
         dim_feedforward (int): Intermediate dimension of FF module.
         causal (bool): Causal mask applied automatically.
         context (int, optional): Receptive field for the causal mask, infinite if None.
-        cross_attention (bool): If True, expect to get secondary input for cross-attention.
         layer_scale (float, optional): If not None, LayerScale will be used
             with the given value as initial scale.
         positional_embedding (str): Positional embedding strategy (sin, rope, sin_rope, or none).
         max_period (float): Maximum period of the time embedding.
         positional_scale (float): Scale of positional embedding, set to 0 to deactivate.
-        input_cumsum: If true, the inputs are cumulatively summed along the time dimension
-            before being fed to the transformer.
-            It makes sense if they are different rvq of the same codec.
         layer_class: (subclass of `StreamingTransformerLayer): class to use
             to initialize the layers, allowing further customization outside of AudioCraft.
         device (torch.device, optional): Device on which to initialize.
@@ -734,12 +660,10 @@ class StreamingTransformer(StreamingModule):
         dim_feedforward: int | list[int] = 2048,
         causal: bool = False,
         context: tp.Optional[int] = None,
-        cross_attention: bool = False,
         positional_embedding: str = "sin",
         max_period: float = 10_000,
         positional_scale: float = 1.0,
         betas: tp.Optional[tp.Tuple[float, float]] = None,
-        input_cumsum: bool = False,
         layer_class: tp.Type[StreamingTransformerLayer] = StreamingTransformerLayer,
         device=None,
         dtype=None,
@@ -752,7 +676,6 @@ class StreamingTransformer(StreamingModule):
         self.max_period = max_period
         self.positional_scale = positional_scale
         self.betas = betas
-        self.input_cumsum = input_cumsum
 
         assert positional_embedding in {"sin", "rope", "sin_rope", "none"}
         self.rope: tp.Optional[RotaryEmbedding] = None
@@ -768,7 +691,6 @@ class StreamingTransformer(StreamingModule):
                     dim_feedforward=dim_feedforward,
                     causal=causal,
                     context=context,
-                    cross_attention=cross_attention,
                     rope=self.rope,
                     device=device,
                     dtype=dtype,
@@ -783,12 +705,6 @@ class StreamingTransformer(StreamingModule):
             offsets = self._streaming_state["offsets"]
         else:
             offsets = torch.zeros(B, dtype=torch.long, device=x.device)
-        if self.input_cumsum:
-            x = torch.cumsum(x, dim=1)
-            if "input_cumsum" in self._streaming_state:
-                x += self._streaming_state["input_cumsum"]
-            if self._is_streaming:
-                self._streaming_state["input_cumsum"] = x[:, -1:]
 
         if self.positional_embedding in {"sin", "sin_rope"}:
             positions = torch.arange(T, device=x.device).view(1, -1, 1)
