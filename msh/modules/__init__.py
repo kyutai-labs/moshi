@@ -8,9 +8,7 @@
 # flake8: noqa
 from .conv import (
     NormConv1d,
-    NormConv2d,
     NormConvTranspose1d,
-    NormConvTranspose2d,
     StreamableConv1d,
     StreamableConvTranspose1d,
     pad_for_conv1d,
