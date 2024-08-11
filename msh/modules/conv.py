@@ -13,6 +13,8 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils import spectral_norm, weight_norm
 
+from .streaming import StreamingConv1d, StreamingConvTranspose1d
+
 
 CONV_NORMALIZATIONS = frozenset(
     ["none", "weight_norm", "spectral_norm", "time_group_norm"]
@@ -135,7 +137,7 @@ class NormConv1d(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        self.conv = apply_parametrization_norm(nn.Conv1d(*args, **kwargs), norm)
+        self.conv = apply_parametrization_norm(StreamingConv1d(*args, **kwargs), norm)
         self.norm = get_norm_module(self.conv, causal, norm, **norm_kwargs)
         self.norm_type = norm
 
@@ -160,7 +162,7 @@ class NormConvTranspose1d(nn.Module):
     ):
         super().__init__()
         self.convtr = apply_parametrization_norm(
-            nn.ConvTranspose1d(*args, **kwargs), norm
+            StreamingConvTranspose1d(*args, **kwargs), norm
         )
         self.norm = get_norm_module(self.convtr, causal, norm, **norm_kwargs)
         self.norm_type = norm
