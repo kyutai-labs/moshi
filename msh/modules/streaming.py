@@ -124,7 +124,24 @@ class StreamingModule(nn.Module):
             return self(x)
 
 
-class StreamingSequential(StreamingModule, nn.Sequential):
+class StreamingAdd(StreamingModule):
+    def forward(self, x: torch.Tensor, y: torch.Tensor):
+        if self._is_streaming:
+            prev_x = self._streaming_state.get("previous_x")
+            prev_y = self._streaming_state.get("previous_y")
+            if prev_x is not None:
+                x = torch.cat([prev_x, x], dim=-1)
+            if prev_y is not None:
+                y = torch.cat([prev_y, y], dim=-1)
+            m_l = min(x.shape[-1], y.shape[-1])
+            self._streaming_state["previous_x"] = x[..., m_l:]
+            self._streaming_state["previous_y"] = y[..., m_l:]
+            return x[..., :m_l] + y[..., :m_l]
+        else:
+            return x + y
+
+
+class StreamingSequential(nn.Sequential, StreamingModule):
     """A streaming compatible alternative of `nn.Sequential`."""
 
     def flush(self, x: tp.Optional[torch.Tensor] = None):

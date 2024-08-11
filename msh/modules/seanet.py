@@ -11,8 +11,7 @@ import torch.nn as nn
 
 from .conv import StreamableConv1d, StreamableConvTranspose1d
 from .lstm import StreamableLSTM
-from .streaming import StreamingModule
-from ..utils.utils import torch_compile_lazy
+from .streaming import StreamingModule, StreamingSequential, StreamingAdd
 
 
 class SEANetResnetBlock(StreamingModule):
@@ -70,7 +69,8 @@ class SEANetResnetBlock(StreamingModule):
                     pad_mode=pad_mode,
                 ),
             ]
-        self.block = nn.Sequential(*block)
+        self.block = StreamingSequential(*block)
+        self.add = StreamingAdd()
         self.shortcut: nn.Module
         if true_skip:
             self.shortcut = nn.Identity()
@@ -86,7 +86,7 @@ class SEANetResnetBlock(StreamingModule):
             )
 
     def forward(self, x):
-        return self.shortcut(x) + self.block(x)
+        return self.add(self.shortcut(x), self.block(x))
 
 
 class SEANetEncoder(StreamingModule):
@@ -235,9 +235,8 @@ class SEANetEncoder(StreamingModule):
             ),
         ]
 
-        self.model = nn.Sequential(*model)
+        self.model = StreamingSequential(*model)
 
-    @torch_compile_lazy
     def forward(self, x):
         return self.model(x)
 
@@ -394,9 +393,8 @@ class SEANetDecoder(StreamingModule):
             final_act = getattr(nn, final_activation)
             final_activation_params = final_activation_params or {}
             model += [final_act(**final_activation_params)]
-        self.model = nn.Sequential(*model)
+        self.model = StreamingSequential(*model)
 
-    @torch_compile_lazy
     def forward(self, z):
         y = self.model(z)
         return y
