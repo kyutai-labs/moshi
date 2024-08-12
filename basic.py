@@ -124,14 +124,20 @@ def get_encodec():
 
 def get_lm():
     model = msh.models.LMModel(
+        delays=[0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1],
         **lm_kwargs,
     ).to(device=DEVICE)
+    model.eval()
+    model.to(torch.bfloat16)
     safetensors.torch.load_model(
         model,
         "/home/laurent/tmp/mimi_0abbed5f@100.safetensors",
     )
-    model.eval()
-    model.to(torch.bfloat16)
+    # pkg = torch.load(
+    #     "/lustre/scwpod02/client/kyutai/neilz/mimi_exp/xps/1049a9ac/checkpoint_120.th",
+    #     "cpu",
+    # )
+    # model.load_state_dict(pkg["fsdp_best_state"]["model"])
     model.autocast = msh.utils.autocast.TorchAutocast(
         enabled=True, dtype=torch.bfloat16, device_type="cuda"
     )
