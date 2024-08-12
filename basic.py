@@ -2,6 +2,7 @@ import msh
 import sentencepiece
 import torch
 import torchaudio
+import torchaudio.functional as F
 import safetensors
 
 SAMPLE_RATE = 24000
@@ -137,28 +138,46 @@ text_tokenizer = sentencepiece.SentencePieceProcessor(
     "/home/laurent/tmp/tokenizer_spm_32k_3.model"
 )
 
+print("loading encodec")
 ec = get_encodec()
 print("encodec loaded")
-all_codes = []
-print("encodec streaming test")
-with ec.model.streaming():
-    for i in range(24000 // 120):
-        inp = torch.zeros(1, 1, 120).to(device=DEVICE)
-        codes, _scale = ec.model.encode(inp)
-        if codes.shape[-1]:
-            print(i, codes.shape)
-            all_codes.append(codes)
-all_codes = torch.cat(all_codes, dim=-1)
-print("codes", all_codes.shape)
-all_pcms = []
-with ec.model.streaming():
-    for i in range(all_codes.shape[-1]):
-        codes = all_codes[..., i : i + 1]
-        pcm = ec.model.decode(codes, scale=None)
-        print(i, pcm.shape)
-        all_pcms.append(pcm)
-all_pcms = torch.cat(all_pcms, dim=-1)
-print("pcm", all_pcms.shape)
+
+
+def encodec_streaming_test(ec, pcm_chunk_size=120):
+    # wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
+    sample_pcm, sample_sr = torchaudio.load("bria.mp3")
+    print("loaded pcm", sample_pcm.shape, sample_sr)
+    sample_pcm = F.resample(sample_pcm, orig_freq=sample_sr, new_freq=SAMPLE_RATE)
+    print("resampled pcm", sample_pcm.shape, sample_sr)
+    sample_pcm = sample_pcm[None].to(device=DEVICE)
+
+    print("streaming encoding...")
+    all_codes = []
+    with ec.model.streaming():
+        for start_idx in range(0, sample_pcm.shape[-1], pcm_chunk_size):
+            end_idx = min(sample_pcm.shape[-1], start_idx + pcm_chunk_size)
+            chunk = sample_pcm[..., start_idx:end_idx]
+            codes, _scale = ec.model.encode(chunk)
+            if codes.shape[-1]:
+                print(start_idx, codes.shape, end="\r")
+                all_codes.append(codes)
+    all_codes = torch.cat(all_codes, dim=-1)
+    print("codes", all_codes.shape)
+    print("streaming decoding...")
+    all_pcms = []
+    with ec.model.streaming():
+        for i in range(all_codes.shape[-1]):
+            codes = all_codes[..., i : i + 1]
+            pcm = ec.model.decode(codes, scale=None)
+            print(i, pcm.shape, end="\r")
+            all_pcms.append(pcm)
+    all_pcms = torch.cat(all_pcms, dim=-1)
+    print("pcm", all_pcms.shape)
+    torchaudio.save("streaming_out.wav", all_pcms[0].cpu(), SAMPLE_RATE)
+
+
+encodec_streaming_test(ec)
+
 
 print("lm loading")
 lm = get_lm()
@@ -189,4 +208,4 @@ for single_res in res:
 for idx, output in enumerate(outputs):
     output = output[0, :, 0].cpu()
     print(idx, output.shape)
-    torchaudio.save(f"output_{idx}.wav", output, 24000)
+    torchaudio.save(f"output_{idx}.wav", output, SAMPLE_RATE)

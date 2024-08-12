@@ -72,5 +72,10 @@ Messages with an unknow message types should be discarded.
  
 ## Python
 
-As of 2024-08-11, the python version does not support streaming. A sample can be
-generated via `python basic.py`.
+As of 2024-08-12, there is some preliminary support for streaming in the python
+version.
+
+```bash
+wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
+python basic.py
+```
