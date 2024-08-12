@@ -68,7 +68,7 @@ lm_kwargs = {
     "context": 3000,
     "max_period": 10000,
     "gating": "silu",
-    "norm": "rms_norm",
+    "norm": "real_rms_norm_f32",
     "positional_embedding": "rope",
     "depformer": bool,
     "depformer_dim": 1024,
@@ -131,6 +131,10 @@ def get_lm():
         "/home/laurent/tmp/mimi_0abbed5f@100.safetensors",
     )
     model.eval()
+    model.to(torch.bfloat16)
+    model.autocast = msh.utils.autocast.TorchAutocast(
+        enabled=True, dtype=torch.bfloat16, device_type="cuda"
+    )
     return model
 
 
@@ -176,7 +180,7 @@ def encodec_streaming_test(ec, pcm_chunk_size=120):
     torchaudio.save("streaming_out.wav", all_pcms[0].cpu(), SAMPLE_RATE)
 
 
-encodec_streaming_test(ec)
+# encodec_streaming_test(ec)
 
 
 print("lm loading")
