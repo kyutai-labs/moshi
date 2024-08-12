@@ -13,7 +13,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils import spectral_norm, weight_norm
 
-from .streaming import StreamingConv1d, StreamingConvTranspose1d
+from .streaming import StreamingConv1d, StreamingConvTranspose1d, StreamingModule
 
 
 CONV_NORMALIZATIONS = frozenset(
@@ -37,7 +37,7 @@ class TransposedLayerNorm(nn.Module):
 def apply_parametrization_norm(module: nn.Module, norm: str = "none"):
     assert norm in CONV_NORMALIZATIONS
     if norm == "weight_norm":
-        return module
+        return weight_norm(module)
     elif norm == "spectral_norm":
         return spectral_norm(module)
     else:

@@ -86,7 +86,8 @@ class SEANetResnetBlock(StreamingModule):
             )
 
     def forward(self, x):
-        return self.add(self.shortcut(x), self.block(x))
+        u, v = self.shortcut(x), self.block(x)
+        return self.add(u, v)
 
 
 class SEANetEncoder(StreamingModule):
