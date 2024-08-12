@@ -290,19 +290,20 @@ class StreamableConvTranspose1d(StreamingModule):
 
         y = self.convtr(x)
 
-        # We will only trim fixed padding. Extra padding from `pad_for_conv1d` would be
-        # removed at the very end, when keeping only the right length for the output,
-        # as removing it here would require also passing the length at the matching layer
-        # in the encoder.
-        if self.causal:
-            # Trim the padding on the right according to the specified ratio
-            # if trim_right_ratio = 1.0, trim everything from right
-            padding_right = math.ceil(padding_total * self.trim_right_ratio)
-            padding_left = padding_total - padding_right
-            y = unpad1d(y, (padding_left, padding_right))
-        else:
-            # Asymmetric padding required for odd strides
-            padding_right = padding_total // 2
-            padding_left = padding_total - padding_right
-            y = unpad1d(y, (padding_left, padding_right))
+        if not self._is_streaming:
+            # We will only trim fixed padding. Extra padding from `pad_for_conv1d` would be
+            # removed at the very end, when keeping only the right length for the output,
+            # as removing it here would require also passing the length at the matching layer
+            # in the encoder.
+            if self.causal:
+                # Trim the padding on the right according to the specified ratio
+                # if trim_right_ratio = 1.0, trim everything from right
+                padding_right = math.ceil(padding_total * self.trim_right_ratio)
+                padding_left = padding_total - padding_right
+                y = unpad1d(y, (padding_left, padding_right))
+            else:
+                # Asymmetric padding required for odd strides
+                padding_right = padding_total // 2
+                padding_left = padding_total - padding_right
+                y = unpad1d(y, (padding_left, padding_right))
         return y
