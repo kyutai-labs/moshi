@@ -139,11 +139,28 @@ text_tokenizer = sentencepiece.SentencePieceProcessor(
 
 ec = get_encodec()
 print("encodec loaded")
+all_codes = []
+print("encodec streaming test")
 with ec.model.streaming():
-    for i in range(20):
+    for i in range(24000 // 120):
         inp = torch.zeros(1, 1, 120).to(device=DEVICE)
-        out = ec.model.encode(inp)
-        print(i, out[0].shape)
+        codes, _scale = ec.model.encode(inp)
+        if codes.shape[-1]:
+            print(i, codes.shape)
+            all_codes.append(codes)
+all_codes = torch.cat(all_codes, dim=-1)
+print("codes", all_codes.shape)
+all_pcms = []
+with ec.model.streaming():
+    for i in range(all_codes.shape[-1]):
+        codes = all_codes[..., i : i + 1]
+        pcm = ec.model.decode(codes, scale=None)
+        print(i, pcm.shape)
+        all_pcms.append(pcm)
+all_pcms = torch.cat(all_pcms, dim=-1)
+print("pcm", all_pcms.shape)
+
+print("lm loading")
 lm = get_lm()
 print("lm loaded")
 

@@ -243,7 +243,10 @@ class StreamingConvTranspose1d(nn.ConvTranspose1d, StreamingModule):
                 # of the `partial` tensor corresponds to the first time step of `out` as anything
                 # coming before the first time step of `out` would have been already flushed.
                 PT = partial.shape[-1]
-                out[..., :PT] += partial - self.bias[:, None]
+                if self.bias is not None:
+                    out[..., :PT] += partial - self.bias[:, None]
+                else:
+                    out[..., :PT] += partial
             # The input is T, the output is S * (T - 1) + K.
             # The offset of the left of the next frame will be S * T
             # so everything between 0 and S * T is ready to be output, and we need
