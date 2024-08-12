@@ -123,7 +123,7 @@ def unpad1d(x: torch.Tensor, paddings: tp.Tuple[int, int]):
     return x[..., padding_left:end]
 
 
-class NormConv1d(nn.Module):
+class NormConv1d(StreamingModule):
     """Wrapper around Conv1d and normalization applied to this conv
     to provide a uniform interface across normalization approaches.
     """
@@ -147,7 +147,7 @@ class NormConv1d(nn.Module):
         return x
 
 
-class NormConvTranspose1d(nn.Module):
+class NormConvTranspose1d(StreamingModule):
     """Wrapper around ConvTranspose1d and normalization applied to this conv
     to provide a uniform interface across normalization approaches.
     """
@@ -173,7 +173,7 @@ class NormConvTranspose1d(nn.Module):
         return x
 
 
-class StreamableConv1d(nn.Module):
+class StreamableConv1d(StreamingModule):
     """Conv1d with some builtin handling of asymmetric or causal padding
     and normalization.
     """
@@ -226,20 +226,27 @@ class StreamableConv1d(nn.Module):
         extra_padding = get_extra_padding_for_conv1d(
             x, kernel_size, stride, padding_total
         )
-        if self.causal:
-            # Left padding for causal
-            x = pad1d(x, (padding_total, extra_padding), mode=self.pad_mode)
+        if self._is_streaming:
+            assert self.causal, "streaming is only supported for causal convs"
+            padding_applied = self._streaming_state.get("padding_applied")
+            if padding_applied is None:
+                x = pad1d(x, (padding_total, extra_padding), mode=self.pad_mode)
+                self._streaming_state["padding_applied"] = True
         else:
-            # Asymmetric padding required for odd strides
-            padding_right = padding_total // 2
-            padding_left = padding_total - padding_right
-            x = pad1d(
-                x, (padding_left, padding_right + extra_padding), mode=self.pad_mode
-            )
+            if self.causal:
+                # Left padding for causal
+                x = pad1d(x, (padding_total, extra_padding), mode=self.pad_mode)
+            else:
+                # Asymmetric padding required for odd strides
+                padding_right = padding_total // 2
+                padding_left = padding_total - padding_right
+                x = pad1d(
+                    x, (padding_left, padding_right + extra_padding), mode=self.pad_mode
+                )
         return self.conv(x)
 
 
-class StreamableConvTranspose1d(nn.Module):
+class StreamableConvTranspose1d(StreamingModule):
     """ConvTranspose1d with some builtin handling of asymmetric or causal padding
     and normalization.
     """

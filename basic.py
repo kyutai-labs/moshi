@@ -140,7 +140,7 @@ ec = get_encodec()
 print("encodec loaded")
 with ec.model.encoder.streaming():
     for i in range(10):
-        inp = torch.zeros(1, 1, 1).to(device=DEVICE)
+        inp = torch.zeros(1, 1, 120).to(device=DEVICE)
         out = ec.model.encoder(inp)
         print(i, out.shape)
     out = ec.model.encoder.flush()
