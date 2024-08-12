@@ -105,7 +105,8 @@ def get_encodec():
         sample_rate=SAMPLE_RATE,
         frame_rate=FRAME_RATE,
         encoder_frame_rate=SAMPLE_RATE / encoder.hop_length,
-        renormalize=True,
+        renormalize=False,
+        causal=True,
         resample_method="conv",
         encoder_transformer=encoder_transformer,
         decoder_transformer=decoder_transformer,
@@ -138,13 +139,11 @@ text_tokenizer = sentencepiece.SentencePieceProcessor(
 
 ec = get_encodec()
 print("encodec loaded")
-with ec.model.encoder.streaming():
-    for i in range(10):
+with ec.model.streaming():
+    for i in range(20):
         inp = torch.zeros(1, 1, 120).to(device=DEVICE)
-        out = ec.model.encoder(inp)
-        print(i, out.shape)
-    out = ec.model.encoder.flush()
-    print(out.shape if out is not None else "none")
+        out = ec.model.encode(inp)
+        print(i, out[0].shape)
 lm = get_lm()
 print("lm loaded")
 

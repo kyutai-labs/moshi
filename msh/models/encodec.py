@@ -20,13 +20,14 @@ from torch.nn import functional as F
 
 from .. import quantization as qt
 from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
+from ..modules.streaming import StreamingModule
 from ..utils.compile import no_compile
 
 
 logger = logging.getLogger()
 
 
-class CompressionModel(ABC, nn.Module):
+class CompressionModel(ABC, StreamingModule):
     """Base API for all compression model that aim at being used as audio tokenizers
     with a language model.
     """
@@ -425,6 +426,8 @@ class EncodecModel(CompressionModel):
             x.dim() == 3
         ), f"CompressionModel._encode_to_unquantized_latent expects audio of shape [B, C, T] but got {x.shape}"
         x, scale = self.preprocess(x)
+        if scale is not None and self._is_streaming:
+            raise ValueError("cannot normalize in streaming mode")
         with self._context_for_encoder_decoder:
             emb = self.encoder(x)
         if self.encoder_transformer is not None:
