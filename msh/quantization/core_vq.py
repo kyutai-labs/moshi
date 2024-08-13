@@ -51,7 +51,9 @@ def _sample_vectors(samples: torch.Tensor, num: int) -> torch.Tensor:
 def _compute_entropy(usage: torch.Tensor) -> torch.Tensor:
     # Usage is some unnormalized distribution.
     proba = usage / usage.sum()
-    p_log_p = torch.where(proba == 0, zero_scalar(usage.device), proba * torch.log(proba))
+    p_log_p = torch.where(
+        proba == 0, zero_scalar(usage.device), proba * torch.log(proba)
+    )
     return -p_log_p.sum()
 
 
@@ -60,7 +62,9 @@ def _is_distributed() -> bool:
     return distributed.is_initialized() and distributed.get_world_size() > 1
 
 
-def _run_kmeans(samples: torch.Tensor, num_clusters: int, num_iters: int = 10) -> tp.Tuple[torch.Tensor, torch.Tensor]:
+def _run_kmeans(
+    samples: torch.Tensor, num_clusters: int, num_iters: int = 10
+) -> tp.Tuple[torch.Tensor, torch.Tensor]:
     # Kmeans algorithm used to initialize the codebooks.
     dim = samples.shape[-1]
     means = _sample_vectors(samples, num_clusters)
@@ -112,10 +116,8 @@ class EuclideanCodebook(nn.Module):
         embedding_sum (torch.Tensor): EMA of the sum of the assigned points to each cluster.
             In particular, this can be normalized by `cluster_usage` to obtain the
             actual cluster centroids.
-        _initialized (torch.Tensor): Single boolean value indicating if the codebook
-            has been kmeans initialized. Always true if `kmeans_init` is False.
-            Use `self.initialized` to access this value without introducing a sync point.
     """
+
     def __init__(
         self,
         dim: int,
@@ -125,12 +127,14 @@ class EuclideanCodebook(nn.Module):
         decay: float = 0.99,
         epsilon: float = 1e-5,
         threshold_usage_ratio: float = 0.1,
-        replaced_usage_ratio: float = 1.,
+        replaced_usage_ratio: float = 1.0,
         check_unused_every: int = 5,
     ):
         super().__init__()
         self.decay = decay
-        init_fn: tp.Union[tp.Callable[..., torch.Tensor], tp.Any] = _uniform_init if not kmeans_init else torch.zeros
+        init_fn: tp.Union[tp.Callable[..., torch.Tensor], tp.Any] = (
+            _uniform_init if not kmeans_init else torch.zeros
+        )
         embedding = init_fn(codebook_size, dim)
 
         self.dim = dim
@@ -143,10 +147,13 @@ class EuclideanCodebook(nn.Module):
         self.check_unused_every = check_unused_every
         self._next_unused_check = check_unused_every
 
-        self.register_buffer("_initialized", torch.tensor([not kmeans_init], dtype=torch.float))
+        self.register_buffer(
+            "_initialized", torch.tensor([not kmeans_init], dtype=torch.float)
+        )
         self.register_buffer("cluster_usage", torch.ones(codebook_size))
         self.register_buffer("embedding_sum", embedding)
         self._cached_initialized = False
+        self._embedding = None
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs) -> None:
         # Mapping old names to new names
@@ -166,44 +173,11 @@ class EuclideanCodebook(nn.Module):
 
     @property
     def embedding(self) -> torch.Tensor:
-        return self.embedding_sum / self.cluster_usage.clamp(min=self.epsilon)[:, None]
-
-    @property
-    def initialized(self) -> bool:
-        """Cached version of self._initialized,
-        This assumes that once the module is initialized, it will never go back to the uninitialized state."""
-        if not self._cached_initialized:
-            self._cached_initialized = self._initialized.item()
-        return self._cached_initialized
-
-    @torch.jit.ignore
-    def _init_embedding(self, data: torch.Tensor) -> None:
-        # Initialize the codebook, e.g. using kmeans.
-        if self.initialized:
-            return
-
-        rank = 0
-        if _is_distributed():
-            rank = distributed.get_rank()
-            # First gathering shapes in case not all GPUs have the same effective batch size.
-            # then gathering the actual content.
-            if rank == 0:
-                other_shapes: tp.List[torch.Size] = [None] * distributed.get_world_size()  # type: ignore
-                distributed.gather_object(data.shape, other_shapes)
-                other_data: tp.List[torch.Tensor] = [
-                    torch.empty(shape, device=data.device, dtype=data.dtype) for shape in other_shapes]
-                distributed.gather(data, other_data)
-                data = torch.cat(other_data, dim=0)
-            else:
-                distributed.gather_object(data.shape)
-                distributed.gather(data)
-        if rank == 0:
-            embedding, cluster_usage = _run_kmeans(data, self.codebook_size, self.kmeans_iters)
-            self.embedding_sum.data.copy_(embedding * cluster_usage[:, None])
-            self.cluster_usage.data.copy_(cluster_usage)
-            self._initialized.data.fill_(1)
-        # Make sure all buffers across workers are in sync after initialization
-        self._broadcast_buffers()
+        if self._embedding is None:
+            self._embedding = (
+                self.embedding_sum / self.cluster_usage.clamp(min=self.epsilon)[:, None]
+            )
+        return self._embedding
 
     def _broadcast_buffers(self) -> None:
         if _is_distributed():
@@ -214,29 +188,15 @@ class EuclideanCodebook(nn.Module):
         # Replaces expired centroids, as indicated by `mask` (a true value indicate the code needs to be replaced).
         # The new codes are sampled from the batch `samples`.
         new_vectors = _sample_vectors(samples, self.codebook_size)
-        replace_cluster_usage = self.replaced_usage_ratio * self.cluster_usage.sum() / self.codebook_size
+        replace_cluster_usage = (
+            self.replaced_usage_ratio * self.cluster_usage.sum() / self.codebook_size
+        )
         self.embedding_sum[:] = torch.where(
-            mask[:, None], replace_cluster_usage * new_vectors, self.embedding_sum)
-        self.cluster_usage[:] = torch.where(mask, replace_cluster_usage, self.cluster_usage)
-
-    def _check_expired_codes(self, batch_samples: torch.Tensor) -> torch.Tensor:
-        # Checks whether some centroids are under utilized, and replace them if necessary.
-        if not self.initialized:
-            return zero_scalar(batch_samples.device)
-
-        self._next_unused_check -= 1
-        if self._next_unused_check > 0:
-            return zero_scalar(batch_samples.device)
-        # we don't check every iteration to avoid having too many sync points.
-        self._next_unused_check = self.check_unused_every
-        threshold_cluster_usage = self.threshold_usage_ratio * self.cluster_usage.sum() / self.codebook_size
-        expired_codes = self.cluster_usage < threshold_cluster_usage
-
-        assert batch_samples.dim() == 2
-        self._replace_expired_codes(batch_samples, mask=expired_codes)
-        self._broadcast_buffers()
-
-        return expired_codes.float().mean()
+            mask[:, None], replace_cluster_usage * new_vectors, self.embedding_sum
+        )
+        self.cluster_usage[:] = torch.where(
+            mask, replace_cluster_usage, self.cluster_usage
+        )
 
     def _reshape_input(self, x: torch.Tensor) -> torch.Tensor:
         # Flattens all the dimensions but the last one, e.g. return a vector of shape `[N, D]`.
@@ -269,43 +229,22 @@ class EuclideanCodebook(nn.Module):
         """Given a tensor of codes of shape `[*]`, returns a tensor of shape `[*, D]`,
         corresponding to the centroids associated to each code index.
         """
-        assert not codes.dtype.is_floating_point, f"Codes should be integers, got {codes.dtype}"
+        assert (
+            not codes.dtype.is_floating_point
+        ), f"Codes should be integers, got {codes.dtype}"
         quantized = F.embedding(codes, self.embedding)
         return quantized
 
-    def forward(self, x: torch.Tensor, initialize: bool = True) -> _CodebookForwardResult:
+    def forward(
+        self, x: torch.Tensor, initialize: bool = True
+    ) -> _CodebookForwardResult:
         shape = x.shape
         x = self._reshape_input(x)
-        if self.training and initialize:
-            # If initialize is False, we are not allowed to initialize this layer
-            # and the rest of the code will operate on a 0 filled codebook.
-            # This is due to previous layers having used the batch to run kmeans init
-            # and thus, the residuals are mostly 0s.
-            self._init_embedding(x.detach())
 
         flat_codes = self._quantize(x)
         codes = self._reshape_codes(flat_codes, shape)
         quantized = self.decode(codes)
         metrics: tp.Dict[str, torch.Tensor] = {}
-
-        if self.training:
-            # We do the expiry of the unused codes at this point as buffers are in sync
-            # and all the workers will take the same decision.
-            expired = self._check_expired_codes(x)
-            metrics['rvq_expired'] = expired
-            cluster_usage = torch.zeros_like(self.cluster_usage)
-            cluster_usage.scatter_add_(
-                0, flat_codes, torch.ones_like(flat_codes, dtype=cluster_usage.dtype))
-            _ema_inplace(self.cluster_usage, cluster_usage, self.decay)
-
-            if self.initialized:
-                # We report the entropy normalized by that of the uniform distribution,
-                # This means the codebooks are optimally used when entropy=1.
-                metrics['rvq_entropy'] = _compute_entropy(self.cluster_usage) / math.log(self.codebook_size)
-
-            embedding_sum = torch.zeros_like(self.embedding_sum)
-            embedding_sum.scatter_add_(0, repeat(flat_codes, "n -> n d", d=self.dim), x)
-            _ema_inplace(self.embedding_sum, embedding_sum, self.decay)
 
         return _CodebookForwardResult(quantized, codes, metrics)
 
@@ -330,6 +269,7 @@ class VectorQuantization(nn.Module):
         check_unused_every (int): Check for unused centroids every `check_unused_every` iterations.
             This is to avoid too many synchronization points.
     """
+
     def __init__(
         self,
         dim: int,
@@ -340,29 +280,35 @@ class VectorQuantization(nn.Module):
         kmeans_init: bool = True,
         kmeans_iters: int = 10,
         threshold_usage_ratio: float = 0.1,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         if codebook_dim is None:
             codebook_dim = dim
 
         requires_projection = codebook_dim != dim
-        self.project_in = (nn.Linear(dim, codebook_dim) if requires_projection else nn.Identity())
-        self.project_out = (nn.Linear(codebook_dim, dim) if requires_projection else nn.Identity())
+        self.project_in = (
+            nn.Linear(dim, codebook_dim) if requires_projection else nn.Identity()
+        )
+        self.project_out = (
+            nn.Linear(codebook_dim, dim) if requires_projection else nn.Identity()
+        )
         self.epsilon = epsilon
-        self._codebook = EuclideanCodebook(dim=codebook_dim, codebook_size=codebook_size,
-                                           kmeans_init=kmeans_init, kmeans_iters=kmeans_iters,
-                                           decay=decay, epsilon=epsilon,
-                                           threshold_usage_ratio=threshold_usage_ratio, **kwargs)
+        self._codebook = EuclideanCodebook(
+            dim=codebook_dim,
+            codebook_size=codebook_size,
+            kmeans_init=kmeans_init,
+            kmeans_iters=kmeans_iters,
+            decay=decay,
+            epsilon=epsilon,
+            threshold_usage_ratio=threshold_usage_ratio,
+            **kwargs,
+        )
         self.codebook_size = codebook_size
 
     @property
     def embedding(self):
         return self._codebook.embedding
-
-    @property
-    def initialized(self):
-        return self._codebook.initialized
 
     def _rearrange_input(self, x):
         x = rearrange(x, "b d n -> b n d")
@@ -390,13 +336,7 @@ class VectorQuantization(nn.Module):
         x = self._rearrange_input(x)
         quantized, codes, metrics = self._codebook(x, initialize=initialize)
 
-        if self.training:
-            quantized = x + (quantized - x).detach()
-
-        if self.training:
-            loss = F.mse_loss(x, quantized.detach())
-        else:
-            loss = zero_scalar(x.device)
+        loss = zero_scalar(x.device)
 
         quantized = self.project_out(quantized)
         quantized = self._rearrange_output(quantized)
@@ -409,6 +349,7 @@ class ResidualVectorQuantization(nn.Module):
 
     Follows Algorithm 1. in https://arxiv.org/pdf/2107.03312.pdf
     """
+
     def __init__(self, *, num_quantizers: int, codebook_offset: int, **kwargs):
         super().__init__()
         self.layers = nn.ModuleList(
@@ -416,7 +357,9 @@ class ResidualVectorQuantization(nn.Module):
         )
         self.codebook_offset = codebook_offset
 
-    def forward(self, x: torch.Tensor, n_q: tp.Optional[int] = None) -> _VQForwardResult:
+    def forward(
+        self, x: torch.Tensor, n_q: tp.Optional[int] = None
+    ) -> _VQForwardResult:
         """
         Args:
             x (torch.Tensor): input tensor to quantize, of shape `[B, C, T]`.
@@ -434,14 +377,12 @@ class ResidualVectorQuantization(nn.Module):
         previous_layer_is_initialized = True
 
         for i, layer in enumerate(self.layers[:n_q]):
-            if self.training:
-                this_layer_is_initialized = layer.initialized
             # We only allow the kmeans initialization if the previous layer is already initialized from the previous
             # iterations, this is to avoid learning the subsequent kmeans on the same batch, which would eventually
             # lead to its exhaustion and running kmeans on 0 values.
-            quantized, codes, loss, metrics = layer(residual, initialize=previous_layer_is_initialized)
-            if self.training:
-                previous_layer_is_initialized = this_layer_is_initialized
+            quantized, codes, loss, metrics = layer(
+                residual, initialize=previous_layer_is_initialized
+            )
 
             quantized = quantized.detach()
             residual = residual - quantized
@@ -456,10 +397,6 @@ class ResidualVectorQuantization(nn.Module):
                 else:
                     all_metrics[key] = value / n_q
                 all_metrics[key + f"_{i + self.codebook_offset}"] = value
-
-        if self.training:
-            # Solving subtle bug with STE and RVQ: https://github.com/facebookresearch/encodec/issues/25
-            quantized_out = x + (quantized_out - x).detach()
 
         out_losses, out_codes = map(torch.stack, (all_losses, all_codes))
         return _VQForwardResult(quantized_out, out_codes, out_losses, all_metrics)
