@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
-import random
 import typing as tp
 
 import torch
@@ -27,8 +26,6 @@ class ResidualVectorQuantizer(BaseQuantizer):
             at train time. The RVQ codebooks will still get the input value to learn the proper codebook.
         bins (int): Codebook size.
         decay (float): Decay for exponential moving average over the codebooks.
-        kmeans_init (bool): Whether to use kmeans to initialize the codebooks.
-        kmeans_iters (int): Number of iterations used for kmeans initialization.
         threshold_usage_ratio (float): Defines the threshold for the cluster usage under which a centroid
             is replaced. This is expressed as a fraction of the usage a centroid would get under
             a uniform distribution, so that it doesn't depend on the batch size etc.
@@ -51,8 +48,6 @@ class ResidualVectorQuantizer(BaseQuantizer):
         no_quantization_rate: float = 0.0,
         bins: int = 1024,
         decay: float = 0.99,
-        kmeans_init: bool = True,
-        kmeans_iters: int = 10,
         threshold_usage_ratio: float = 0.1,
         replaced_usage_ratio: float = 1.0,
         codebook_offset: int = 0,
@@ -70,8 +65,6 @@ class ResidualVectorQuantizer(BaseQuantizer):
         self.output_dimension = output_dimension or dimension
         self.bins = bins
         self.decay = decay
-        self.kmeans_init = kmeans_init
-        self.kmeans_iters = kmeans_iters
         self.input_proj: torch.nn.Module
         self.output_proj: torch.nn.Module
         self.generator = None
@@ -97,8 +90,6 @@ class ResidualVectorQuantizer(BaseQuantizer):
             codebook_size=self.bins,
             num_quantizers=self.n_q,
             decay=self.decay,
-            kmeans_init=self.kmeans_init,
-            kmeans_iters=self.kmeans_iters,
             threshold_usage_ratio=threshold_usage_ratio,
             replaced_usage_ratio=replaced_usage_ratio,
             codebook_offset=codebook_offset,
@@ -121,24 +112,10 @@ class ResidualVectorQuantizer(BaseQuantizer):
         """
         n_q = self.n_q
         x = self.input_proj(x)
-        if self.training and self.q_dropout:
-            assert self.q_first_only_proba == 0.0
-            n_q = int(torch.randint(1, self.n_q + 1, (1,)).item())
-        if self.training and self.q_first_only_proba:
-            if random.random() < self.q_first_only_proba:
-                n_q = 1
-            else:
-                n_q = self.n_q
 
         bw_per_q = math.log2(self.bins) * frame_rate / 1000
         quantized, codes, commit_loss, metrics = self.vq(x, n_q=n_q)
         B, _, _ = quantized.shape
-        if self.training and self.no_quantization_rate > 0:
-            mask = (
-                torch.rand(B, 1, 1, device=x.device, generator=self.generator)
-                <= self.no_quantization_rate
-            ).float()
-            quantized = x * mask + (1 - mask) * quantized
         quantized = self.output_proj(quantized)
         codes = codes.transpose(0, 1)
         # codes is [B, K, T], with T frames, K nb of codebooks.
@@ -294,12 +271,6 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
                 )
             else:
                 full_quantized_metrics[key] = value
-        if self.training and self.no_quantization_rate > 0:
-            # from time to time we apply no quantization at all.
-            mask = (
-                torch.rand(len(x), 1, 1, device=x.device) <= self.no_quantization_rate
-            ).float()
-            full_quantized_emb = x * mask + (1 - mask) * full_quantized_emb
         return QuantizedResult(
             full_quantized_emb,
             full_quantized_codes,

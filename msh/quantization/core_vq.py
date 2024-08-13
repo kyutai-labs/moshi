@@ -62,29 +62,6 @@ def _is_distributed() -> bool:
     return distributed.is_initialized() and distributed.get_world_size() > 1
 
 
-def _run_kmeans(
-    samples: torch.Tensor, num_clusters: int, num_iters: int = 10
-) -> tp.Tuple[torch.Tensor, torch.Tensor]:
-    # Kmeans algorithm used to initialize the codebooks.
-    dim = samples.shape[-1]
-    means = _sample_vectors(samples, num_clusters)
-
-    for _ in range(num_iters):
-        dists = torch.cdist(samples[None], means[None], p=2)[0]
-        buckets = dists.argmin(dim=-1)
-        bins = torch.bincount(buckets, minlength=num_clusters)
-        zero_mask = bins == 0
-        bins.clamp_(min=1)
-
-        new_means = torch.zeros_like(means)
-        new_means.scatter_add_(0, repeat(buckets, "n -> n d", d=dim), samples)
-        new_means /= bins[..., None]
-        resampled = _sample_vectors(samples, num_clusters)
-        means = torch.where(zero_mask[..., None], resampled, new_means)
-
-    return means, bins
-
-
 def zero_scalar(device) -> torch.Tensor:
     """Returns a 0. value on the given device without introducing a synchronization point."""
     return torch.zeros([1], device=device)[0]
@@ -96,10 +73,6 @@ class EuclideanCodebook(nn.Module):
     Args:
         dim (int): Dimension.
         codebook_size (int): Codebook size.
-        kmeans_init (bool): Whether to use k-means to initialize the codebooks.
-            If set to true, run the k-means algorithm on the first training batch and use
-            the learned centroids as initialization.
-        kmeans_iters (int): Number of iterations used for k-means algorithm at initialization.
         decay (float): Decay for exponential moving average over the codebooks.
         epsilon (float): Epsilon value for numerical stability.
         threshold_usage_ratio (float): Defines the threshold for the cluster usage under which a centroid
@@ -122,8 +95,6 @@ class EuclideanCodebook(nn.Module):
         self,
         dim: int,
         codebook_size: int,
-        kmeans_init: int = True,
-        kmeans_iters: int = 10,
         decay: float = 0.99,
         epsilon: float = 1e-5,
         threshold_usage_ratio: float = 0.1,
@@ -132,24 +103,18 @@ class EuclideanCodebook(nn.Module):
     ):
         super().__init__()
         self.decay = decay
-        init_fn: tp.Union[tp.Callable[..., torch.Tensor], tp.Any] = (
-            _uniform_init if not kmeans_init else torch.zeros
-        )
-        embedding = init_fn(codebook_size, dim)
+        embedding = torch.zeros(codebook_size, dim)
 
         self.dim = dim
         self.codebook_size = codebook_size
 
-        self.kmeans_iters = kmeans_iters
         self.epsilon = epsilon
         self.threshold_usage_ratio = threshold_usage_ratio
         self.replaced_usage_ratio = replaced_usage_ratio
         self.check_unused_every = check_unused_every
         self._next_unused_check = check_unused_every
 
-        self.register_buffer(
-            "_initialized", torch.tensor([not kmeans_init], dtype=torch.float)
-        )
+        self.register_buffer("_initialized", torch.tensor([False], dtype=torch.float))
         self.register_buffer("cluster_usage", torch.ones(codebook_size))
         self.register_buffer("embedding_sum", embedding)
         self._cached_initialized = False
@@ -259,8 +224,6 @@ class VectorQuantization(nn.Module):
         codebook_dim (int): Codebook dimension. If not defined, uses the specified dimension in dim.
         decay (float): Decay for exponential moving average over the codebooks.
         epsilon (float): Epsilon value for numerical stability.
-        kmeans_init (bool): Whether to use kmeans to initialize the codebooks.
-        kmeans_iters (int): Number of iterations used for kmeans initialization.
         threshold_usage_ratio (float): Defines the threshold for the cluster usage under which a centroid
             is replaced. This is expressed as a fraction of the usage a centroid would get under
             a uniform distribution, so that it doesn't depend on the batch size etc.
@@ -277,8 +240,6 @@ class VectorQuantization(nn.Module):
         codebook_dim: tp.Optional[int] = None,
         decay: float = 0.99,
         epsilon: float = 1e-5,
-        kmeans_init: bool = True,
-        kmeans_iters: int = 10,
         threshold_usage_ratio: float = 0.1,
         **kwargs,
     ):
@@ -297,8 +258,6 @@ class VectorQuantization(nn.Module):
         self._codebook = EuclideanCodebook(
             dim=codebook_dim,
             codebook_size=codebook_size,
-            kmeans_init=kmeans_init,
-            kmeans_iters=kmeans_iters,
             decay=decay,
             epsilon=epsilon,
             threshold_usage_ratio=threshold_usage_ratio,
@@ -377,9 +336,6 @@ class ResidualVectorQuantization(nn.Module):
         previous_layer_is_initialized = True
 
         for i, layer in enumerate(self.layers[:n_q]):
-            # We only allow the kmeans initialization if the previous layer is already initialized from the previous
-            # iterations, this is to avoid learning the subsequent kmeans on the same batch, which would eventually
-            # lead to its exhaustion and running kmeans on 0 values.
             quantized, codes, loss, metrics = layer(
                 residual, initialize=previous_layer_is_initialized
             )
