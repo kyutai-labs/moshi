@@ -175,6 +175,9 @@ def encodec_streaming_test(ec, pcm_chunk_size=120, max_duration_sec=10.0):
                 print(start_idx, codes.shape, end="\r")
                 all_codes.append(codes)
     all_codes = torch.cat(all_codes, dim=-1)
+    # print(all_codes)
+    # all_codes, _scale = ec.model.encode(sample_pcm)
+    # print(all_codes)
     print("codes", all_codes.shape)
     print("streaming decoding...")
     all_pcms = []

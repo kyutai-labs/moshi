@@ -228,10 +228,13 @@ class StreamableConv1d(StreamingModule):
         )
         if self._is_streaming:
             assert self.causal, "streaming is only supported for causal convs"
-            padding_applied = self._streaming_state.get("padding_applied")
-            if padding_applied is None:
-                x = pad1d(x, (padding_total, extra_padding), mode=self.pad_mode)
-                self._streaming_state["padding_applied"] = True
+            padding_to_add = self._streaming_state.get("padding_to_add")
+            if padding_to_add is None:
+                self._streaming_state["padding_to_add"] = padding_total
+                padding_to_add = padding_total
+            if padding_to_add > 0 and x.shape[-1] > 0:
+                x = pad1d(x, (padding_to_add, 0), mode=self.pad_mode)
+                self._streaming_state["padding_to_add"] = 0
         else:
             if self.causal:
                 # Left padding for causal
