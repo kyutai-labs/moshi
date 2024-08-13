@@ -1,5 +1,6 @@
 import msh
 import sentencepiece
+import time
 import torch
 import torchaudio
 import torchaudio.functional as F
@@ -8,6 +9,7 @@ import safetensors
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
 DEVICE = "cuda:0"
+ENABLE_PROFILING = False
 
 seanet_kwargs = {
     "channels": 1,
@@ -153,7 +155,7 @@ ec = get_encodec()
 print("encodec loaded")
 
 
-def encodec_streaming_test(ec, pcm_chunk_size=120, max_duration_sec=10.0):
+def encodec_streaming_test(ec, pcm_chunk_size=1920, max_duration_sec=10.0):
     # wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
     sample_pcm, sample_sr = torchaudio.load("bria.mp3")
     print("loaded pcm", sample_pcm.shape, sample_sr)
@@ -165,8 +167,11 @@ def encodec_streaming_test(ec, pcm_chunk_size=120, max_duration_sec=10.0):
     sample_pcm = sample_pcm[None].to(device=DEVICE)
 
     print("streaming encoding...")
+    start_time = time.time()
     all_codes = []
-    with ec.model.streaming():
+    from torch.profiler import profile, record_function, ProfilerActivity
+
+    def run_loop():
         for start_idx in range(0, sample_pcm.shape[-1], pcm_chunk_size):
             end_idx = min(sample_pcm.shape[-1], start_idx + pcm_chunk_size)
             chunk = sample_pcm[..., start_idx:end_idx]
@@ -174,11 +179,18 @@ def encodec_streaming_test(ec, pcm_chunk_size=120, max_duration_sec=10.0):
             if codes.shape[-1]:
                 print(start_idx, codes.shape, end="\r")
                 all_codes.append(codes)
+
+    if ENABLE_PROFILING:
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            run_loop()
+        prof.export_chrome_trace("trace.json")
+    else:
+        run_loop()
     all_codes = torch.cat(all_codes, dim=-1)
     # print(all_codes)
     # all_codes, _scale = ec.model.encode(sample_pcm)
     # print(all_codes)
-    print("codes", all_codes.shape)
+    print(f"codes {all_codes.shape} generated in {time.time() - start_time:.2f}s")
     print("streaming decoding...")
     all_pcms = []
     with ec.model.streaming():
