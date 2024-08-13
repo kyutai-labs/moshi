@@ -53,22 +53,6 @@ class ScaledEmbedding(nn.Embedding):
         return y
 
 
-def _delay_sequence(
-    delays: tp.List[int], tensor: torch.Tensor, padding: torch.Tensor
-) -> torch.Tensor:
-    B, K, T = tensor.shape
-    assert len(delays) == K, (len(delays), K)
-    outs = []
-
-    for k, delay in enumerate(delays):
-        assert delay >= 0
-        line = tensor[:, k].roll(delay, dims=1)
-        if delay > 0:
-            line[:, :delay] = padding[:, k]
-        outs.append(line)
-    return torch.stack(outs, dim=1)
-
-
 def _undelay_sequence(
     delays: tp.List[int],
     tensor: torch.Tensor,
@@ -112,21 +96,12 @@ class LMModel(StreamingModule):
         hidden_scale (int): Scale for hidden feed forward dimension of the transformer encoder.
         norm (str): Normalization method.
         norm_emb (bool): Whether to normalize embeddings.
-        emb_lr (float, optional): Embedding-specific learning rate.
         bias_proj (bool): Use bias for output projections.
-        weight_init (str, optional): Method for weight initialization.
-        depthwise_init (str, optional): Method for depthwise weight initialization.
-        zero_bias_init (bool): If true and bias in Linears, initialize bias to zeros.
         depformer (bool): whether to use a smaller Transformer along the codebooks for predicting them.
         depformer_*: params used for the Depformer Transformer, all the other will be shared.
         depformer_multi_linear (bool): if True, uses one linear layer per codebook to project the
             output of the main transformer to the Depformer latent space.
         depformer_dim_feedforward (int| list[int]| None): If None, defaults to hidden_scale * depformer_dim.
-        repeat_penalty_coef (float): amount of penalty to apply to the logits of the first codebook.
-            Typically, if a codebook entry was repeat non stop, then the max penalty in probability space
-            would be `exp(repeat_penalty_coef)`.
-        repeat_penalty_length (float): the repeat penalty coef gets multiplied by the EMA of the one hot encoding
-            of the codebook picked by the model. The weight for changing the EMA is `1 / repeat_penalty_length`.
         autocast (TorchAutocast): autocast to use when evaluating the LM. This is better than
             wrapping calls to the LMModel with autocast, as this allows to exclude the conditioning
             computation.
@@ -150,17 +125,12 @@ class LMModel(StreamingModule):
         norm: str = "layer_norm",
         norm_emb: bool = False,
         bias_proj: bool = False,
-        weight_init: tp.Optional[str] = None,
-        depthwise_init: tp.Optional[str] = None,
-        zero_bias_init: bool = False,
         depformer: bool = False,
         depformer_dim: int = 256,
         depformer_dim_feedforward: int | list[int] | None = None,
         depformer_multi_linear: bool = False,
         depformer_weights_per_step: bool = False,
         depformer_pos_emb: str = "sin",
-        repeat_penalty_coef: float = 0.0,
-        repeat_penalty_length: float = 4,
         autocast: TorchAutocast = TorchAutocast(enabled=False),
         existing_text_padding_id: tp.Optional[int] = None,
         context: tp.Optional[int] = None,
@@ -181,8 +151,6 @@ class LMModel(StreamingModule):
             logger.info("Extended delay to %r", delays)
         self.delays = delays
         self.dim = dim
-        self.repeat_penalty_coef = repeat_penalty_coef
-        self.repeat_penalty_length = repeat_penalty_length
         self.existing_text_padding_id = existing_text_padding_id
         self.context = context
         self.text_context = text_context
@@ -546,62 +514,6 @@ class LMModel(StreamingModule):
         assert logits is not None or text_logits is not None
         return logits, text_logits
 
-    def compute_predictions(
-        self,
-        codes: torch.Tensor,
-        text_or_audio: str = "audio",
-    ) -> LMOutput:
-        """Given an input tensor of codes [B, K, T], runs the model
-        forward using the specified codes interleaving pattern.
-
-        Args:
-            codes (torch.Tensor): Input codes of shape [B, K, T] with B the batch size,
-                K the number of codebooks and T the number of timesteps. When text is supported,
-                the first 'codebook' corresponds to the text, and the remaining codebooks are for the  audio.
-            text_or_audio (str): one of 'text', 'audio' or 'both' to control whether to generate
-                text, audio, or both.
-        Returns:
-            LMOutput: Language model outputs, containing either text or audio logits, or both.
-                logits (torch.Tensor, or None) of shape [B, K, T, card] corresponding to the provided codes,
-                    i.e. the first item corresponds to logits to predict the first code, meaning that
-                    no additional shifting of codes and logits is required.
-                mask (torch.Tensor, or None) of shape [B, K, T], mask over valid and invalid positions.
-                    Given the specified interleaving strategies, parts of the logits and codes should
-                    not be considered as valid predictions because of invalid context.
-                text_logits (torch.Tensor, or None) of shape [B, 1, T, text_card].
-                text_mask (torch.Tensor, or None) of shape [B, 1, T], mask over the valid positions for the text.
-        """
-        B, K, T = codes.shape
-        assert K == self.num_codebooks, (K, self.num_codebooks)
-        # Delaying codes and removing the last time step that will never be an input.
-        initial = self._get_initial_token(text_or_audio).expand(B, -1, -1)
-        delayed_codes = _delay_sequence(self.delays, codes, initial)
-        # Inserting the empty tokens for the first time step.
-        delayed_codes = torch.cat([initial, delayed_codes], dim=2)
-
-        # apply model on pattern sequence
-        model = self
-
-        context = self.text_context if text_or_audio == "text" else self.context
-        set_attention_context(self.transformer, context)
-        with self.autocast:
-            logits, text_logits = model(delayed_codes, text_or_audio)  # [B, K, S, card]
-        # map back the logits on pattern sequence to logits on original codes: [B, K, S, card] -> [B, K, T, card]
-        # and provide the corresponding mask over invalid positions of tokens
-        logits_mask = None
-        if logits is not None:
-            logits, logits_mask = _undelay_sequence(
-                self.delays[self.audio_offset :], logits, fill_value=float("NaN")
-            )
-            logits_mask &= codes[:, self.audio_offset :] != self.zero_token_id
-        text_logits_mask = None
-        if text_logits is not None:
-            text_logits, text_logits_mask = _undelay_sequence(
-                self.delays[:1], text_logits, fill_value=float("NaN")
-            )
-            text_logits_mask &= codes[:, :1] != self.zero_token_id
-        return LMOutput(logits, logits_mask, text_logits, text_logits_mask)
-
     def _sample_next_token(
         self,
         sequence: torch.Tensor,
@@ -637,20 +549,6 @@ class LMModel(StreamingModule):
         text_logits = None
         logits, text_logits = model(sequence, **kwargs)
 
-        # Repeat penalty for the first codebook.
-        # When `logits` corresponds to the codebook 0, `depformer_cb_index` will already be updated to 1.
-        counts: tp.Optional[torch.Tensor] = None
-        is_first = self._streaming_state.get("depformer_cb_index") == 1
-        if is_first and self.repeat_penalty_coef > 0.0:
-            assert logits is not None
-            if "counts" not in self._streaming_state:
-                self._streaming_state["counts"] = torch.zeros(
-                    B, 1, 1, self.card, dtype=torch.float, device=logits.device
-                )
-            counts = self._streaming_state["counts"]
-            logits = torch.log_softmax(logits, dim=-1)
-            logits -= self.repeat_penalty_coef * counts
-
         tokens_per_modality = []
         # When using Depformer, only one of the logits will be active at any time.
         for modality_logits in [text_logits, logits]:
@@ -671,14 +569,6 @@ class LMModel(StreamingModule):
             tokens_per_modality.append(next_token)
 
         next_token = torch.cat(tokens_per_modality, dim=1)
-
-        if is_first and self.repeat_penalty_coef > 1.0:
-            # Keeping track of EMA of one hot encoding of the selected codebook entry.
-            alpha = 1 / self.repeat_penalty_length
-            if is_first:
-                assert counts is not None
-                one_hot = nn.functional.one_hot(next_token, self.card)
-                counts[:] = counts * (1 - alpha) + alpha * one_hot
 
         assert next_token.dim() == 3, next_token.shape
         return next_token, (text_logits, logits)
