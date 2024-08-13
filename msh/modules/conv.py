@@ -11,14 +11,12 @@ import warnings
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.nn.utils import spectral_norm, weight_norm
+from torch.nn.utils import weight_norm
 
 from .streaming import StreamingConv1d, StreamingConvTranspose1d, StreamingModule
 
 
-CONV_NORMALIZATIONS = frozenset(
-    ["none", "weight_norm", "spectral_norm", "time_group_norm"]
-)
+CONV_NORMALIZATIONS = frozenset(["none", "weight_norm"])
 
 
 class TransposedLayerNorm(nn.Module):
@@ -38,28 +36,10 @@ def apply_parametrization_norm(module: nn.Module, norm: str = "none"):
     assert norm in CONV_NORMALIZATIONS
     if norm == "weight_norm":
         return weight_norm(module)
-    elif norm == "spectral_norm":
-        return spectral_norm(module)
     else:
         # We already check was in CONV_NORMALIZATION, so any other choice
         # doesn't need reparametrization.
         return module
-
-
-def get_norm_module(
-    module: nn.Module, causal: bool = False, norm: str = "none", **norm_kwargs
-):
-    """Return the proper normalization module. If causal is True, this will ensure the returned
-    module is causal, or return an error if the normalization doesn't support causal evaluation.
-    """
-    assert norm in CONV_NORMALIZATIONS
-    if norm == "time_group_norm":
-        if causal:
-            raise ValueError("GroupNorm doesn't support causal evaluation.")
-        assert isinstance(module, nn.modules.conv._ConvNd)
-        return nn.GroupNorm(1, module.out_channels, **norm_kwargs)
-    else:
-        return nn.Identity()
 
 
 def get_extra_padding_for_conv1d(
@@ -138,12 +118,10 @@ class NormConv1d(StreamingModule):
     ):
         super().__init__()
         self.conv = apply_parametrization_norm(StreamingConv1d(*args, **kwargs), norm)
-        self.norm = get_norm_module(self.conv, causal, norm, **norm_kwargs)
         self.norm_type = norm
 
     def forward(self, x):
         x = self.conv(x)
-        x = self.norm(x)
         return x
 
 
@@ -164,12 +142,10 @@ class NormConvTranspose1d(StreamingModule):
         self.convtr = apply_parametrization_norm(
             StreamingConvTranspose1d(*args, **kwargs), norm
         )
-        self.norm = get_norm_module(self.convtr, causal, norm, **norm_kwargs)
         self.norm_type = norm
 
     def forward(self, x):
         x = self.convtr(x)
-        x = self.norm(x)
         return x
 
 
