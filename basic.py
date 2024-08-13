@@ -153,11 +153,14 @@ ec = get_encodec()
 print("encodec loaded")
 
 
-def encodec_streaming_test(ec, pcm_chunk_size=120):
+def encodec_streaming_test(ec, pcm_chunk_size=120, max_duration_sec=10.0):
     # wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
     sample_pcm, sample_sr = torchaudio.load("bria.mp3")
     print("loaded pcm", sample_pcm.shape, sample_sr)
     sample_pcm = F.resample(sample_pcm, orig_freq=sample_sr, new_freq=SAMPLE_RATE)
+    max_duration_len = int(SAMPLE_RATE * max_duration_sec)
+    if sample_pcm.shape[-1] > max_duration_len:
+        sample_pcm = sample_pcm[..., :max_duration_len]
     print("resampled pcm", sample_pcm.shape, sample_sr)
     sample_pcm = sample_pcm[None].to(device=DEVICE)
 
@@ -184,9 +187,12 @@ def encodec_streaming_test(ec, pcm_chunk_size=120):
     all_pcms = torch.cat(all_pcms, dim=-1)
     print("pcm", all_pcms.shape)
     torchaudio.save("streaming_out.wav", all_pcms[0].cpu(), SAMPLE_RATE)
+    pcm = ec.model.decode(all_codes, scale=None)
+    print("pcm", pcm.shape)
+    torchaudio.save("roundtrip_out.wav", pcm[0].cpu(), SAMPLE_RATE)
 
 
-# encodec_streaming_test(ec)
+encodec_streaming_test(ec)
 
 
 print("lm loading")
