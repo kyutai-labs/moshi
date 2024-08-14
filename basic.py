@@ -6,12 +6,29 @@ import torchaudio
 import torchaudio.functional as F
 import safetensors
 from torch.profiler import profile, ProfilerActivity
+import numpy as np
+import random
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
 DEVICE = "cuda:0"
 ENABLE_PROFILING = False
 STREAMING_LM_GEN = True
+
+
+def seed_all(seed):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # for multi-GPU setups
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+seed_all(42424242)
+
 
 seanet_kwargs = {
     "channels": 1,
