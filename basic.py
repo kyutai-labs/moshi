@@ -224,7 +224,7 @@ if STREAMING_LM_GEN:
     max_gen_len = 256
     with torch.no_grad():
         lm_gen = msh.models.LMGen(lm, check=True, max_gen_len=max_gen_len)
-        tokens = [0] * 17
+        tokens = [lm_gen.ungenerated] * 17
         main_audio = []
         other_audio = []
         for _step in range(max_gen_len):
