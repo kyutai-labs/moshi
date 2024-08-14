@@ -13,7 +13,7 @@ SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
 DEVICE = "cuda:0"
 ENABLE_PROFILING = False
-STREAMING_LM_GEN = True
+STREAMING_LM_GEN = False
 
 
 def seed_all(seed):
@@ -273,7 +273,6 @@ else:
             prompt=None,
             num_samples=batch_size,
             callback=cb,
-            text_or_audio="both",
             max_gen_len=int(12.5 * max_gen_len_s),
             top_k=250,
             temp=0.8,
