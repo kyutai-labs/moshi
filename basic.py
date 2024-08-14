@@ -226,7 +226,11 @@ if STREAMING_LM_GEN:
     tokens = [0] * 17
     for _step in range(max_gen_len):
         tokens = lm_gen.step(tokens)
-        print(tokens)
+        text_token = tokens[0]
+        if text_token not in (0, 3):
+            _text = text_tokenizer.id_to_piece(text_token)
+            _text = _text.replace("▁", " ")
+            print(_text, end="")
 else:
     batch_size = 8
     max_gen_len_s = 10
