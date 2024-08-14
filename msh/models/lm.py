@@ -517,7 +517,6 @@ class LMModel(StreamingModule):
     def _sample_next_token(
         self,
         sequence: torch.Tensor,
-        unconditional_state: State,
         use_sampling: bool = False,
         temp: float = 1.0,
         top_k: int = 0,
@@ -542,7 +541,6 @@ class LMModel(StreamingModule):
         Returns:
             next_token (torch.Tensor): Next token tensor of shape [B, K, 1].
         """
-        B = sequence.shape[0]
         model = self
         kwargs = {"text_or_audio": text_or_audio}
         logits = None
@@ -583,9 +581,7 @@ class LMModel(StreamingModule):
         temp: float = 1.0,
         top_k: int = 250,
         top_p: float = 0.0,
-        strip: int = 0,
         check: bool = False,
-        min_start_offset: tp.Optional[int] = None,
         callback: tp.Optional[tp.Callable[[int, int], None]] = None,
         text_or_audio: str = "audio",
     ) -> torch.Tensor:
@@ -601,12 +597,7 @@ class LMModel(StreamingModule):
             temp (float): Sampling temperature.
             top_k (int): K for "top-k" sampling.
             top_p (float): P for "top-p" sampling.
-            strip (int): number of time steps to strip from the prompt to avoid padding artifacts. 1 should be enough.
             check (bool): Whether to apply further checks on generated sequence.
-            min_start_offset (int or None): if provided, always replays the generation at least from that offset,
-                even if the prompt is longer. This is to ensure the same number of steps on different GPUs with varying
-                prompt, to remove any chance of deadlock with FSDP in the case where it might OOM (and ask again
-                for the other shards).
             callback (Callback, optional): Callback function to report generation progress.
             text_or_audio (str): controls whether to generate only text, only audio, or both.
          Returns:
@@ -651,11 +642,6 @@ class LMModel(StreamingModule):
         start_offset = 0
 
         if prompt is not None:
-            assert (
-                prompt.shape[-1] > strip
-            ), f"Prompt should be longer than strip={strip} time steps."
-            if strip:
-                prompt = prompt[..., :-strip]
             assert start_offset < max_gen_len
             PT = prompt.shape[-1]
             for cb in range(self.num_codebooks):
@@ -671,8 +657,6 @@ class LMModel(StreamingModule):
             # The `-1` offset is because time step T is generated as the output of
             # timestep T - 1.
             start_offset = int(ungenerated_steps.amin()) - 1
-            if min_start_offset is not None:
-                start_offset = min(min_start_offset, start_offset)
             assert start_offset >= 0
             logger.debug("Start offset is %d", start_offset)
 
@@ -680,7 +664,6 @@ class LMModel(StreamingModule):
         context = self.text_context if text_or_audio == "text" else self.context
         set_attention_context(self.transformer, context)
         with self.streaming(), self.autocast:
-            unconditional_state = dict(self.get_streaming_state())
             for offset in range(start_offset, max_gen_len + max_delay):
                 # `offset` measures position in the output tensor with no delays.
                 # In particular, there is a shift of 1 with the `gen_sequence` that includes
@@ -702,7 +685,6 @@ class LMModel(StreamingModule):
 
                 next_token, _ = self._sample_next_token(
                     input_,
-                    unconditional_state,
                     use_sampling,
                     temp,
                     top_k,
@@ -777,7 +759,6 @@ class LMModel(StreamingModule):
                                     assert (input_ <= self.card).all()
                             next_token, _ = self._sample_next_token(
                                 input_,
-                                unconditional_state,
                                 use_sampling,
                                 temp,
                                 top_k,
@@ -815,7 +796,6 @@ class LMModel(StreamingModule):
                         1 + offset - start_offset,
                         max_gen_len + max_delay - start_offset,
                     )
-        unconditional_state.clear()
 
         output, mask = _undelay_sequence(
             self.delays, gen_sequence[:, :, 1:], fill_value=ungenerated

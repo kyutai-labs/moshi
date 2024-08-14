@@ -5,6 +5,7 @@ import torch
 import torchaudio
 import torchaudio.functional as F
 import safetensors
+from torch.profiler import profile, ProfilerActivity
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
@@ -169,7 +170,6 @@ def encodec_streaming_test(ec, pcm_chunk_size=1920, max_duration_sec=10.0):
     print("streaming encoding...")
     start_time = time.time()
     all_codes = []
-    from torch.profiler import profile, record_function, ProfilerActivity
 
     def run_loop():
         for start_idx in range(0, sample_pcm.shape[-1], pcm_chunk_size):
@@ -230,7 +230,6 @@ with torch.no_grad():
         max_gen_len=int(12.5 * max_gen_len_s),
         top_k=250,
         temp=0.8,
-        strip=0,
     )
 outputs = []
 for single_res in res:
