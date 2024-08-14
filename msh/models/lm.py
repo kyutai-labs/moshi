@@ -273,6 +273,11 @@ class LMModel(StreamingModule):
         return -2
 
     @property
+    def device(self):
+        first_param = next(iter(self.parameters()))
+        return first_param.device
+
+    @property
     def num_codebooks(self) -> int:
         return self.n_q + int(self.has_text)
 
@@ -812,3 +817,212 @@ class LMModel(StreamingModule):
         if text_or_audio == "text":
             assert (output[:, :1] <= self.text_card).all()
         return output
+
+
+class LMGen(StreamingModule):
+    def __init__(
+        self,
+        lm_model: LMModel,
+        text_or_audio: str = "both",
+        max_gen_len: int = 256,
+        use_sampling: bool = True,
+        temp: float = 1.0,
+        top_k: int = 250,
+        top_p: float = 0.0,
+        check: bool = False,
+    ):
+        assert not lm_model.training, "generation shouldn't be used in training mode."
+        super().__init__()
+
+        lm_model.reset_streaming()
+        lm_model._set_streaming(True)
+        device = lm_model.device
+        self.lm_model = lm_model
+        self.text_or_audio = text_or_audio
+        self.max_gen_len = max_gen_len
+        self.use_sampling = use_sampling
+        self.temp = temp
+        self.top_k = top_k
+        self.top_p = top_p
+        self.check = check
+        self.ungenerated = (
+            lm_model.ungenerated_token_id
+        )  # special value to indicate tokens to generate
+        self.max_delay = max(
+            lm_model.delays
+        )  # with delays, we need to generate a few more time steps.
+
+        self.num_samples = 1
+        self.initial = lm_model._get_initial_token(text_or_audio).expand(
+            self.num_samples, -1, -1
+        )
+        self.gen_sequence = torch.full(
+            (
+                self.num_samples,
+                lm_model.num_codebooks,
+                max_gen_len + self.max_delay + 1,
+            ),
+            self.ungenerated,
+            device=device,
+            dtype=torch.long,
+        )
+        self.gen_sequence[:, :, :1] = self.initial
+        self.zero = torch.full(
+            [1], lm_model.zero_token_id, device=device, dtype=torch.long
+        )
+        self.audio_offset = lm_model.audio_offset
+        context = lm_model.text_context if text_or_audio == "text" else lm_model.context
+        set_attention_context(lm_model.transformer, context)
+        self.offset = 0
+
+    @torch.no_grad()
+    def step(
+        self,
+        input_tokens: tp.List[int],
+    ) -> tp.Union[None, tp.List[int]]:
+        lm_model = self.lm_model
+        # `offset` measures position in the output tensor with no delays.
+        # In particular, there is a shift of 1 with the `gen_sequence` that includes
+        # the initial empty token.
+        logger.debug("Offset %d / %d", self.offset, self.max_gen_len + self.max_delay)
+
+        for k, delay in enumerate(lm_model.delays):
+            if self.offset < delay or input_tokens[k] == self.ungenerated:
+                continue
+            if self.gen_sequence[:, k, self.offset - delay] == self.ungenerated:
+                self.gen_sequence[:, k, self.offset - delay] = input_tokens[k]
+
+        input_ = self.gen_sequence[:, :, self.offset : self.offset + 1]
+
+        if self.check:
+            # Check that we are not feeding in any value that is not generated yet.
+            assert not (input_ == self.ungenerated).any(), (self.offset, input_)
+            assert (input_[:, lm_model.audio_offset :] <= lm_model.card).all(), input_
+            if lm_model.has_text:
+                assert (input_[:, :1] <= lm_model.text_card).all()
+
+        next_token, _ = lm_model._sample_next_token(
+            input_,
+            self.use_sampling,
+            self.temp,
+            self.top_k,
+            self.top_p,
+            text_or_audio=self.text_or_audio,
+        )
+        assert next_token.shape[-1] == 1
+        next_token = next_token[:, :, 0]  # shape is [B, K]
+        this_gen_step = self.gen_sequence[:, :, self.offset + 1]
+
+        if lm_model.depformer is None:
+            if self.text_or_audio == "audio" and self.has_text:
+                # We want audio only, but the model also supports text, we insert a
+                # padding token for the text.
+                next_token = torch.cat(
+                    [self.zero.expand(len(next_token), 1), next_token], dim=1
+                )
+            elif self.text_or_audio == "text" and lm_model.num_audio_codebooks > 0:
+                # We want text only, but the model also supports audio, we insert
+                # as many padding tokens as the number of audio codebooks.
+                next_token = torch.cat(
+                    [
+                        next_token,
+                        self.zero.expand(len(next_token), lm_model.num_audio_codebooks),
+                    ],
+                    dim=1,
+                )
+            next_token = torch.where(
+                this_gen_step == self.ungenerated, next_token, this_gen_step
+            )
+
+        else:
+            # Depformer gives us tokens one by one instead of K at once.
+            assert next_token.shape[1] == 1, next_token.shape[1]
+            next_token = next_token[:, 0]  # Now shape is B.
+            depformer_tokens: tp.List[torch.Tensor] = []
+            for cb_index in range(lm_model.num_codebooks):
+                if (
+                    cb_index == 0
+                    and lm_model.has_text
+                    and self.text_or_audio == "audio"
+                ):
+                    # We are not generating text, we can fill the text with zero tokens.
+                    depformer_tokens.insert(0, self.zero.expand(len(next_token)))
+                    continue
+                if cb_index > 0 and self.text_or_audio == "text":
+                    # We are not generating audio, filling up with zero tokens.
+                    depformer_tokens.append(self.zero.expand(len(next_token)))
+                    continue
+                if cb_index == 0:
+                    # No need to generate, `next_token` is actually the next text token.
+                    # We just need to only keep the new token if the value wasn't provided
+                    # in the prompt.
+                    next_token = torch.where(
+                        this_gen_step[:, 0] == self.ungenerated,
+                        next_token,
+                        this_gen_step[:, 0],
+                    )
+                elif (
+                    cb_index == 1
+                    and lm_model.has_text
+                    and self.text_or_audio == "audio"
+                ):
+                    # No need to generate, `next_token` is actually the next audio token.
+                    next_token = torch.where(
+                        this_gen_step[:, 1] == self.ungenerated,
+                        next_token,
+                        this_gen_step[:, 1],
+                    )
+                else:
+                    input_ = next_token[:, None, None]
+                    if self.check:
+                        # Check that we are not feeding in any value that is not generated yet.
+                        assert not (input_ == self.ungenerated).any()
+                        if lm_model.has_text and cb_index == 1:
+                            assert (input_ <= lm_model.text_card).all()
+                        else:
+                            assert (input_ <= lm_model.card).all()
+                    next_token, _ = lm_model._sample_next_token(
+                        input_,
+                        self.use_sampling,
+                        self.temp,
+                        self.top_k,
+                        self.top_p,
+                        text_or_audio=self.text_or_audio,
+                    )
+                    assert next_token.shape[-1] == 1
+                    next_token = next_token[:, 0, 0]  # shape is [B, K]
+                    next_token = torch.where(
+                        this_gen_step[:, cb_index] == self.ungenerated,
+                        next_token,
+                        this_gen_step[:, cb_index],
+                    )
+
+                original_offset = self.offset - lm_model.delays[cb_index]
+                if original_offset < 0:
+                    # We are not currently generating this codebook, we replace with a special token.
+                    next_token[:] = self.initial[:, cb_index, 0]
+                depformer_tokens.append(next_token)
+
+            assert len(depformer_tokens) == lm_model.num_codebooks, (
+                len(depformer_tokens),
+                lm_model.num_codebooks,
+            )
+            next_token = torch.stack(depformer_tokens, dim=1)
+            assert next_token.shape == (
+                self.num_samples,
+                lm_model.num_codebooks,
+            ), next_token.shape
+
+        # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
+        # TODO(laurent): find out how this is supposed to work.
+        self.offset += 1
+        self.gen_sequence[..., self.offset] = next_token
+
+        out = []
+        for k, delay in enumerate(lm_model.delays):
+            if self.offset < delay:
+                return None
+            _out = self.gen_sequence[0, k, self.offset - delay].item()
+            out.append(_out)
+
+        return out

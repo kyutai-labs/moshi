@@ -11,6 +11,7 @@ SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
 DEVICE = "cuda:0"
 ENABLE_PROFILING = False
+STREAMING_LM_GEN = True
 
 seanet_kwargs = {
     "channels": 1,
@@ -219,23 +220,52 @@ def cb(step, total):
     print(f"{step:06d} / {total:06d}", end="\r")
 
 
-batch_size = 8
-max_gen_len_s = 10
-with torch.no_grad():
-    res = lm.generate(
-        prompt=None,
-        num_samples=batch_size,
-        callback=cb,
-        text_or_audio="both",
-        max_gen_len=int(12.5 * max_gen_len_s),
-        top_k=250,
-        temp=0.8,
-    )
-outputs = []
-for single_res in res:
-    print(single_res.shape)
-    outputs.append(ec.decode_sources(single_res[None, 1:]))
-for idx, output in enumerate(outputs):
-    output = output[0, :, 0].cpu()
-    print(idx, output.shape)
-    torchaudio.save(f"output_{idx}.wav", output, SAMPLE_RATE)
+if STREAMING_LM_GEN:
+    max_gen_len = 256
+    with torch.no_grad():
+        lm_gen = msh.models.LMGen(lm, check=True, max_gen_len=max_gen_len)
+        tokens = [lm_gen.ungenerated] * 17
+        main_audio = []
+        other_audio = []
+        for _step in range(max_gen_len):
+            tokens = lm_gen.step(tokens)
+            main_audio.append(tokens[1:9])
+            other_audio.append(tokens[9:])
+            text_token = tokens[0]
+            if text_token not in (0, 3):
+                _text = text_tokenizer.id_to_piece(text_token)
+                _text = _text.replace("▁", " ")
+                print(_text, end="", flush=True)
+        print()
+        main_audio = torch.tensor(main_audio).to(device=DEVICE)
+        other_audio = torch.tensor(other_audio).to(device=DEVICE)
+        print(main_audio.shape, other_audio.shape)
+        all_codes = torch.stack([main_audio, other_audio], dim=0).transpose(1, 2)
+        print(all_codes.shape)
+        print(all_codes)
+        # Discard the two first slices.
+        pcm = ec.model.decode(all_codes[:, :, 2:], scale=None)
+        print("pcm", pcm.shape)
+        torchaudio.save("gen_main.wav", pcm[0].cpu(), SAMPLE_RATE)
+        torchaudio.save("gen_other.wav", pcm[1].cpu(), SAMPLE_RATE)
+else:
+    batch_size = 8
+    max_gen_len_s = 10
+    with torch.no_grad():
+        res = lm.generate(
+            prompt=None,
+            num_samples=batch_size,
+            callback=cb,
+            text_or_audio="both",
+            max_gen_len=int(12.5 * max_gen_len_s),
+            top_k=250,
+            temp=0.8,
+        )
+    outputs = []
+    for single_res in res:
+        print(single_res.shape)
+        outputs.append(ec.decode_sources(single_res[None, 1:]))
+    for idx, output in enumerate(outputs):
+        output = output[0, :, 0].cpu()
+        print(idx, output.shape)
+        torchaudio.save(f"output_{idx}.wav", output, SAMPLE_RATE)

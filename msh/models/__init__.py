@@ -13,4 +13,4 @@ from .encodec import (
     EncodecModel,
     MultistreamCompressionModel,
 )
-from .lm import LMModel
+from .lm import LMModel, LMGen
