@@ -11,6 +11,7 @@ SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
 DEVICE = "cuda:0"
 ENABLE_PROFILING = False
+STREAMING_LM_GEN = True
 
 seanet_kwargs = {
     "channels": 1,
@@ -219,23 +220,31 @@ def cb(step, total):
     print(f"{step:06d} / {total:06d}", end="\r")
 
 
-batch_size = 8
-max_gen_len_s = 10
-with torch.no_grad():
-    res = lm.generate(
-        prompt=None,
-        num_samples=batch_size,
-        callback=cb,
-        text_or_audio="both",
-        max_gen_len=int(12.5 * max_gen_len_s),
-        top_k=250,
-        temp=0.8,
-    )
-outputs = []
-for single_res in res:
-    print(single_res.shape)
-    outputs.append(ec.decode_sources(single_res[None, 1:]))
-for idx, output in enumerate(outputs):
-    output = output[0, :, 0].cpu()
-    print(idx, output.shape)
-    torchaudio.save(f"output_{idx}.wav", output, SAMPLE_RATE)
+if STREAMING_LM_GEN:
+    max_gen_len = 256
+    lm_gen = msh.models.LMGen(lm, check=True, max_gen_len=max_gen_len)
+    tokens = [0] * 17
+    for _step in range(max_gen_len):
+        tokens = lm_gen.step(tokens)
+        print(tokens)
+else:
+    batch_size = 8
+    max_gen_len_s = 10
+    with torch.no_grad():
+        res = lm.generate(
+            prompt=None,
+            num_samples=batch_size,
+            callback=cb,
+            text_or_audio="both",
+            max_gen_len=int(12.5 * max_gen_len_s),
+            top_k=250,
+            temp=0.8,
+        )
+    outputs = []
+    for single_res in res:
+        print(single_res.shape)
+        outputs.append(ec.decode_sources(single_res[None, 1:]))
+    for idx, output in enumerate(outputs):
+        output = output[0, :, 0].cpu()
+        print(idx, output.shape)
+        torchaudio.save(f"output_{idx}.wav", output, SAMPLE_RATE)

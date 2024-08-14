@@ -273,6 +273,11 @@ class LMModel(StreamingModule):
         return -2
 
     @property
+    def device(self):
+        first_param = next(iter(self.parameters()))
+        return first_param.device
+
+    @property
     def num_codebooks(self) -> int:
         return self.n_q + int(self.has_text)
 
@@ -830,24 +835,25 @@ class LMGen(StreamingModule):
         super().__init__()
 
         lm_model.reset_streaming()
-        lm_model.set_streaming(True)
+        lm_model._set_streaming(True)
         device = lm_model.device
         self.lm_model = lm_model
         self.text_or_audio = text_or_audio
         self.max_gen_len = max_gen_len
+        self.use_sampling = use_sampling
         self.temp = temp
         self.top_k = top_k
         self.top_p = top_p
         self.check = check
         self.ungenerated = (
-            self.ungenerated_token_id
+            lm_model.ungenerated_token_id
         )  # special value to indicate tokens to generate
         self.max_delay = max(
             lm_model.delays
         )  # with delays, we need to generate a few more time steps.
 
         self.num_samples = 1
-        self.initial = self._get_initial_token(text_or_audio).expand(
+        self.initial = lm_model._get_initial_token(text_or_audio).expand(
             self.num_samples, -1, -1
         )
         self.gen_sequence = torch.full(
@@ -872,19 +878,21 @@ class LMGen(StreamingModule):
     @torch.no_grad()
     def step(
         self,
-        prompt: tp.Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
+        input_tokens: tp.List[int],
+    ) -> tp.Union[None, tp.List[int]]:
         lm_model = self.lm_model
         # `offset` measures position in the output tensor with no delays.
         # In particular, there is a shift of 1 with the `gen_sequence` that includes
         # the initial empty token.
         logger.debug("Offset %d / %d", self.offset, self.max_gen_len + self.max_delay)
-        # get current sequence (note that the streaming API is providing the caching over previous offsets)
 
-        if self.offset == 0:
-            input_ = self.gen_sequence[:, :, : self.offset + 1]
-        else:
-            input_ = self.gen_sequence[:, :, self.offset : self.offset + 1]
+        for k, delay in enumerate(lm_model.delays):
+            if self.offset < delay or input_tokens[k] == self.ungenerated:
+                continue
+            if self.gen_sequence[:, k, self.offset - delay] == self.ungenerated:
+                self.gen_sequence[:, k, self.offset - delay] = input_tokens[k]
+
+        input_ = self.gen_sequence[:, :, self.offset : self.offset + 1]
 
         if self.check:
             # Check that we are not feeding in any value that is not generated yet.
@@ -905,7 +913,7 @@ class LMGen(StreamingModule):
         next_token = next_token[:, :, 0]  # shape is [B, K]
         this_gen_step = self.gen_sequence[:, :, self.offset + 1]
 
-        if self.depformer is None:
+        if lm_model.depformer is None:
             if self.text_or_audio == "audio" and self.has_text:
                 # We want audio only, but the model also supports text, we insert a
                 # padding token for the text.
@@ -1006,21 +1014,15 @@ class LMGen(StreamingModule):
             ), next_token.shape
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
-        self.gen_sequence[..., self.offset + 1] = next_token
+        # TODO(laurent): find out how this is supposed to work.
         self.offset += 1
+        self.gen_sequence[..., self.offset] = next_token
 
-        # output, mask = _undelay_sequence(
-        #     lm_model.delays, gen_sequence[:, :, 1:], fill_value=ungenerated
-        # )
-        # assert mask[:, :, :max_gen_len].all()
-        # output = output[:, :, :max_gen_len]
-        # tgt_shape = (num_samples, lm_model.num_codebooks, max_gen_len)
-        # assert output.shape == tgt_shape, (output.shape, tgt_shape)
-        # # ensure sequence has been entirely filled
-        # assert not (output == ungenerated).any()
-        # # ensure the returned codes are all valid
-        # if text_or_audio == "audio":
-        #     assert (output[:, audio_offset:] < lm_model.card).all()
-        # if text_or_audio == "text":
-        #     assert (output[:, :1] <= lm_model.text_card).all()
-        # return output
+        out = []
+        for k, delay in enumerate(lm_model.delays):
+            if self.offset < delay:
+                return None
+            _out = self.gen_sequence[0, k, self.offset - delay].item()
+            out.append(_out)
+
+        return out
