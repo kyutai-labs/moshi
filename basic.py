@@ -222,15 +222,32 @@ def cb(step, total):
 
 if STREAMING_LM_GEN:
     max_gen_len = 256
-    lm_gen = msh.models.LMGen(lm, check=True, max_gen_len=max_gen_len)
-    tokens = [0] * 17
-    for _step in range(max_gen_len):
-        tokens = lm_gen.step(tokens)
-        text_token = tokens[0]
-        if text_token not in (0, 3):
-            _text = text_tokenizer.id_to_piece(text_token)
-            _text = _text.replace("▁", " ")
-            print(_text, end="")
+    with torch.no_grad():
+        lm_gen = msh.models.LMGen(lm, check=True, max_gen_len=max_gen_len)
+        tokens = [0] * 17
+        main_audio = []
+        other_audio = []
+        for _step in range(max_gen_len):
+            tokens = lm_gen.step(tokens)
+            main_audio.append(tokens[1:9])
+            other_audio.append(tokens[9:])
+            text_token = tokens[0]
+            if text_token not in (0, 3):
+                _text = text_tokenizer.id_to_piece(text_token)
+                _text = _text.replace("▁", " ")
+                print(_text, end="", flush=True)
+        print()
+        main_audio = torch.tensor(main_audio).to(device=DEVICE)
+        other_audio = torch.tensor(other_audio).to(device=DEVICE)
+        print(main_audio.shape, other_audio.shape)
+        all_codes = torch.stack([main_audio, other_audio], dim=0).transpose(1, 2)
+        print(all_codes.shape)
+        print(all_codes)
+        # Discard the two first slices.
+        pcm = ec.model.decode(all_codes[:, :, 2:], scale=None)
+        print("pcm", pcm.shape)
+        torchaudio.save("gen_main.wav", pcm[0].cpu(), SAMPLE_RATE)
+        torchaudio.save("gen_other.wav", pcm[1].cpu(), SAMPLE_RATE)
 else:
     batch_size = 8
     max_gen_len_s = 10
