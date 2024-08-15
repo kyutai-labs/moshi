@@ -77,9 +77,9 @@ class ServerState:
                 if kind == 1:  # audio
                     payload = message[1:]
                     # TODO(laurent): ogg + opus decoding
-                    print(payload)
-
-                    chunk = torch.zeros((1, 1, 1920), dtype=torch.float, device=DEVICE)
+                    np_array = np.frombuffer(payload, dtype=np.float32)
+                    chunk = torch.tensor(np_array, device=self.ec.device)[None, None]
+                    print(chunk.shape)
                     codes, _scale = self.ec.encode(chunk)
                     for c in range(codes.shape[-1]):
                         tokens = lm_gen.step(codes[0, :, c].tolist())
@@ -93,8 +93,9 @@ class ServerState:
                                 (1, 8, 1)
                             )
                             main_pcm = self.ec.decode(tokens, scale=None)
+                            msg = b"\0x01" + main_pcm.cpu().numpy().tobytes()
                             # TODO(laurent): ogg + opus encoding
-                            websocket.send(b"audio message here")
+                            websocket.send(msg)
                 else:
                     print("unknown message kind {kind}")
 
