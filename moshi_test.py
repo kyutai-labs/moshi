@@ -76,30 +76,5 @@ def streaming_test():
         torchaudio.save("gen_other.wav", pcm[1].cpu(), SAMPLE_RATE)
 
 
-def generate_test():
-    lm.reset_streaming()
-    batch_size = 8
-    max_gen_len_s = 20
-    with torch.no_grad():
-        res = lm.generate(
-            prompt=None,
-            num_samples=batch_size,
-            callback=cb,
-            max_gen_len=int(12.5 * max_gen_len_s),
-            top_k=250,
-            temp=0.8,
-        )
-    outputs = []
-    for single_res in res:
-        print(single_res.shape)
-        outputs.append(ec.decode(single_res[1:].reshape(2, 8, -1)))
-    for idx, output in enumerate(outputs):
-        output = (output[0:1, 0, :] + output[1:2, 0, :]).cpu()
-        print(idx, output.shape)
-        torchaudio.save(f"output_{idx}.wav", output, SAMPLE_RATE)
-
-
 print("streaming test")
 streaming_test()
-print("generate test")
-generate_test()

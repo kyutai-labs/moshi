@@ -87,9 +87,10 @@ class LMModel(StreamingModule):
     """Transformer-based language model on multiple streams of codes.
 
     Args:
-        n_q (int): Number of parallel streams to model.
+        n_q (int): Number of parallel streams to model as input.
+        dep_q (int): Number of parallel streams to model in the depformer.
         card (int): Cardinality, vocabulary size.
-        text_card (int): Cardinality of the text vocabulary. Activates text support
+        text_card (int): Cardinality of the text vocabulary.
         dim (int): Dimension of the transformer encoder.
         num_heads (int): Number of heads for the transformer encoder.
         hidden_scale (int): Scale for hidden feed forward dimension of the transformer encoder.
@@ -113,8 +114,9 @@ class LMModel(StreamingModule):
         self,
         delays: tp.List[int] = [0],
         n_q: int = 8,
+        dep_q: int = 8,
         card: int = 1024,
-        text_card: tp.Optional[int] = None,
+        text_card: int = 32000,
         dim: int = 128,
         num_heads: int = 8,
         hidden_scale: int = 4,
@@ -136,13 +138,10 @@ class LMModel(StreamingModule):
     ):
         super().__init__()
         self.n_q = n_q
+        self.dep_q = dep_q
         self.card = card
         self.text_card = text_card
-        assert len(delays) > 0, "Delays must be non empty"
-        assert len(delays) <= self.num_codebooks, "Too many delays"
-        if len(delays) < self.num_codebooks:
-            delays = delays + [delays[-1]] * (self.num_codebooks - len(delays))
-            logger.info("Extended delay to %r", delays)
+        assert len(delays) == self.num_codebooks, "unexpected number of delays"
         self.delays = delays
         self.dim = dim
         self.existing_text_padding_id = existing_text_padding_id
@@ -160,12 +159,11 @@ class LMModel(StreamingModule):
         self.emb = nn.ModuleList(
             [EmbeddingFactory(self.card + 1, dim) for _ in range(n_q)]
         )
-        if text_card:
-            # Text card + padding token (if not in the original tokenizer)
-            extra_text = self.existing_text_padding_id is None
-            # Unlike for audio, here we authorize the model to output the special token.
-            self.text_emb = EmbeddingFactory(text_card + 1, dim)
-            self.text_linear = nn.Linear(dim, text_card + extra_text, bias=bias_proj)
+        # Text card + padding token (if not in the original tokenizer)
+        extra_text = self.existing_text_padding_id is None
+        # Unlike for audio, here we authorize the model to output the special token.
+        self.text_emb = EmbeddingFactory(text_card + 1, dim)
+        self.text_linear = nn.Linear(dim, text_card + extra_text, bias=bias_proj)
         depformer_prefix = "depformer_"
         main_kwargs = {
             k: v for k, v in kwargs.items() if not k.startswith(depformer_prefix)
@@ -192,22 +190,21 @@ class LMModel(StreamingModule):
         kwargs_dep["positional_embedding"] = depformer_pos_emb
         kwargs_dep["context"] = None
         if depformer_weights_per_step:
-            kwargs_dep["weights_per_step"] = n_q
+            kwargs_dep["weights_per_step"] = dep_q
         if depformer_multi_linear:
             # One linear layer per codebook to project different informations from the main model.
             self.depformer_in = nn.ModuleList(
-                [nn.Linear(dim, depformer_dim, bias=False) for _ in range(n_q)]
+                [nn.Linear(dim, depformer_dim, bias=False) for _ in range(dep_q)]
             )
         else:
             self.depformer_in = nn.ModuleList(
                 [nn.Linear(dim, depformer_dim, bias=False)]
             )
-        # Only using up to n_q - 1 because the last codebook is never an input to Depformer.
+        # Only using up to dep_q - 1 because the last codebook is never an input to Depformer.
         self.depformer_emb = nn.ModuleList(
-            [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(n_q - 1)]
+            [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
         )
-        if text_card is not None:
-            self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim)
+        self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim)
         if depformer_dim_feedforward is None:
             depformer_dim_feedforward = int(hidden_scale * depformer_dim)
         self.depformer = StreamingTransformer(
@@ -221,7 +218,7 @@ class LMModel(StreamingModule):
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
         self.linears = nn.ModuleList(
-            [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(n_q)]
+            [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
         )
 
     @property
@@ -232,13 +229,11 @@ class LMModel(StreamingModule):
     @property
     def text_initial_token_id(self) -> int:
         """Token id for the start of sequence (text)."""
-        assert self.text_card is not None
         return self.text_card
 
     @property
     def text_padding_token_id(self) -> int:
         """Token id for text padding."""
-        assert self.text_card is not None
         if self.existing_text_padding_id is None:
             return self.text_card
         else:
@@ -270,7 +265,7 @@ class LMModel(StreamingModule):
 
     @property
     def num_codebooks(self) -> int:
-        return self.n_q + int(self.has_text)
+        return self.n_q + 1
 
     @property
     def num_audio_codebooks(self) -> int:
@@ -278,11 +273,7 @@ class LMModel(StreamingModule):
 
     @property
     def audio_offset(self) -> int:
-        return int(self.has_text)
-
-    @property
-    def has_text(self) -> bool:
-        return self.text_card is not None
+        return 1
 
     def _get_initial_token(self) -> torch.Tensor:
         # Returns the initial token that will be fed to the model to predict the very first timestep.
@@ -385,201 +376,6 @@ class LMModel(StreamingModule):
             next_token = torch.argmax(logits, dim=-1, keepdim=True)
         return next_token
 
-    @torch.no_grad()
-    def generate(
-        self,
-        prompt: tp.Optional[torch.Tensor] = None,
-        num_samples: tp.Optional[int] = None,
-        max_gen_len: int = 256,
-        use_sampling: bool = True,
-        temp: float = 1.0,
-        top_k: int = 250,
-        top_p: float = 0.0,
-        check: bool = False,
-        callback: tp.Optional[tp.Callable[[int, int], None]] = None,
-    ) -> torch.Tensor:
-        """Generate tokens sampling from the model given a prompt or unconditionally. Generation can
-        be perform in a greedy fashion or using sampling with top K and top P strategies.
-
-        Args:
-            prompt (torch.Tensor, optional): Prompt tokens of shape [B, Kt + Ka, T]. When the model supports text,
-                `Kt` is 1. The text token is at index 0. `Ka` is the number of audio codebooks.
-            num_samples (int, optional): Number of samples to generate when no prompt and no conditions are given.
-            max_gen_len (int): Maximum generation length.
-            use_sampling (bool): Whether to use a sampling strategy or not.
-            temp (float): Sampling temperature.
-            top_k (int): K for "top-k" sampling.
-            top_p (float): P for "top-p" sampling.
-            check (bool): Whether to apply further checks on generated sequence.
-            callback (Callback, optional): Callback function to report generation progress.
-         Returns:
-            torch.Tensor: Generated tokens, with shape `[B, Kt + Ka, T]`. Note that even if only one modality
-                is generated, the output always contains `Kt + Ka` tokens.
-
-        """
-        assert not self.training, "generation shouldn't be used in training mode."
-        first_param = next(iter(self.parameters()))
-        device = first_param.device
-
-        # Checking all input shapes are consistent.
-        possible_num_samples = []
-        if num_samples is not None:
-            possible_num_samples.append(num_samples)
-        elif prompt is not None:
-            possible_num_samples.append(prompt.shape[0])
-        else:
-            possible_num_samples.append(1)
-        assert [
-            x == possible_num_samples[0] for x in possible_num_samples
-        ], "Inconsistent inputs shapes"
-        num_samples = possible_num_samples[0]
-        assert isinstance(num_samples, int)
-
-        initial = self._get_initial_token().expand(num_samples, -1, -1)
-        max_delay = max(
-            self.delays
-        )  # with delays, we need to generate a few more time steps.
-        ungenerated = (
-            self.ungenerated_token_id
-        )  # special value to indicate tokens to generate
-        gen_sequence = torch.full(
-            (num_samples, self.num_codebooks, max_gen_len + max_delay + 1),
-            ungenerated,
-            device=device,
-            dtype=torch.long,
-        )
-        # special token for the beginning of the sequence.
-        gen_sequence[:, :, :1] = initial
-        start_offset = 0
-
-        if prompt is not None:
-            assert start_offset < max_gen_len
-            PT = prompt.shape[-1]
-            for cb in range(self.num_codebooks):
-                delay = self.delays[cb]
-                gen_sequence[:, cb, : delay + 1] = initial[:, cb]
-                gen_sequence[:, cb, delay + 1 : delay + 1 + PT] = prompt[:, cb, :]
-            # We look for the first time step that is ungenerated, as we allow for partial teacher
-            # forcing, for instance by providing the text and generating the audio or the opposite.
-            ungenerated_steps = (gen_sequence == ungenerated).nonzero()[:, 2]
-            if not ungenerated_steps.numel():
-                raise RuntimeError("Nothing to generate.")
-            # start offset will be one step before the first value to generate.
-            # The `-1` offset is because time step T is generated as the output of
-            # timestep T - 1.
-            start_offset = int(ungenerated_steps.amin()) - 1
-            assert start_offset >= 0
-            logger.debug("Start offset is %d", start_offset)
-
-        set_attention_context(self.transformer, self.context)
-        with self.streaming(), self.autocast:
-            for offset in range(start_offset, max_gen_len + max_delay):
-                # `offset` measures position in the output tensor with no delays.
-                # In particular, there is a shift of 1 with the `gen_sequence` that includes
-                # the initial empty token.
-                logger.debug("Offset %d / %d", offset, max_gen_len + max_delay)
-                # get current sequence (note that the streaming API is providing the caching over previous offsets)
-
-                if offset == start_offset:
-                    input_ = gen_sequence[:, :, : offset + 1]
-                else:
-                    input_ = gen_sequence[:, :, offset : offset + 1]
-
-                if check:
-                    # Check that we are not feeding in any value that is not generated yet.
-                    assert not (input_ == ungenerated).any(), (offset, input_)
-                    assert (input_[:, self.audio_offset :] <= self.card).all(), input_
-                    if self.has_text:
-                        assert (input_[:, :1] <= self.text_card).all()
-
-                transformer_out, text_logits = self.forward_text(input_)
-                next_token = self._sample_next_token(
-                    text_logits,
-                    use_sampling,
-                    temp,
-                    top_k,
-                    top_p,
-                )
-                assert next_token.shape[-1] == 1
-                next_token = next_token[:, :, 0]  # shape is [B, K]
-                this_gen_step = gen_sequence[:, :, offset + 1]
-
-                # Depformer gives us tokens one by one instead of K at once.
-                assert next_token.shape[1] == 1, next_token.shape[1]
-                next_token = next_token[:, 0]  # Now shape is B.
-                depformer_tokens: tp.List[torch.Tensor] = []
-                for cb_index in range(self.num_codebooks):
-                    if cb_index == 0:
-                        # No need to generate, `next_token` is actually the next text token.
-                        # We just need to only keep the new token if the value wasn't provided
-                        # in the prompt.
-                        next_token = torch.where(
-                            this_gen_step[:, 0] == ungenerated,
-                            next_token,
-                            this_gen_step[:, 0],
-                        )
-                    else:
-                        input_ = next_token[:, None, None]
-                        if check:
-                            # Check that we are not feeding in any value that is not generated yet.
-                            assert not (input_ == ungenerated).any()
-                            if self.has_text and cb_index == 1:
-                                assert (input_ <= self.text_card).all()
-                            else:
-                                assert (input_ <= self.card).all()
-                        logits = self.forward_depformer(
-                            cb_index - 1, input_, transformer_out
-                        )
-                        next_token = self._sample_next_token(
-                            logits,
-                            use_sampling,
-                            temp,
-                            top_k,
-                            top_p,
-                        )
-                        assert next_token.shape[-1] == 1
-                        next_token = next_token[:, 0, 0]  # shape is [B, K]
-                        next_token = torch.where(
-                            this_gen_step[:, cb_index] == ungenerated,
-                            next_token,
-                            this_gen_step[:, cb_index],
-                        )
-
-                    original_offset = offset - self.delays[cb_index]
-                    if original_offset < 0:
-                        # We are not currently generating this codebook, we replace with a special token.
-                        next_token[:] = initial[:, cb_index, 0]
-                    depformer_tokens.append(next_token)
-
-                assert len(depformer_tokens) == self.num_codebooks, (
-                    len(depformer_tokens),
-                    self.num_codebooks,
-                )
-                next_token = torch.stack(depformer_tokens, dim=1)
-                assert next_token.shape == (
-                    num_samples,
-                    self.num_codebooks,
-                ), next_token.shape
-
-                # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
-                gen_sequence[..., offset + 1] = next_token
-                if callback is not None:
-                    callback(
-                        1 + offset - start_offset,
-                        max_gen_len + max_delay - start_offset,
-                    )
-
-        output, mask = _undelay_sequence(
-            self.delays, gen_sequence[:, :, 1:], fill_value=ungenerated
-        )
-        assert mask[:, :, :max_gen_len].all()
-        output = output[:, :, :max_gen_len]
-        tgt_shape = (num_samples, self.num_codebooks, max_gen_len)
-        assert output.shape == tgt_shape, (output.shape, tgt_shape)
-        # ensure sequence has been entirely filled
-        assert not (output == ungenerated).any()
-        return output
-
 
 class LMGen(StreamingModule):
     def __init__(
@@ -655,8 +451,7 @@ class LMGen(StreamingModule):
             # Check that we are not feeding in any value that is not generated yet.
             assert not (input_ == self.ungenerated).any(), (self.offset, input_)
             assert (input_[:, lm_model.audio_offset :] <= lm_model.card).all(), input_
-            if lm_model.has_text:
-                assert (input_[:, :1] <= lm_model.text_card).all()
+            assert (input_[:, :1] <= lm_model.text_card).all()
 
         transformer_out, text_logits = lm_model.forward_text(input_)
         next_token = lm_model._sample_next_token(
@@ -675,7 +470,7 @@ class LMGen(StreamingModule):
         assert next_token.shape[1] == 1, next_token.shape[1]
         next_token = next_token[:, 0]  # Now shape is B.
         depformer_tokens: tp.List[torch.Tensor] = []
-        for cb_index in range(lm_model.num_codebooks):
+        for cb_index in range(lm_model.dep_q + 1):
             if cb_index == 0:
                 # No need to generate, `next_token` is actually the next text token.
                 # We just need to only keep the new token if the value wasn't provided
@@ -690,7 +485,7 @@ class LMGen(StreamingModule):
                 if self.check:
                     # Check that we are not feeding in any value that is not generated yet.
                     assert not (input_ == self.ungenerated).any()
-                    if lm_model.has_text and cb_index == 1:
+                    if cb_index == 1:
                         assert (input_ <= lm_model.text_card).all()
                     else:
                         assert (input_ <= lm_model.card).all()
@@ -718,14 +513,14 @@ class LMGen(StreamingModule):
                 next_token[:] = self.initial[:, cb_index, 0]
             depformer_tokens.append(next_token)
 
-        assert len(depformer_tokens) == lm_model.num_codebooks, (
+        assert len(depformer_tokens) == lm_model.dep_q + 1, (
             len(depformer_tokens),
-            lm_model.num_codebooks,
+            lm_model.dep_q,
         )
         next_token = torch.stack(depformer_tokens, dim=1)
         assert next_token.shape == (
             self.num_samples,
-            lm_model.num_codebooks,
+            lm_model.dep_q + 1,
         ), next_token.shape
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens

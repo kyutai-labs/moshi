@@ -58,6 +58,7 @@ lm_kwargs = {
     "text_card": 32000,
     "existing_text_padding_id": 3,
     "n_q": 16,
+    "dep_q": 16,
     "card": quantizer_kwargs["bins"],
     "num_heads": 32,
     "num_layers": 32,
