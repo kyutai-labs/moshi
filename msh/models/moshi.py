@@ -1,27 +1,11 @@
 import msh
 import torch
 import safetensors
-import numpy as np
-import random
 from pathlib import Path
 import typing as tp
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
-
-
-def seed_all(seed):
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)  # for multi-GPU setups
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-seed_all(42424242)
 
 
 seanet_kwargs = {
@@ -85,7 +69,6 @@ lm_kwargs = {
     "gating": "silu",
     "norm": "real_rms_norm_f32",
     "positional_embedding": "rope",
-    "depformer": bool,
     "depformer_dim": 1024,
     "depformer_dim_feedforward": int(4.125 * 1024),
     "depformer_num_heads": 16,
@@ -98,6 +81,7 @@ lm_kwargs = {
     "depformer_gating": "silu",
     "depformer_pos_emb": "none",
     "depformer_weights_per_step": True,
+    "delays": [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1],
 }
 
 
@@ -147,7 +131,6 @@ def get_encodec(filename: tp.Union[str, Path], device):
 
 def get_lm(filename: tp.Union[str, Path], device):
     model = msh.models.LMModel(
-        delays=[0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1],
         **lm_kwargs,
     ).to(device=device)
     model.eval()
@@ -161,6 +144,6 @@ def get_lm(filename: tp.Union[str, Path], device):
         )
         model.load_state_dict(pkg["fsdp_best_state"]["model"])
     model.autocast = msh.utils.autocast.TorchAutocast(
-        enabled=True, dtype=torch.bfloat16, device_type="cuda"
+        enabled=True, dtype=torch.bfloat16, device_type=model.device.type
     )
     return model

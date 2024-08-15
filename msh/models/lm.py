@@ -9,13 +9,12 @@ from functools import partial
 import logging
 import typing as tp
 
-from einops import rearrange
 import torch
 from torch import nn
 
 from ..utils import utils
 from ..utils.autocast import TorchAutocast
-from ..modules.streaming import StreamingModule, State
+from ..modules.streaming import StreamingModule
 from ..modules.transformer import (
     StreamingTransformer,
     create_norm_fn,
@@ -97,7 +96,6 @@ class LMModel(StreamingModule):
         norm (str): Normalization method.
         norm_emb (bool): Whether to normalize embeddings.
         bias_proj (bool): Use bias for output projections.
-        depformer (bool): whether to use a smaller Transformer along the codebooks for predicting them.
         depformer_*: params used for the Depformer Transformer, all the other will be shared.
         depformer_multi_linear (bool): if True, uses one linear layer per codebook to project the
             output of the main transformer to the Depformer latent space.
@@ -123,7 +121,6 @@ class LMModel(StreamingModule):
         norm: str = "layer_norm",
         norm_emb: bool = False,
         bias_proj: bool = False,
-        depformer: bool = False,
         depformer_dim: int = 256,
         depformer_dim_feedforward: int | list[int] | None = None,
         depformer_multi_linear: bool = False,
@@ -183,47 +180,45 @@ class LMModel(StreamingModule):
             **main_kwargs,
         )
         self.out_norm = create_norm_fn(norm, dim)
-        self.depformer: tp.Optional[nn.Module] = None
         self.depformer_multi_linear = depformer_multi_linear
-        if depformer:
-            kwargs_dep = main_kwargs.copy()
-            kwargs_dep.update(
-                {
-                    k.removeprefix(depformer_prefix): v
-                    for k, v in kwargs.items()
-                    if k.startswith(depformer_prefix)
-                }
+        kwargs_dep = main_kwargs.copy()
+        kwargs_dep.update(
+            {
+                k.removeprefix(depformer_prefix): v
+                for k, v in kwargs.items()
+                if k.startswith(depformer_prefix)
+            }
+        )
+        kwargs_dep["positional_embedding"] = depformer_pos_emb
+        kwargs_dep["context"] = None
+        if depformer_weights_per_step:
+            kwargs_dep["weights_per_step"] = n_q
+        if depformer_multi_linear:
+            # One linear layer per codebook to project different informations from the main model.
+            self.depformer_in = nn.ModuleList(
+                [nn.Linear(dim, depformer_dim, bias=False) for _ in range(n_q)]
             )
-            kwargs_dep["positional_embedding"] = depformer_pos_emb
-            kwargs_dep["context"] = None
-            if depformer_weights_per_step:
-                kwargs_dep["weights_per_step"] = n_q
-            if depformer_multi_linear:
-                # One linear layer per codebook to project different informations from the main model.
-                self.depformer_in = nn.ModuleList(
-                    [nn.Linear(dim, depformer_dim, bias=False) for _ in range(n_q)]
-                )
-            else:
-                self.depformer_in = nn.ModuleList(
-                    [nn.Linear(dim, depformer_dim, bias=False)]
-                )
-            # Only using up to n_q - 1 because the last codebook is never an input to Depformer.
-            self.depformer_emb = nn.ModuleList(
-                [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(n_q - 1)]
+        else:
+            self.depformer_in = nn.ModuleList(
+                [nn.Linear(dim, depformer_dim, bias=False)]
             )
-            if text_card is not None:
-                self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim)
-            if depformer_dim_feedforward is None:
-                depformer_dim_feedforward = int(hidden_scale * depformer_dim)
-            self.depformer = StreamingTransformer(
-                d_model=depformer_dim,
-                dim_feedforward=depformer_dim_feedforward,
-                norm=norm,
-                device=device,
-                dtype=dtype,
-                **kwargs_dep,
-            )
-            dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
+        # Only using up to n_q - 1 because the last codebook is never an input to Depformer.
+        self.depformer_emb = nn.ModuleList(
+            [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(n_q - 1)]
+        )
+        if text_card is not None:
+            self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim)
+        if depformer_dim_feedforward is None:
+            depformer_dim_feedforward = int(hidden_scale * depformer_dim)
+        self.depformer = StreamingTransformer(
+            d_model=depformer_dim,
+            dim_feedforward=depformer_dim_feedforward,
+            norm=norm,
+            device=device,
+            dtype=dtype,
+            **kwargs_dep,
+        )
+        dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
         self.linears = nn.ModuleList(
             [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(n_q)]
@@ -508,7 +503,6 @@ class LMModel(StreamingModule):
                 assert next_token.shape[-1] == 1
                 next_token = next_token[:, :, 0]  # shape is [B, K]
                 this_gen_step = gen_sequence[:, :, offset + 1]
-                assert self.depformer is not None
 
                 # Depformer gives us tokens one by one instead of K at once.
                 assert next_token.shape[1] == 1, next_token.shape[1]
