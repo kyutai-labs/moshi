@@ -55,9 +55,25 @@ async def main():
             msg = b'\x01' + in_data.tobytes()
             audio_queue.put_nowait(msg)
 
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE, channels=CHANNELS, blocksize=1920, callback=on_input
-        ):
+        in_stream = sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=CHANNELS,
+            blocksize=1920,
+            callback=on_input
+        )
+
+        def on_output(out_data, frames, time, status):
+            print(frames, type(out_data))
+            out_data.fill(0)
+
+        out_stream = sd.OutputStream(
+                samplerate=SAMPLE_RATE,
+                channels=CHANNELS,
+                blocksize=1920,
+                callback=on_output
+        )
+
+        with in_stream, out_stream:
             await queue_loop()
             #await asyncio.gather(recv_loop(), queue_loop())
 
