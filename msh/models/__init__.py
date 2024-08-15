@@ -14,3 +14,4 @@ from .encodec import (
     MultistreamCompressionModel,
 )
 from .lm import LMModel, LMGen
+from .moshi import get_encodec, get_lm

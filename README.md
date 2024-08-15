@@ -72,10 +72,20 @@ Messages with an unknow message types should be discarded.
  
 ## Python
 
-As of 2024-08-12, there is some preliminary support for streaming in the python
-version.
+The python api can be found in the `msh` directory. It provides streaming
+version of the audio tokenizer (mimi) and the lm model (moshi).
+
+In order to test the audio tokenizer, you can run the following command.
 
 ```bash
 wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
-python basic.py
+python mimi_test.py --weights .../tokenizer-de0e421d-checkpoint40.safetensors
+```
+
+In order to test moshi, run the following.
+```bash
+python moshi_test.py \
+    --mimi-weights tokenizer-de0e421d-checkpoint40.safetensors \
+    --tokenizer tokenizer_spm_32k_3.model \
+    --moshi-weights mimi_0abbed5f@100.safetensors 
 ```
