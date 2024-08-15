@@ -190,7 +190,9 @@ class LMModel(StreamingModule):
         kwargs_dep["positional_embedding"] = depformer_pos_emb
         kwargs_dep["context"] = None
         if depformer_weights_per_step:
-            kwargs_dep["weights_per_step"] = dep_q
+            kwargs_dep["weights_per_step"] = (
+                n_q  # TODO(laurent): use dep_q and remove the extra weights.
+            )
         if depformer_multi_linear:
             # One linear layer per codebook to project different informations from the main model.
             self.depformer_in = nn.ModuleList(
@@ -420,7 +422,9 @@ class LMGen(StreamingModule):
             device=device,
             dtype=torch.long,
         )
-        self.gen_sequence[:, :, :1] = self.initial
+        for cb_idx, delay in enumerate(lm_model.delays):
+            for i in range(1 + delay):
+                self.gen_sequence[:, cb_idx, i] = self.initial[:, cb_idx, 0]
         self.zero = torch.full(
             [1], lm_model.zero_token_id, device=device, dtype=torch.long
         )
@@ -439,11 +443,12 @@ class LMGen(StreamingModule):
         # the initial empty token.
         logger.debug("Offset %d / %d", self.offset, self.max_gen_len + self.max_delay)
 
-        for k, delay in enumerate(lm_model.delays):
-            if self.offset < delay or input_tokens[k] == self.ungenerated:
-                continue
-            if self.gen_sequence[:, k, self.offset - delay] == self.ungenerated:
-                self.gen_sequence[:, k, self.offset - delay] = input_tokens[k]
+        for k, tok in enumerate(input_tokens):
+            kk = lm_model.dep_q + 1 + k
+            delay = lm_model.delays[kk]
+            idx = self.offset + delay
+            if self.gen_sequence[:, kk, idx] == self.ungenerated:
+                self.gen_sequence[:, kk, idx] = tok
 
         input_ = self.gen_sequence[:, :, self.offset : self.offset + 1]
 
@@ -524,12 +529,12 @@ class LMGen(StreamingModule):
         ), next_token.shape
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
-        # TODO(laurent): find out how this is supposed to work.
         self.offset += 1
-        self.gen_sequence[..., self.offset] = next_token
+        self.gen_sequence[..., : lm_model.dep_q + 1, self.offset] = next_token
 
         out = []
-        for k, delay in enumerate(lm_model.delays):
+        for k in range(1 + lm_model.dep_q):
+            delay = lm_model.delays[k]
             if self.offset < delay:
                 return None
             _out = self.gen_sequence[0, k, self.offset - delay].item()
