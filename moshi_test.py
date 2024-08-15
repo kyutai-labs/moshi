@@ -48,33 +48,33 @@ def cb(step, total):
 def streaming_test():
     lm.reset_streaming()
     max_gen_len = 256
-    with torch.no_grad():
-        lm_gen = msh.models.LMGen(lm, check=True, max_gen_len=max_gen_len)
-        tokens = [lm_gen.ungenerated] * 17
-        main_audio = []
-        other_audio = []
-        for _step in range(max_gen_len):
-            tokens = lm_gen.step(tokens)
-            main_audio.append(tokens[1:9])
-            other_audio.append(tokens[9:])
+    lm_gen = msh.models.LMGen(lm, check=True, max_gen_len=max_gen_len)
+
+    main_audio = []
+    for step in range(200):
+        # Chunk should contain the pcm data from the user, single channel with a sample rate of 24000.
+        chunk = torch.zeros((1, 1, 1920), dtype=torch.float, device=DEVICE)
+        codes, _scale = ec.encode(chunk)
+        for c in range(codes.shape[-1]):
+            tokens = lm_gen.step(codes[0, :, c].tolist())
             text_token = tokens[0]
             if text_token not in (0, 3):
                 _text = text_tokenizer.id_to_piece(text_token)
                 _text = _text.replace("▁", " ")
                 print(_text, end="", flush=True)
-        print()
-        main_audio = torch.tensor(main_audio).to(device=DEVICE)
-        other_audio = torch.tensor(other_audio).to(device=DEVICE)
-        print(main_audio.shape, other_audio.shape)
-        all_codes = torch.stack([main_audio, other_audio], dim=0).transpose(1, 2)
-        print(all_codes.shape)
-        print(all_codes)
-        # Discard the two first slices.
-        pcm = ec.decode(all_codes[:, :, 2:])
-        print("pcm", pcm.shape)
-        torchaudio.save("gen_main.wav", pcm[0].cpu(), SAMPLE_RATE)
-        torchaudio.save("gen_other.wav", pcm[1].cpu(), SAMPLE_RATE)
+            if all([t < 2048 for t in tokens[1:]]):
+                tokens = torch.tensor(tokens[1:], device=DEVICE).reshape((1, 8, 1))
+                main_pcm = ec.decode(tokens, scale=None)
+                # main_pcm is the audio to be played back to the user, here we just append it and store it in
+                # a file once the loop is finished.
+                main_audio.append(main_pcm[0])
+    print()
+    main_audio = torch.cat(main_audio, dim=-1)
+    print(main_audio.shape)
+    torchaudio.save("gen_main.wav", main_audio.cpu(), SAMPLE_RATE)
 
 
 print("streaming test")
-streaming_test()
+with torch.no_grad():
+    with ec.streaming():
+        streaming_test()

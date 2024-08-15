@@ -58,7 +58,7 @@ lm_kwargs = {
     "text_card": 32000,
     "existing_text_padding_id": 3,
     "n_q": 16,
-    "dep_q": 16,
+    "dep_q": 8,
     "card": quantizer_kwargs["bins"],
     "num_heads": 32,
     "num_layers": 32,
@@ -137,7 +137,8 @@ def get_lm(filename: tp.Union[str, Path], device):
     model.eval()
     model.to(torch.bfloat16)
     if _is_safetensors(filename):
-        safetensors.torch.load_model(model, filename)
+        # TODO(laurent): remove `strict=False` once the new weights have been uploaded.
+        safetensors.torch.load_model(model, filename, strict=False)
     else:
         pkg = torch.load(
             filename,
