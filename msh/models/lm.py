@@ -422,7 +422,9 @@ class LMGen(StreamingModule):
             device=device,
             dtype=torch.long,
         )
-        self.gen_sequence[:, :, :1] = self.initial
+        for cb_idx, delay in enumerate(lm_model.delays):
+            for i in range(1 + delay):
+                self.gen_sequence[:, cb_idx, i] = self.initial[:, cb_idx, 0]
         self.zero = torch.full(
             [1], lm_model.zero_token_id, device=device, dtype=torch.long
         )
@@ -444,9 +446,7 @@ class LMGen(StreamingModule):
         for k, tok in enumerate(input_tokens):
             kk = lm_model.dep_q + 1 + k
             delay = lm_model.delays[kk]
-            idx = self.offset + self.max_delay - delay
-            if idx < 0:
-                continue
+            idx = self.offset + delay
             if self.gen_sequence[:, kk, idx] == self.ungenerated:
                 self.gen_sequence[:, kk, idx] = tok
 
@@ -529,7 +529,6 @@ class LMGen(StreamingModule):
         ), next_token.shape
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
-        # TODO(laurent): find out how this is supposed to work.
         self.offset += 1
         self.gen_sequence[..., : lm_model.dep_q + 1, self.offset] = next_token
 
