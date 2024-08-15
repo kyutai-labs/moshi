@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import queue
 import sounddevice as sd
 import websockets
 
@@ -15,15 +16,23 @@ CHANNELS = 1
 async def main():
     uri = f"ws://{args.host}:{args.port}"
     print(f"connecting to {uri}")
+
+    audio_queue = queue.Queue()
+
     async with websockets.connect(uri) as websocket:
+        async def queue_loop():
+            print("start queue loop")
+            while True:
+                await asyncio.sleep(0.001)
+                try:
+                    msg = audio_queue.get(block=False)
+                except queue.Empty:
+                    continue
+                await websocket.send(msg)
+                audio_queue.task_done()
 
-        async def on_input(in_data, frames, time, status):
-            print(type(in_data), type(frames), time, status)
-            await websocket.send(b"\1hello, server!")
-
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE, channels=CHANNELS, callback=on_input
-        ):
+        async def recv_loop():
+            print("start recv loop")
             while True:
                 message = await websocket.recv()
                 if not isinstance(message, bytes):
@@ -39,6 +48,18 @@ async def main():
                     print(payload)
                 else:
                     print("unknown message kind {kind}")
+
+
+        def on_input(in_data, frames, time, status):
+            # TODO(laurent): opus encoding
+            msg = b'\x01' + in_data.tobytes()
+            audio_queue.put_nowait(msg)
+
+        with sd.InputStream(
+            samplerate=SAMPLE_RATE, channels=CHANNELS, blocksize=1920, callback=on_input
+        ):
+            await queue_loop()
+            #await asyncio.gather(recv_loop(), queue_loop())
 
 
 asyncio.run(main())
