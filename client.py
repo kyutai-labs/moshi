@@ -18,7 +18,8 @@ async def main():
     uri = f"ws://{args.host}:{args.port}"
     print(f"connecting to {uri}")
 
-    audio_queue = queue.Queue()
+    input_queue = queue.Queue()
+    output_queue = queue.Queue()
 
     async with websockets.connect(uri) as websocket:
 
@@ -27,11 +28,11 @@ async def main():
             while True:
                 await asyncio.sleep(0.001)
                 try:
-                    msg = audio_queue.get(block=False)
+                    msg = input_queue.get(block=False)
                 except queue.Empty:
                     continue
                 await websocket.send(msg)
-                audio_queue.task_done()
+                input_queue.task_done()
 
         async def recv_loop():
             print("start recv loop")
@@ -49,8 +50,8 @@ async def main():
                     payload = message[1:]
                     # TODO(laurent): ogg + opus decoding + play
                     payload = np.frombuffer(payload, dtype=np.float32)
+                    output_queue.put_nowait(payload)
                     cnt += 1
-                    print(cnt, payload.shape)
                 elif kind == 2:  # text
                     payload = message[1:]
                     print("text", payload)
@@ -60,7 +61,7 @@ async def main():
         def on_input(in_data, frames, time, status):
             # TODO(laurent): opus encoding
             msg = b"\x01" + in_data.tobytes()
-            audio_queue.put_nowait(msg)
+            input_queue.put_nowait(msg)
 
         in_stream = sd.InputStream(
             samplerate=SAMPLE_RATE, channels=CHANNELS, blocksize=1920, callback=on_input
@@ -68,7 +69,14 @@ async def main():
 
         def on_output(out_data, frames, time, status):
             # print(frames, type(out_data))
-            out_data.fill(0)
+            assert out_data.shape == (1920, 1), out_data.shape
+            try:
+                pcm_data = output_queue.get(block=False)
+                # TODO: handle other shapes by using some form of fifo/ring buffer.
+                assert pcm_data.shape == (1920,), pcm_data.shape
+                out_data[:, 0] = pcm_data
+            except queue.Empty:
+                out_data.fill(0)
 
         out_stream = sd.OutputStream(
             samplerate=SAMPLE_RATE,
