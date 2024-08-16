@@ -58,9 +58,30 @@ class ServerState:
         self.lm = msh.models.moshi.get_lm(args.moshi_weights, DEVICE)
         print("lm loaded")
 
+    def warmup(self):
+        self.lm.reset_streaming()
+        self.ec.reset_streaming()
+        lm_gen = msh.models.LMGen(self.lm, check=True, max_gen_len=64)
+        with self.ec.streaming():
+            while True:
+                chunk = torch.zeros(1, 1, 1920, dtype=torch.float32, device=DEVICE)
+                codes, _scale = self.ec.encode(chunk)
+                main_pcm = None
+                for c in range(codes.shape[-1]):
+                    tokens = lm_gen.step(codes[0, :, c].tolist())
+                    if all([t < 2048 for t in tokens[1:]]):
+                        tokens = torch.tensor(tokens[1:], device=DEVICE).reshape(
+                            (1, 8, 1)
+                        )
+                        main_pcm = self.ec.decode(tokens, scale=None)
+                        print(main_pcm.shape)
+                if main_pcm is not None:
+                    break
+
     async def handle_conn(self, websocket, path):
         print(websocket, path)
         self.lm.reset_streaming()
+        self.ec.reset_streaming()
         max_gen_len = 256
         lm_gen = msh.models.LMGen(self.lm, check=True, max_gen_len=max_gen_len)
 
@@ -106,6 +127,8 @@ class ServerState:
 
 async def main():
     state = ServerState()
+    print("warming up the model")
+    state.warmup()
     print(f"listening to ws://{args.host}:{args.port}")
     async with serve(state.handle_conn, args.host, args.port):
         await asyncio.Future()  # run forever
