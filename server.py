@@ -69,7 +69,7 @@ class ServerState:
                 main_pcm = None
                 for c in range(codes.shape[-1]):
                     tokens = lm_gen.step(codes[0, :, c].tolist())
-                    if all([t < 2048 for t in tokens[1:]]):
+                    if all([t < self.ec.cardinality for t in tokens[1:]]):
                         tokens = torch.tensor(tokens[1:], device=DEVICE).reshape(
                             (1, 8, 1)
                         )
@@ -113,7 +113,7 @@ class ServerState:
                             msg = b"\x02" + bytes(_text, encoding="utf8")
                             print("text token", msg)
                             await websocket.send(msg)
-                        if all([t < 2048 for t in tokens[1:]]):
+                        if all([t < self.ec.cardinality for t in tokens[1:]]):
                             tokens = torch.tensor(tokens[1:], device=DEVICE).reshape(
                                 (1, 8, 1)
                             )

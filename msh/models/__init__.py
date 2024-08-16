@@ -11,7 +11,6 @@ Models for EnCodec, AudioGen, MusicGen, as well as the generic LMModel.
 from .encodec import (
     CompressionModel,
     EncodecModel,
-    MultistreamCompressionModel,
 )
 from .lm import LMModel, LMGen
 from .moshi import get_encodec, get_lm
