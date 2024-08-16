@@ -91,7 +91,7 @@ class ServerState:
                             _text = _text.replace("▁", " ")
                             msg = b"\0x02" + bytes(_text, encoding="utf8")
                             print("text token", msg)
-                            websocket.send(msg)
+                            await websocket.send(msg)
                         if all([t < 2048 for t in tokens[1:]]):
                             tokens = torch.tensor(tokens[1:], device=DEVICE).reshape(
                                 (1, 8, 1)
@@ -99,7 +99,7 @@ class ServerState:
                             main_pcm = self.ec.decode(tokens, scale=None)
                             msg = b"\0x01" + main_pcm.cpu().numpy().tobytes()
                             # TODO(laurent): ogg + opus encoding
-                            websocket.send(msg)
+                            await websocket.send(msg)
                 else:
                     print("unknown message kind {kind}")
 

@@ -51,8 +51,11 @@ async def main():
                     payload = np.frombuffer(payload, dtype=np.float32)
                     cnt += 1
                     print(cnt, payload.shape)
+                elif kind == 2:  # text
+                    payload = message[1:]
+                    print("text", payload)
                 else:
-                    print("unknown message kind {kind}")
+                    print(f"unknown message kind {kind}")
 
         def on_input(in_data, frames, time, status):
             # TODO(laurent): opus encoding
