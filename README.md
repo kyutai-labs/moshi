@@ -1,8 +1,8 @@
 # moshi-inference
 
-There are two versions of the moshi inference stack in this repo. The rust
-version used for deployment is in the `rust` directory, the python version
-is in the `msh` directory.
+There are two separate versions of the moshi inference stack in this repo.
+- The rust version used in production is in the `rust` directory.
+- The python version is in the `msh` directory.
 
 ## Rust
 
@@ -75,6 +75,35 @@ Messages with an unknow message types should be discarded.
 The python api can be found in the `msh` directory. It provides streaming
 version of the audio tokenizer (mimi) and the lm model (moshi).
 
+In order to run in interactive mode, you need to start a server which will
+run the model, and a client that captures the sound from the microphone
+and passes it to the server, get some data back from the server and plays it
+on the speakers.
+
+The client and server do not have to run on the same machine. Note that for
+now the protocol is slightly different from the one used on the rust side as
+there is no ogg/opus encoding.
+
+Start the server with:
+```bash
+python server.py \
+    --mimi-weights tokenizer-de0e421d-checkpoint40.safetensors \
+    --tokenizer tokenizer_spm_32k_3.model \
+    --moshi-weights mimi_0abbed5f@100.safetensors 
+```
+
+And then starts the client with:
+```bash
+python client.py
+```
+
+When running on different machine, you can add the command line argument
+`--host 0.0.0.0` to the server so that it accepts remote connections and
+the argument `--host 192.168.0.42` to the client where `192.168.0.42` is
+the ip of the server. The default port is `9998` and can be overriden with
+`--port`.
+
+### Testing
 In order to test the audio tokenizer, you can run the following command.
 
 ```bash
