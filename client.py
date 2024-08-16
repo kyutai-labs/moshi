@@ -39,7 +39,7 @@ async def main():
             while True:
                 message = await websocket.recv()
                 if not isinstance(message, bytes):
-                    print("unsupported message type {type(message)}")
+                    print(f"unsupported message type {type(message)}")
                     continue
                 if len(message) == 0:
                     print("empty message")

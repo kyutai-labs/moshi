@@ -89,7 +89,7 @@ class ServerState:
                         if text_token not in (0, 3):
                             _text = self.text_tokenizer.id_to_piece(text_token)
                             _text = _text.replace("▁", " ")
-                            msg = b"\0x02" + bytes(_text, encoding="utf8")
+                            msg = b"\x02" + bytes(_text, encoding="utf8")
                             print("text token", msg)
                             await websocket.send(msg)
                         if all([t < 2048 for t in tokens[1:]]):
@@ -97,7 +97,7 @@ class ServerState:
                                 (1, 8, 1)
                             )
                             main_pcm = self.ec.decode(tokens, scale=None)
-                            msg = b"\0x01" + main_pcm.cpu().numpy().tobytes()
+                            msg = b"\x01" + main_pcm.cpu().numpy().tobytes()
                             # TODO(laurent): ogg + opus encoding
                             await websocket.send(msg)
                 else:
