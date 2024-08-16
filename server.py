@@ -5,7 +5,6 @@ from websockets.server import serve
 import msh
 import sentencepiece
 import torch
-import torchaudio
 import numpy as np
 import random
 
@@ -74,20 +73,25 @@ class ServerState:
                     print("empty message")
                     continue
                 kind = message[0]
+                print("received message", kind)
                 if kind == 1:  # audio
                     payload = message[1:]
                     # TODO(laurent): ogg + opus decoding
                     np_array = np.frombuffer(payload, dtype=np.float32)
-                    chunk = torch.tensor(np_array, device=self.ec.device)[None, None]
-                    print(chunk.shape)
+                    chunk = torch.tensor(np_array, device=DEVICE)[None, None]
+                    print("pcm to process", chunk.shape)
                     codes, _scale = self.ec.encode(chunk)
+                    print("codes to process", codes.shape)
                     for c in range(codes.shape[-1]):
                         tokens = lm_gen.step(codes[0, :, c].tolist())
                         text_token = tokens[0]
+                        print("generated", tokens)
                         if text_token not in (0, 3):
                             _text = self.text_tokenizer.id_to_piece(text_token)
                             _text = _text.replace("▁", " ")
-                            print(_text, end="", flush=True)
+                            msg = b"\0x02" + bytes(_text, encoding="utf8")
+                            print("text token", msg)
+                            websocket.send(msg)
                         if all([t < 2048 for t in tokens[1:]]):
                             tokens = torch.tensor(tokens[1:], device=DEVICE).reshape(
                                 (1, 8, 1)

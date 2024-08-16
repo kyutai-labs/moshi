@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import numpy as np
 import queue
 import sounddevice as sd
 import websockets
@@ -20,6 +21,7 @@ async def main():
     audio_queue = queue.Queue()
 
     async with websockets.connect(uri) as websocket:
+
         async def queue_loop():
             print("start queue loop")
             while True:
@@ -33,6 +35,7 @@ async def main():
 
         async def recv_loop():
             print("start recv loop")
+            cnt = 0
             while True:
                 message = await websocket.recv()
                 if not isinstance(message, bytes):
@@ -45,37 +48,34 @@ async def main():
                 if kind == 1:  # audio
                     payload = message[1:]
                     # TODO(laurent): ogg + opus decoding + play
-                    print(payload)
+                    payload = np.frombuffer(payload, dtype=np.float32)
+                    cnt += 1
+                    print(cnt, payload.shape)
                 else:
                     print("unknown message kind {kind}")
 
-
         def on_input(in_data, frames, time, status):
             # TODO(laurent): opus encoding
-            msg = b'\x01' + in_data.tobytes()
+            msg = b"\x01" + in_data.tobytes()
             audio_queue.put_nowait(msg)
 
         in_stream = sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            blocksize=1920,
-            callback=on_input
+            samplerate=SAMPLE_RATE, channels=CHANNELS, blocksize=1920, callback=on_input
         )
 
         def on_output(out_data, frames, time, status):
-            print(frames, type(out_data))
+            # print(frames, type(out_data))
             out_data.fill(0)
 
         out_stream = sd.OutputStream(
-                samplerate=SAMPLE_RATE,
-                channels=CHANNELS,
-                blocksize=1920,
-                callback=on_output
+            samplerate=SAMPLE_RATE,
+            channels=CHANNELS,
+            blocksize=1920,
+            callback=on_output,
         )
 
         with in_stream, out_stream:
-            await queue_loop()
-            #await asyncio.gather(recv_loop(), queue_loop())
+            await asyncio.gather(recv_loop(), queue_loop())
 
 
 asyncio.run(main())
