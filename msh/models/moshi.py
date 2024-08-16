@@ -137,8 +137,7 @@ def get_lm(filename: tp.Union[str, Path], device):
     model.eval()
     model.to(torch.bfloat16)
     if _is_safetensors(filename):
-        # TODO(laurent): remove `strict=False` once the new weights have been uploaded.
-        safetensors.torch.load_model(model, filename, strict=False)
+        safetensors.torch.load_model(model, filename)
     else:
         pkg = torch.load(
             filename,

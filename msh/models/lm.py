@@ -190,9 +190,7 @@ class LMModel(StreamingModule):
         kwargs_dep["positional_embedding"] = depformer_pos_emb
         kwargs_dep["context"] = None
         if depformer_weights_per_step:
-            kwargs_dep["weights_per_step"] = (
-                n_q  # TODO(laurent): use dep_q and remove the extra weights.
-            )
+            kwargs_dep["weights_per_step"] = dep_q
         if depformer_multi_linear:
             # One linear layer per codebook to project different informations from the main model.
             self.depformer_in = nn.ModuleList(
