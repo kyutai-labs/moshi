@@ -1,11 +1,16 @@
+# Copyright (c) Kyutai, all rights reserved.
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 from torch import nn
 import torch
 from ..utils.utils import torch_compile_lazy
 
 
 @torch_compile_lazy
-def apply_rope(q: torch.Tensor, k: torch.Tensor, offset: int = 0,
-               max_period: float = 10_000):
+def apply_rope(
+    q: torch.Tensor, k: torch.Tensor, offset: int = 0, max_period: float = 10_000
+):
     """
     Args:
         q (torch.Tensor): queries, shape `[B, T, H, D]`.
@@ -20,7 +25,9 @@ def apply_rope(q: torch.Tensor, k: torch.Tensor, offset: int = 0,
     ds = torch.arange(D // 2, device=q.device, dtype=torch.float32)
     max_period_t = torch.full([1], max_period, device=q.device, dtype=torch.float32)
     freqs = 1.0 / (max_period_t ** (2 * ds / D))
-    ts = torch.arange(offset, offset + T, device=q.device, dtype=torch.float32).view(-1, 1, 1)
+    ts = torch.arange(offset, offset + T, device=q.device, dtype=torch.float32).view(
+        -1, 1, 1
+    )
 
     q = q.view(B, T, H, D // 2, 2)
     k = k.view(B, T, H, D // 2, 2)
@@ -53,6 +60,7 @@ class RotaryEmbedding(nn.Module):
     Args:
         max_period (float): Maximum period of the rotation frequencies.
     """
+
     def __init__(self, max_period: float = 10000.0):
         super().__init__()
         self.max_period = max_period

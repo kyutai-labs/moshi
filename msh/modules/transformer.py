@@ -1,3 +1,7 @@
+# Copyright (c) Kyutai, all rights reserved.
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 """
 Transformer model, with streaming support, xformer attention support
 and easy causal attention with a potentially finite receptive field.

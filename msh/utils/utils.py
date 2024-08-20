@@ -1,19 +1,14 @@
+# Copyright (c) Kyutai, all rights reserved.
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, Future, Executor
-from contextlib import contextmanager
-from functools import wraps, lru_cache
-import itertools
-import hashlib
-import json
 import logging
-from pathlib import Path
-import typing as tp
 
 import torch
 
