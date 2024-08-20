@@ -1,3 +1,7 @@
+// Copyright (c) Kyutai, all rights reserved.
+// This source code is licensed under the license found in the
+// LICENSE file in the root directory of this source tree.
+
 use crate::lm::{Config, DepFormerConfig, VERBOSE};
 use crate::quantized_transformer as transformer;
 use candle::{DType, Device, IndexOp, Module, Result, Tensor};

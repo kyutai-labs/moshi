@@ -1,3 +1,7 @@
+// Copyright (c) Kyutai, all rights reserved.
+// This source code is licensed under the license found in the
+// LICENSE file in the root directory of this source tree.
+
 // The dispatcher is responsible for allocating user to gpu workers.
 // Redis is used to discover workers that are ready to process data.
 use crate::waiting_queue::SessionId;

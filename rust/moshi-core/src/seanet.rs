@@ -1,3 +1,7 @@
+// Copyright (c) Kyutai, all rights reserved.
+// This source code is licensed under the license found in the
+// LICENSE file in the root directory of this source tree.
+
 use crate::streaming::{self, StreamTensor, StreamingModule};
 use candle::{Module, Result, Tensor};
 use candle_nn::VarBuilder;

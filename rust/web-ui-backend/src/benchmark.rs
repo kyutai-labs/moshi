@@ -1,3 +1,7 @@
+// Copyright (c) Kyutai, all rights reserved.
+// This source code is licensed under the license found in the
+// LICENSE file in the root directory of this source tree.
+
 use crate::stream_both::{AppStateInner, Config, SessionConfigReq, StreamOut, StreamingModel};
 use anyhow::Result;
 use std::sync::mpsc;

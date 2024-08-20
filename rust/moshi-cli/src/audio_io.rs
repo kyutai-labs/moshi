@@ -1,3 +1,7 @@
+// Copyright (c) Kyutai, all rights reserved.
+// This source code is licensed under the license found in the
+// LICENSE file in the root directory of this source tree.
+
 use anyhow::{Context, Result};
 use std::collections::VecDeque;
 use std::io::prelude::*;

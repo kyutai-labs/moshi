@@ -1,3 +1,7 @@
+// Copyright (c) Kyutai, all rights reserved.
+// This source code is licensed under the license found in the
+// LICENSE file in the root directory of this source tree.
+
 use crate::transformer;
 use candle::{DType, Device, IndexOp, Module, Result, Tensor};
 use candle_nn::VarBuilder;
