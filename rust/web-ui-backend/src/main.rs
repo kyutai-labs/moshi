@@ -8,14 +8,9 @@ use std::str::FromStr;
 
 mod audio;
 mod benchmark;
-mod dispatcher;
-mod metrics;
-mod redis_client;
 mod standalone;
 mod stream_both;
 mod utils;
-mod waiting_queue;
-mod worker;
 
 #[derive(Parser, Debug)]
 #[clap(name = "server", about = "moshi web server")]
@@ -40,9 +35,6 @@ struct StandaloneArgs {
 }
 
 #[derive(Clone, Parser, Debug)]
-pub struct DispatcherArgs {}
-
-#[derive(Clone, Parser, Debug)]
 pub struct BenchmarkArgs {
     #[clap(long)]
     cpu: bool,
@@ -62,10 +54,8 @@ pub struct BenchmarkArgs {
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
-    Dispatcher(DispatcherArgs),
     Standalone(StandaloneArgs),
     Benchmark(BenchmarkArgs),
-    Worker(StandaloneArgs),
 }
 
 /// A TLS acceptor that sets `TCP_NODELAY` on accepted streams.
@@ -117,17 +107,6 @@ fn tracing_init(
 async fn main() -> Result<()> {
     let args = Args::parse();
     match args.command {
-        Command::Worker(standalone_args) => {
-            let config = worker::Config::load(&args.config)?;
-            let _guard = tracing_init(
-                &config.stream.log_dir,
-                &config.stream.instance_name,
-                &args.log_level,
-                args.silent,
-            )?;
-            tracing::info!("starting process with pid {}", std::process::id());
-            worker::run(&standalone_args, &config).await?;
-        }
         Command::Standalone(standalone_args) => {
             let config = standalone::Config::load(&args.config)?;
             let _guard = tracing_init(
@@ -159,17 +138,6 @@ async fn main() -> Result<()> {
                 b
             };
             benchmark::run(&standalone_args, &config).await?;
-        }
-        Command::Dispatcher(dispatcher_args) => {
-            let config = dispatcher::Config::load(&args.config)?;
-            let _guard = tracing_init(
-                config.log_dir(),
-                config.instance_name(),
-                &args.log_level,
-                args.silent,
-            )?;
-            tracing::info!("starting process with pid {}", std::process::id());
-            dispatcher::run(&dispatcher_args, &config, &args.config).await?;
         }
     }
     Ok(())

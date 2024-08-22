@@ -222,7 +222,6 @@ pub struct MsgSender {
     out_pcm_buf: Vec<u8>,
     total_data: usize,
     sender: SplitSink<ws::WebSocket, ws::Message>,
-    last_input_pcm: Option<std::time::Instant>,
 }
 
 impl MsgSender {
@@ -240,7 +239,7 @@ impl MsgSender {
         let mut tags = Vec::new();
         crate::audio::write_opus_tags(&mut tags)?;
         pw.write_packet(tags, 42, ogg::PacketWriteEndInfo::EndPage, 0)?;
-        Ok(Self { pw, encoder, out_pcm, out_pcm_buf, total_data: 0, sender, last_input_pcm: None })
+        Ok(Self { pw, encoder, out_pcm, out_pcm_buf, total_data: 0, sender })
     }
 
     async fn send_text(&mut self, text: String) -> Result<()> {
@@ -685,22 +684,13 @@ async fn sender_loop(
     // to some weird deadlocks.
     while let Some(v) = stream_out_rx.recv().await {
         match v {
-            StreamOut::Pcm { pcm } => {
-                if let Some(last_input_pcm) = sender.last_input_pcm {
-                    let model_step_duration = last_input_pcm.elapsed().as_secs_f64();
-                    crate::metrics::worker::MODEL_STEP_DURATION.observe(model_step_duration);
-                    sender.last_input_pcm = None;
-                }
-                sender.send_pcm(pcm).await?
-            }
+            StreamOut::Pcm { pcm } => sender.send_pcm(pcm).await?,
             StreamOut::Ready => sender.send_ready().await?,
             StreamOut::MetaData { metadata } => sender.send_metadata(metadata).await?,
             StreamOut::Text { text } => sender.send_text(text).await?,
-            StreamOut::InputPcm { .. } => {
-                let now = std::time::Instant::now();
-                sender.last_input_pcm = Some(now)
-            }
-            StreamOut::StepStart { .. } | StreamOut::StepPostSampling { .. } => {}
+            StreamOut::InputPcm { .. }
+            | StreamOut::StepStart { .. }
+            | StreamOut::StepPostSampling { .. } => {}
         }
     }
     Ok::<_, anyhow::Error>(())

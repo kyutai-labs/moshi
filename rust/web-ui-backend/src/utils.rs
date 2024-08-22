@@ -33,38 +33,6 @@ impl BuildInfo {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AdName {
-    pub instance_name: String,
-    pub auth_id: String,
-    pub local_ip: std::net::IpAddr,
-    pub port: u16,
-}
-
-impl AdName {
-    #[allow(clippy::inherent_to_string)]
-    pub fn to_string(&self) -> String {
-        format!("{}|{}|{}|{}", &self.instance_name, self.auth_id, self.local_ip, self.port)
-    }
-}
-
-impl std::str::FromStr for AdName {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s: Vec<_> = s.split('|').collect();
-        match s.as_slice() {
-            [s1, s2, s3, s4] => {
-                let instance_name = s1.to_string();
-                let auth_id = s2.to_string();
-                let local_ip = std::net::IpAddr::from_str(s3)?;
-                let port = u16::from_str(s4)?;
-                Ok(Self { instance_name, auth_id, local_ip, port })
-            }
-            _ => anyhow::bail!("incorrect format {s:?}"),
-        }
-    }
-}
-
 pub struct WrapJson<T>(pub anyhow::Result<T>);
 
 impl<T: serde::Serialize> axum::response::IntoResponse for WrapJson<T> {
@@ -100,8 +68,4 @@ impl<T: serde::Serialize> axum::response::IntoResponse for WrapBincode<T> {
             }
         }
     }
-}
-
-pub fn duration_s(s: std::time::SystemTime) -> f64 {
-    s.duration_since(std::time::UNIX_EPOCH).map_or(f64::NAN, |v| v.as_secs_f64())
 }

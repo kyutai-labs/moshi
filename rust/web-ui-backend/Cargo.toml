@@ -25,10 +25,8 @@ log = "0.4.20"
 moshi = { path = "../moshi-core" }
 ogg = { version = "0.9.1", features = ["async"] }
 opus = "0.3.0"
-prometheus = "0.13.4"
 rand = { version = "0.8.5", features = ["getrandom"] }
 rand_chacha = "0.3.1"
-redis = "0.25.4"
 regex = "1.10.3"
 rubato = "0.15.0"
 sentencepiece = "0.11.2"
