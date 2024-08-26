@@ -1,4 +1,4 @@
-# kyutai-elie
+# moshi-client
 
 Frontend for the demo.
 
