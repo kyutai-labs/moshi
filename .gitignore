@@ -176,3 +176,4 @@ pkg
 /moshi-demo/config.sh
 log.*
 laurent/cuda-test/check
+client/node_modules

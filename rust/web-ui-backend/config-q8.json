@@ -5,7 +5,7 @@
   "log_dir": "$HOME/tmp/moshi-logs",
   "encodec_model_file": "$HOME/tmp/tokenizer-de0e421d-checkpoint40.safetensors",
   "encodec_num_codebooks": 8,
-  "static_dir": "foo",
+  "static_dir": "client/dist",
   "addr": "0.0.0.0",
   "port": 8080,
   "cert_dir": "."

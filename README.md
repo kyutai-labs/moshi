@@ -36,7 +36,18 @@ cargo run --bin moshi-cli -r -- tui --host localhost
 
 ### WebUI
 
-TODO
+The web UI can be used as an alternative to the CLI. In order to do so, run the
+following steps (these will require `npm` being installed).
+```bash
+cd client
+npm install
+npm build
+```
+
+Then run the server in the same way mentioned above and from your web browser
+navigate to `https://localhost:8080/?worker_addr=0.0.0.0:8080`. You will get
+some warnings about the site being unsafe. When using chrome you can bypass it
+by selecting "Details", then "Visit this unsafe site".
 
 ### Protocol
 
