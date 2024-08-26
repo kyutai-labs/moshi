@@ -46,7 +46,7 @@ npm run build
 ```
 
 Then run the server in the same way mentioned above and from your web browser
-navigate to `https://localhost:8080/?worker_addr=localhost:8080`. You will get
+navigate to `https://127.0.0.1:8080/?worker_addr=127.0.0.1:8080`. You will get
 some warnings about the site being unsafe. When using chrome you can bypass it
 by selecting "Details" or "Advanced", then "Visit this unsafe site" or "Proceed
 to localhost (unsafe)".
