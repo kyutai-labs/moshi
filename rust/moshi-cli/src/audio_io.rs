@@ -195,8 +195,13 @@ pub(crate) fn setup_input_stream() -> Result<(cpal::Stream, AudioOutputData)> {
     let host = cpal::default_host();
     let device = host.default_input_device().context("no input device available")?;
     let mut supported_configs_range = device.supported_input_configs()?;
-    let config_range =
-        supported_configs_range.find(|c| c.channels() == 1).context("no audio input available")?;
+    let config_range = match supported_configs_range.find(|c| c.channels() == 1) {
+        Some(config) => config,
+        None => {
+            let supported_configs = device.supported_input_configs()?.collect::<Vec<_>>();
+            anyhow::bail!("no audio input available, supported configs {supported_configs:?}",)
+        }
+    };
     let sample_rate = cpal::SampleRate(SAMPLE_RATE as u32)
         .clamp(config_range.min_sample_rate(), config_range.max_sample_rate());
     let config: cpal::StreamConfig = config_range.with_sample_rate(sample_rate).into();
