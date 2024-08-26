@@ -93,7 +93,7 @@ class ServerState:
         opus_writer = sphn.OpusStreamWriter(24000)
         opus_reader = sphn.OpusStreamReader(24000)
 
-        def recv_loop():
+        async def recv_loop():
             async for message in websocket:
                 if not isinstance(message, bytes):
                     print("unsupported message type {type(message)}")
@@ -112,7 +112,7 @@ class ServerState:
 
         all_pcm_data = None
 
-        def opus_loop():
+        async def opus_loop():
             while True:
                 await asyncio.sleep(0.001)
                 pcm = opus_reader.read_pcm()
@@ -146,7 +146,7 @@ class ServerState:
                             main_pcm = self.ec.decode(tokens, scale=None)
                             opus_writer.append_pcm(main_pcm[0])
 
-        def send_loop():
+        async def send_loop():
             while True:
                 await asyncio.sleep(0.001)
                 msg = opus_writer.read_bytes()
