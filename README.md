@@ -41,7 +41,7 @@ following steps (these will require `npm` being installed).
 ```bash
 cd client
 npm install
-npm build
+npm run build
 ```
 
 Then run the server in the same way mentioned above and from your web browser
