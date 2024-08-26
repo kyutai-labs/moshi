@@ -24,14 +24,14 @@ enum Command {
         #[arg(long)]
         host: String,
 
-        #[arg(long, default_value_t = 9999)]
+        #[arg(long, default_value_t = 8080)]
         port: usize,
     },
     Tui {
         #[arg(long)]
         host: String,
 
-        #[arg(long, default_value_t = 9999)]
+        #[arg(long, default_value_t = 8080)]
         port: usize,
     },
 }
