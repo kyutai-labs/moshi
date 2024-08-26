@@ -19,6 +19,7 @@ ENABLE_PROFILING = False
 parser = argparse.ArgumentParser()
 parser.add_argument("--host", default="localhost", type=str)
 parser.add_argument("--port", default=8998, type=int)
+parser.add_argument("--max-gen-len", default=2048, type=int)
 parser.add_argument("--tokenizer", type=str)
 parser.add_argument("--moshi-weights", type=str)
 parser.add_argument("--mimi-weights", type=str)
@@ -86,8 +87,7 @@ class ServerState:
         print(websocket, path)
         self.lm.reset_streaming()
         self.ec.reset_streaming()
-        max_gen_len = 256
-        lm_gen = msh.models.LMGen(self.lm, check=True, max_gen_len=max_gen_len)
+        lm_gen = msh.models.LMGen(self.lm, check=True, max_gen_len=args.max_gen_len)
 
         with self.ec.streaming():
             async for message in websocket:
