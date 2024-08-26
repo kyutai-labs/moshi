@@ -102,7 +102,6 @@ class ServerState:
                     print("empty message")
                     continue
                 kind = message[0]
-                print("received message", kind)
                 if kind == 1:  # audio
                     payload = message[1:]
                     opus_reader.append_bytes(payload)
@@ -143,7 +142,8 @@ class ServerState:
                                 (1, 8, 1)
                             )
                             main_pcm = self.ec.decode(tokens, scale=None)
-                            opus_writer.append_pcm(main_pcm[0])
+                            main_pcm = main_pcm.cpu().numpy()
+                            opus_writer.append_pcm(main_pcm[0][0])
 
         async def send_loop():
             while True:
