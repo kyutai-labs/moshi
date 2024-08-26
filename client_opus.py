@@ -37,8 +37,8 @@ async def main():
                 if len(msg) > 0:
                     await websocket.send(b"\x01" + msg)
 
-        all_pcm_data = None
         async def decoder_loop():
+            all_pcm_data = None
             print("start decoder loop")
             while True:
                 await asyncio.sleep(0.001)
@@ -91,7 +91,6 @@ async def main():
                 out_data[:, 0] = pcm_data
             except queue.Empty:
                 out_data.fill(0)
-
 
         out_stream = sd.OutputStream(
             samplerate=SAMPLE_RATE,

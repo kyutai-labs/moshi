@@ -105,14 +105,13 @@ class ServerState:
                 print("received message", kind)
                 if kind == 1:  # audio
                     payload = message[1:]
-                    payload = np.frombuffer(payload, dtype=np.float32)
                     opus_reader.append_bytes(payload)
                 else:
                     print("unknown message kind {kind}")
 
-        all_pcm_data = None
-
         async def opus_loop():
+            all_pcm_data = None
+
             while True:
                 await asyncio.sleep(0.001)
                 pcm = opus_reader.read_pcm()
