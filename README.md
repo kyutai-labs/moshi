@@ -19,6 +19,7 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pe
 ```bash
 cargo run --features cuda --bin web-ui-backend -r -- --config web-ui-backend/config.json standalone
 ```
+When using macOS, you can replace `--features cuda` with `--features metal`.
 
 Alternatively you can use `config-q8.json` rather than `config.json` to use the
 quantified q8 model.
@@ -45,9 +46,10 @@ npm run build
 ```
 
 Then run the server in the same way mentioned above and from your web browser
-navigate to `https://localhost:8080/?worker_addr=0.0.0.0:8080`. You will get
+navigate to `https://localhost:8080/?worker_addr=localhost:8080`. You will get
 some warnings about the site being unsafe. When using chrome you can bypass it
-by selecting "Details", then "Visit this unsafe site".
+by selecting "Details" or "Advanced", then "Visit this unsafe site" or "Proceed
+to localhost (unsafe)".
 
 ### Protocol
 
