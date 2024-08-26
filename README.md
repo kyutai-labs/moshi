@@ -80,13 +80,13 @@ run the model, and a client that captures the sound from the microphone
 and passes it to the server, get some data back from the server and plays it
 on the speakers.
 
-The client and server do not have to run on the same machine. Note that for
-now the protocol is slightly different from the one used on the rust side as
-there is no ogg/opus encoding.
+The client and server do not have to run on the same machine, the protocol used
+to transfer data between the client and the server should be compatible with the
+rust version.
 
 Start the server with:
 ```bash
-python server.py \
+python server_opus.py \
     --mimi-weights tokenizer-de0e421d-checkpoint40.safetensors \
     --tokenizer tokenizer_spm_32k_3.model \
     --moshi-weights mimi_0abbed5f@100.safetensors 
@@ -94,7 +94,7 @@ python server.py \
 
 And then starts the client with:
 ```bash
-python client.py
+python client_opus.py
 ```
 
 When running on different machine, you can add the command line argument
@@ -102,6 +102,11 @@ When running on different machine, you can add the command line argument
 the argument `--host 192.168.0.42` to the client where `192.168.0.42` is
 the ip of the server. The default port is `9998` and can be overriden with
 `--port`.
+
+The `client_opus.py` and `server_opus.py` use some newly released ogg/opus
+streaming capacities. If you run into any issue you can try using `client.py`
+and `server.py` instead, this will result in streaming the full pcm data rather
+than an opus stream (so this will require a lot more bandwidth).
 
 ### Testing
 In order to test the audio tokenizer, you can run the following command.
