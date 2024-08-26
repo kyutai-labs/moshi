@@ -65,7 +65,6 @@ async def main():
                 kind = message[0]
                 if kind == 1:  # audio
                     payload = message[1:]
-                    payload = np.frombuffer(payload, dtype=np.float32)
                     opus_reader.append_bytes(payload)
                     cnt += 1
                 elif kind == 2:  # text
@@ -75,7 +74,7 @@ async def main():
                     print(f"unknown message kind {kind}")
 
         def on_input(in_data, frames, time, status):
-            opus_writer.append_pcm(in_data[0])
+            opus_writer.append_pcm(in_data[:, 0])
 
         in_stream = sd.InputStream(
             samplerate=SAMPLE_RATE, channels=CHANNELS, blocksize=1920, callback=on_input
