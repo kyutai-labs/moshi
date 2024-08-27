@@ -3,6 +3,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from torch import nn
+import math
 import torch
 from ..utils.utils import torch_compile_lazy
 
@@ -21,10 +22,12 @@ def apply_rope(
 
     B, T, H, D = q.shape
     assert k.shape == q.shape
+    assert D > 0
+    assert D % 2 == 0
+    assert max_period > 0
 
     ds = torch.arange(D // 2, device=q.device, dtype=torch.float32)
-    max_period_t = torch.full([1], max_period, device=q.device, dtype=torch.float32)
-    freqs = 1.0 / (max_period_t ** (2 * ds / D))
+    freqs = torch.exp(ds * (-math.log(max_period) * 2 / D))
     ts = torch.arange(offset, offset + T, device=q.device, dtype=torch.float32).view(
         -1, 1, 1
     )
