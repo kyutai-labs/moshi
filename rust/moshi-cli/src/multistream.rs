@@ -248,8 +248,6 @@ pub mod client_tui {
         recv_messages: usize,
         recv_text_messages: usize,
         recv_audio_messages: usize,
-        sent_bos: usize,
-        sent_eos: usize,
         sent_audio_messages: usize,
     }
 
@@ -259,8 +257,6 @@ pub mod client_tui {
                 recv_messages: 0,
                 recv_text_messages: 0,
                 recv_audio_messages: 0,
-                sent_bos: 0,
-                sent_eos: 0,
                 sent_audio_messages: 0,
             }
         }
@@ -323,9 +319,7 @@ pub mod client_tui {
                 output_audio.samples_in_buffer() as f32 / 24000.,
             );
             let stats2 = format!(
-                "bos {}\neos {}\naudio msgs: {}\nrecd len: {} ({:.1}s)\nrecd buf: {} ({:.1}s)",
-                stats.sent_bos,
-                stats.sent_eos,
+                "audio msgs: {}\nrecd len: {} ({:.1}s)\nrecd buf: {} ({:.1}s)",
                 stats.sent_audio_messages,
                 input_audio.total_samples(),
                 input_audio.total_samples() as f32 / 24000.,
@@ -447,16 +441,8 @@ pub mod client_tui {
                 app.should_quit = true
             }
             Action::None => {}
-            Action::Enter => {
-                app.stats.lock().unwrap().sent_bos += 1;
-                app.subs.lock().unwrap().push("\n<sent bos>\n".to_string());
-                app.sender.lock().await.send_control(0).await?
-            }
-            Action::Space => {
-                app.stats.lock().unwrap().sent_eos += 1;
-                app.subs.lock().unwrap().push("\n<sent eos>\n".to_string());
-                app.sender.lock().await.send_control(1).await?
-            }
+            Action::Enter => app.sender.lock().await.send_control(0).await?,
+            Action::Space => app.sender.lock().await.send_control(1).await?,
         };
         Ok(())
     }
