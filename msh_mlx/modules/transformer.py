@@ -9,7 +9,7 @@ import mlx.core as mx
 import mlx.nn as nn
 
 @dataclass
-class Config:
+class TransformerConfig:
     d_model: int
     num_heads: int
     num_layers: int
@@ -55,7 +55,7 @@ class LayerScale(nn.Module):
         return xs * self.scale
 
 class Attention(nn.Module):
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: TransformerConfig):
         super().__init__()
 
         num_kv = cfg.num_heads // cfg.kv_repeat
@@ -90,7 +90,7 @@ class Attention(nn.Module):
         return xs
 
 class MlpGating(nn.Module):
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: TransformerConfig):
         super().__init__()
 
         hidden = 2 * cfg.dim_feedforward // 3
@@ -107,7 +107,7 @@ class MlpGating(nn.Module):
         return self.linear_out(nn.silu(xs[:, :, 0]) * xs[:, :, 1])
 
 class MlpNoGating(nn.Module):
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: TransformerConfig):
         super().__init__()
 
         self.linear1 = nn.Linear(cfg.d_model, cfg.dim_feedforward, bias=cfg.bias_ff)
@@ -118,10 +118,10 @@ class MlpNoGating(nn.Module):
 
 
 class TransformerLayer(nn.Module):
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: TransformerConfig):
         super().__init__()
 
-        assert cfg.use_conv_block, "conv-block is not supported"
+        assert not cfg.use_conv_block, "conv-block is not supported"
         assert not cfg.cross_attention, "cross-attn is not supported"
         if cfg.gating:
             self.mlp = MlpGating(cfg)
@@ -152,7 +152,7 @@ class TransformerLayer(nn.Module):
         return xs
 
 class Transformer(nn.Module):
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: TransformerConfig):
         super().__init__()
 
         self.cfg = cfg

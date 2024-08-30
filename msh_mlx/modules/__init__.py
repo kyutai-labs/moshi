@@ -3,4 +3,4 @@
 # LICENSE file in the root directory of this source tree.
 """Modules used for building the models."""
 
-from .transformer import StreamingTransformer
+from .transformer import Transformer, TransformerConfig

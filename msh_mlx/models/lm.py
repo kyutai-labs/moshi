@@ -8,8 +8,8 @@ from typing import List, Optional, Tuple
 import mlx.core as mx
 import mlx.nn as nn
 
-from ..modules.transformer import Config as TransformerConfig
-from ..modules.transformer import Transformer
+from ..modules.transformer import Transformer, TransformerConfig
+from msh_mlx.modules import transformer
 
 @dataclass
 class DepFormerConfig:
@@ -17,7 +17,7 @@ class DepFormerConfig:
     num_slices: int
 
 @dataclass
-class Config:
+class LmConfig:
     transformer: TransformerConfig
     depformer: DepFormerConfig
     text_in_vocab_size: int
@@ -39,7 +39,7 @@ class DepFormerSlice(nn.Module):
         return xs
 
 class DepFormer(nn.Module):
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: LmConfig):
         super().__init__()
 
         self.slices = []
@@ -59,7 +59,7 @@ class DepFormer(nn.Module):
         return xs
 
 class Lm(nn.Module):
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: LmConfig):
         super().__init__()
 
         dim = cfg.transformer.d_model
@@ -75,9 +75,69 @@ class Lm(nn.Module):
             raise ValueError(f"unsupported norm type {cfg.transformer.norm}")
 
         self.text_linear = nn.Linear(dim, cfg.text_out_vocab_size, bias=False)
-        self.audio_embs = [nn.Embedding(cfg.audio_vocab_size, dim) for _i in range(cfg.audio_codebooks)]
+        self.audio_embs = [nn.Embedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)]
 
 
     def __call__(self, xs: mx.array) -> mx.array:
         # TODO
         return xs
+
+def config_v0_1() -> LmConfig:
+    transformer = TransformerConfig(
+        d_model=4096,
+        num_heads=32,
+        num_layers=32,
+        dim_feedforward=4096 * 4, # dim * hidden_scale
+        causal=True,
+        norm_first=True,
+        bias_ff=False,
+        bias_attn=False,
+        layer_scale=None,
+        context=3000,
+        max_period=10000,
+        use_conv_block=False,
+        use_conv_bias=True,
+        cross_attention=False,
+        gating=True,
+        norm="rms_norm",
+        positional_embedding="rope",
+        conv_layout=False,
+        conv_kernel_size=3,
+        kv_repeat=1,
+        max_seq_len=4096,
+    )
+    depformer = DepFormerConfig(
+        transformer=TransformerConfig(
+            d_model=1024,
+            num_heads=16,
+            num_layers=6,
+            dim_feedforward=1024 * 4, # dim * hidden_scale
+            causal=True,
+            norm_first=True,
+            bias_ff=False,
+            bias_attn=False,
+            layer_scale=None,
+            context=8,
+            max_period=10000,
+            use_conv_block=False,
+            use_conv_bias=True,
+            cross_attention=False,
+            gating=True,
+            norm="rms_norm",
+            positional_embedding="none",
+            conv_layout=False,
+            conv_kernel_size=3,
+            kv_repeat=1,
+            max_seq_len=4096,
+        ),
+        num_slices=8,
+    )
+    return LmConfig(
+        transformer=transformer,
+        depformer=depformer,
+        audio_vocab_size=2049,
+        text_in_vocab_size=32001,
+        text_out_vocab_size=32000,
+        audio_codebooks=16,
+    )
+

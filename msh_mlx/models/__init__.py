@@ -4,3 +4,5 @@
 """
 Models for EnCodec, AudioGen, MusicGen, as well as the generic LMModel.
 """
+
+from .lm import Lm, LmConfig, config_v0_1
