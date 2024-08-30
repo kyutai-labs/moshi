@@ -7,7 +7,7 @@ msh_mlx is the MLX inference codebase for Kyutai audio generation models.
 """
 
 # flake8: noqa
-from . import modules, models
+from . import modules, models, utils
 
 __version__ = "1.0.0a1"
 

@@ -9,6 +9,7 @@ import mlx.core as mx
 import mlx.nn as nn
 
 from ..modules.transformer import Transformer, TransformerConfig
+from ..utils import sampling
 from msh_mlx.modules import transformer
 
 @dataclass
@@ -43,6 +44,8 @@ class DepFormer(nn.Module):
     def __init__(self, cfg: LmConfig):
         super().__init__()
 
+        self.audio_eos_token = cfg.audio_vocab_size - 2
+        self.audio_padding_token = cfg.audio_vocab_size - 1
         self.slices: List[DepFormerSlice] = []
         for slice_idx in range(cfg.depformer.num_slices):
             in_vs = cfg.text_in_vocab_size if slice_idx == 0 else cfg.audio_vocab_size
@@ -61,19 +64,22 @@ class DepFormer(nn.Module):
         self,
         step_idx: int,
         main_xs: mx.array,
-        sampling_params: int,
-        text_token: int,
+        sampler: sampling.Sampler,
+        text_token: mx.array,
     ) -> List[int]:
         tokens = []
         last_token = text_token
         cache = None
         for slice_idx, slice in enumerate(self.slices):
             xs = slice.linear_in(main_xs)
-            xs = xs + slice.emb(mx.array([text_token]))
+            # TODO: avoid hardcoding these...
+            if slice_idx not in (0, 1, 9) and step_idx <= 1:
+                xs = mx.array([self.audio_padding_token])
+
+            xs = xs + slice.emb(mx.array([last_token]))
             xs, cache = slice.transformer(xs, cache=cache)
             logits = slice.linear_out(xs)
-            # TODO: sampling
-            last_token = 42
+            last_token = sampler(logits)
             tokens.append(last_token)
         tokens = mx.concatenate(tokens)
         return tokens
@@ -98,9 +104,9 @@ class Lm(nn.Module):
         self.audio_embs = [nn.Embedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)]
 
 
-    def __call__(self, xs: mx.array) -> mx.array:
-        # TODO
-        return xs
+    def __call__(self, _: mx.array) -> mx.array:
+        raise ValueError("not implemented")
+
 
 def config_v0_1() -> LmConfig:
     transformer = TransformerConfig(
