@@ -1,0 +1,3 @@
+huggingface-hub==0.24.6
+livekit-agents~=0.8
+python-dotenv==1.0.1
