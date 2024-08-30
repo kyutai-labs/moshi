@@ -9,7 +9,6 @@ import sentencepiece
 
 import mlx.core as mx
 import mlx.nn as nn
-from mlx.utils import tree_unflatten
 
 import msh_mlx
 
@@ -27,17 +26,10 @@ print(model)
 print(lm_config)
 model.set_dtype(mx.bfloat16)
 print("model created")
-nn.quantize(model, bits=8)
+# nn.quantize(model, bits=8)
 print("model quantized, loading weights...")
-weights = mx.load(MODEL_FILE)
-print("weights loaded, updating model...")
-weights = tree_unflatten(list(weights.items()))
-# model.update(weights)
-print("LOADED NAMES")
-print(list(weights.keys()))
-print("MODEL NAMES")
-print(list(model.parameters().keys()))
-print("model updated")
+model.load_weights(MODEL_FILE, strict=False)
+print("weights loaded")
 
 cache = None
 start_time = 0

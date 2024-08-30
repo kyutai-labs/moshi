@@ -140,9 +140,10 @@ class TransformerLayer(nn.Module):
         assert not cfg.use_conv_block, "conv-block is not supported"
         assert not cfg.cross_attention, "cross-attn is not supported"
         if cfg.gating:
-            self.mlp = MlpGating(cfg)
+            self.gating = MlpGating(cfg)
         else:
-            self.mlp = MlpNoGating(cfg)
+            # TODO: Use a better name?
+            self.gating = MlpNoGating(cfg)
 
         if cfg.norm == "layer_norm":
             self.norm1 = nn.LayerNorm(cfg.d_model, 1e-5)
@@ -169,7 +170,7 @@ class TransformerLayer(nn.Module):
         n1 = self.norm1(xs)
         n1, cache = self.self_attn(n1, cache=cache)
         xs = xs + self.layer_scale_1(n1)
-        xs = xs + self.layer_scale_2(self.mlp(self.norm2(xs)))
+        xs = xs + self.layer_scale_2(self.gating(self.norm2(xs)))
         return xs, cache
 
 class Transformer(nn.Module):
