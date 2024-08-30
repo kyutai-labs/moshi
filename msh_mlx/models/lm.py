@@ -34,15 +34,16 @@ class DepFormerSlice(nn.Module):
         self.emb = nn.Embedding(in_vocab_size, dim)
         self.linear_in = nn.Linear(main_transformer_dim, dim, bias=False)
         self.linear_out = nn.Linear(dim, out_vocab_size, bias=False)
+        self.transformer = Transformer(cfg)
 
-    def __call__(self, xs: mx.array) -> mx.array:
-        return xs
+    def __call__(self, _: mx.array) -> mx.array:
+        raise ValueError("not implemented")
 
 class DepFormer(nn.Module):
     def __init__(self, cfg: LmConfig):
         super().__init__()
 
-        self.slices = []
+        self.slices: List[DepFormerSlice] = []
         for slice_idx in range(cfg.depformer.num_slices):
             in_vs = cfg.text_in_vocab_size if slice_idx == 0 else cfg.audio_vocab_size
             slice = DepFormerSlice(
@@ -53,10 +54,29 @@ class DepFormer(nn.Module):
             )
             self.slices.append(slice)
 
+    def __call__(self, _: mx.array) -> mx.array:
+        raise ValueError("not implemented")
 
-    def __call__(self, xs: mx.array) -> mx.array:
-        # TODO
-        return xs
+    def sample(
+        self,
+        step_idx: int,
+        main_xs: mx.array,
+        sampling_params: int,
+        text_token: int,
+    ) -> List[int]:
+        tokens = []
+        last_token = text_token
+        cache = None
+        for slice_idx, slice in enumerate(self.slices):
+            xs = slice.linear_in(main_xs)
+            xs = xs + slice.emb(mx.array([text_token]))
+            xs, cache = slice.transformer(xs, cache=cache)
+            logits = slice.linear_out(xs)
+            # TODO: sampling
+            last_token = 42
+            tokens.append(last_token)
+        tokens = mx.concatenate(tokens)
+        return tokens
 
 class Lm(nn.Module):
     def __init__(self, cfg: LmConfig):
