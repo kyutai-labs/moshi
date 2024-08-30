@@ -10,12 +10,13 @@ import mlx.nn as nn
 
 from ..modules.transformer import Transformer, TransformerConfig
 from ..utils import sampling
-from msh_mlx.modules import transformer
+
 
 @dataclass
 class DepFormerConfig:
     transformer: TransformerConfig
     num_slices: int
+
 
 @dataclass
 class LmConfig:
@@ -39,6 +40,7 @@ class DepFormerSlice(nn.Module):
 
     def __call__(self, _: mx.array) -> mx.array:
         raise ValueError("not implemented")
+
 
 class DepFormer(nn.Module):
     def __init__(self, cfg: LmConfig):
@@ -84,6 +86,7 @@ class DepFormer(nn.Module):
         tokens = mx.concatenate(tokens)
         return tokens
 
+
 class Lm(nn.Module):
     def __init__(self, cfg: LmConfig):
         super().__init__()
@@ -104,8 +107,13 @@ class Lm(nn.Module):
         self.audio_embs = [nn.Embedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)]
 
 
-    def __call__(self, _: mx.array) -> mx.array:
-        raise ValueError("not implemented")
+    def __call__(
+        self,
+        xs: mx.array,
+        cache: Optional[List[Tuple[mx.array, mx.array]]] = None,
+    ) -> Tuple[mx.array, List[Tuple[mx.array, mx.array]]]:
+        logits, upd_cache = self.transformer(xs, cache=cache)
+        return logits, upd_cache
 
 
 def config_v0_1() -> LmConfig:

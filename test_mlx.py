@@ -10,7 +10,8 @@ import mlx.core as mx
 import msh_mlx
 
 lm_config = msh_mlx.models.config_v0_1()
-print(lm_config)
 
 model = msh_mlx.models.Lm(lm_config)
 print(model)
+print(lm_config)
+model.set_dtype()
