@@ -3,4 +3,4 @@
 # LICENSE file in the root directory of this source tree.
 """Utilities."""
 
-from . import sampling
+from .sampling import Sampler
