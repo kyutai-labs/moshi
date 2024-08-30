@@ -72,22 +72,38 @@ class Attention(nn.Module):
         self,
         xs: mx.array,
         mask: Optional[mx.array] = None,
-        # cache: Optional[Tuple[mx.array, mx.array]] = None,
-    ) -> mx.array:
+        cache: Optional[Tuple[mx.array, mx.array]] = None,
+    ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
         assert self.cfg.kv_repeat == 1, "only kv_repeat==1 is supported"
+
         b, t, hd = xs.shape
         qkv = self.in_proj(xs).reshape(b, t, 3, self.cfg.num_heads, self.cfg.head_dim)
         q = qkv[:, :, 0].transpose(0, 2, 1, 3)
         k = qkv[:, :, 1].transpose(0, 2, 1, 3)
         v = qkv[:, :, 2].transpose(0, 2, 1, 3)
         if self.rope is not None:
-            q = self.rope(q, offset=42)
-            k = self.rope(k, offset=42)
-        # TODO: kv-cache
+            offset = 0
+            if cache is not None:
+                offset = cache[0].shape[2]
+            q = self.rope(q, offset=offset)
+            k = self.rope(k, offset=offset)
+
+        if cache is not None:
+            k_cache, v_cache = cache
+            k = mx.concatenate([k_cache, k], axis=2)
+            v = mx.concatenate([v_cache, v], axis=2)
+
+        k_len = k.shape[2]
+        k_target_len = t + min(self.cfg.context, k_len - t)
+        if k_target_len < k_len:
+            k = k[:, :, k_len - k_target_len]
+            v = v[:, :, k_len - k_target_len]
+
+        cache = k, v
         xs = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale, mask=mask)
         xs = xs.transpose(0, 2, 1, 3).reshape(b, t, hd)
         xs = self.out_proj(xs)
-        return xs
+        return xs, cache
 
 class MlpGating(nn.Module):
     def __init__(self, cfg: TransformerConfig):
@@ -145,11 +161,16 @@ class TransformerLayer(nn.Module):
             self.layer_scale_2 = Id()
         self.self_attn = Attention(cfg)
 
-    def __call__(self, xs: mx.array) -> mx.array:
+    def __call__(
+        self,
+        xs: mx.array,
+        cache: Optional[Tuple[mx.array, mx.array]] = None,
+    ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
         n1 = self.norm1(xs)
-        xs = xs + self.layer_scale_1(self.self_attn(n1))
+        n1, cache = self.self_attn(n1, cache=cache)
+        xs = xs + self.layer_scale_1(n1)
         xs = xs + self.layer_scale_2(self.mlp(self.norm2(xs)))
-        return xs
+        return xs, cache
 
 class Transformer(nn.Module):
     def __init__(self, cfg: TransformerConfig):
@@ -158,7 +179,14 @@ class Transformer(nn.Module):
         self.cfg = cfg
         self.layers = [TransformerLayer(cfg=cfg) for _ in range(cfg.num_layers)]
 
-    def __call__(self, xs: mx.array) -> mx.array:
-        for layer in self.layers:
-            xs = layer(xs)
-        return xs
+    def __call__(
+        self,
+        xs: mx.array,
+        cache: Optional[List[Tuple[mx.array, mx.array]]] = None,
+    ) -> Tuple[mx.array, List[Tuple[mx.array, mx.array]]]:
+        upd_cache = []
+        for layer_idx, layer in enumerate(self.layers):
+            c = cache[layer_idx] if cache is not None else None
+            xs, c = layer(xs, c)
+            upd_cache.append(c)
+        return xs, upd_cache
