@@ -68,7 +68,7 @@ class DepFormer(nn.Module):
         main_xs: mx.array,
         sampler: sampling.Sampler,
         text_token: mx.array,
-    ) -> List[int]:
+    ) -> mx.array:
         tokens = []
         last_token = text_token
         cache = None
@@ -109,9 +109,10 @@ class Lm(nn.Module):
 
     def __call__(
         self,
-        xs: mx.array,
+        token_ids: mx.array,
         cache: Optional[List[Tuple[mx.array, mx.array]]] = None,
     ) -> Tuple[mx.array, List[Tuple[mx.array, mx.array]]]:
+        xs = self.text_emb(token_ids)
         logits, upd_cache = self.transformer(xs, cache=cache)
         return logits, upd_cache
 

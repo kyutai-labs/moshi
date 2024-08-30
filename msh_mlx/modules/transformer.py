@@ -114,12 +114,12 @@ class MlpGating(nn.Module):
             hidden = 11 * cfg.d_model // 4
 
         self.linear_in = nn.Linear(cfg.d_model, 2 * hidden, bias=cfg.bias_ff)
-        self.linear_out = nn.Linear(2 * hidden, cfg.d_model, bias=cfg.bias_ff)
+        self.linear_out = nn.Linear(hidden, cfg.d_model, bias=cfg.bias_ff)
 
     def __call__(self, xs: mx.array) -> mx.array:
         xs = self.linear_in(xs)
         b, t, _ = xs.shape
-        xs = self.linear_in(xs).reshape(b, t, 2, -1)
+        xs = xs.reshape(b, t, 2, -1)
         return self.linear_out(nn.silu(xs[:, :, 0]) * xs[:, :, 1])
 
 class MlpNoGating(nn.Module):
