@@ -108,7 +108,7 @@ impl Tokenizer {
             resample_method: encodec::ResampleMethod::Conv,
             seanet: seanet_cfg,
             transformer: transformer_cfg,
-            quantizer_n_q: 16,
+            quantizer_n_q: 8,
             quantizer_bins: 2048,
             quantizer_dim: 256,
         };

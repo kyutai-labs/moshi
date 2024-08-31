@@ -4,6 +4,7 @@
 
 import argparse
 import time
+import numpy as np
 from pathlib import Path
 import sentencepiece
 
@@ -13,7 +14,11 @@ from mlx.utils import tree_map_with_path
 
 import msh_mlx
 
-def run_audio_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
+def run_audio_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
+    import mimi
+
+    audio_tokenizer = mimi.Tokenizer(mimi_path)
+
     start_time = 0
     gen = msh_mlx.models.LmGen(
         model=model,
@@ -22,10 +27,13 @@ def run_audio_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
         audio_sampler=msh_mlx.utils.Sampler(),
         check=False,
     )
+    pcm_data = np.array([[[0.] * 1920]]).astype(np.float32)
+    all_out_pcm = []
     for i in range(steps + 1):
         if i == 1:
             start_time = time.time()
-        other_audio_tokens = mx.zeros(shape=(1, 8), dtype=mx.int32)
+        other_audio_tokens = audio_tokenizer.encode_step(pcm_data)
+        other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[:, :, :8]
         text_token = gen.step(other_audio_tokens)
         text_token = text_token[0].item()
         audio_tokens = gen.last_audio_tokens()
@@ -34,8 +42,15 @@ def run_audio_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
             _text = text_tokenizer.id_to_piece(text_token)
             _text = _text.replace("▁", " ")
         print(i, text_token, _text, audio_tokens.shape if audio_tokens is not None else None)
+        if audio_tokens is not None:
+            audio_tokens = np.array(audio_tokens[:, :, None]).astype(np.uint32)
+            out_pcm = audio_tokenizer.decode_step(audio_tokens)
+            all_out_pcm.append(out_pcm)
+            print(out_pcm.shape)
 
     print()
+    all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
+    mimi.write_wav("out.wav", all_out_pcm[0, 0], sample_rate=24000)
     token_per_second = steps / (time.time() - start_time)
     print(f"steps: {steps}, token per sec: {token_per_second}")
 
@@ -71,6 +86,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--model", type=str)
+    parser.add_argument("--mimi", type=str)
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--quantized", action="store_true")
     parser.add_argument("--text-only", action="store_true")
@@ -108,7 +124,7 @@ def main():
     if args.text_only:
         run_text_gen(model, text_tokenizer, args.steps)
     else:
-        run_audio_gen(model, text_tokenizer, args.steps)
+        run_audio_gen(model, args.mimi, text_tokenizer, args.steps)
 
 if __name__ == "__main__":
     main()
