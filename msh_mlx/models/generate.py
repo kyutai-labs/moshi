@@ -35,6 +35,7 @@ class LmGen:
         self.cache = None
         self.audio_padding_token = self.model.cfg.audio_padding_token
         self.audio_delays = self.model.cfg.audio_delays
+        self.main_codebooks = self.model.cfg.depformer.num_slices
 
 
     @property
@@ -59,6 +60,7 @@ class LmGen:
             text_tokens = mx.array([[32000]])
         else:
             text_tokens = self.gen_sequence[:, 0, self.step_idx - 1][None]
+        self.gen_sequence[:, 1 + self.main_codebooks:, self.step_idx] = other_audio_tokens
         audio_tokens = []
         for cb_idx, delay in enumerate(self.audio_delays):
             gen_idx = self.step_idx - 1 - delay
@@ -66,14 +68,13 @@ class LmGen:
                 audio_token = self.gen_sequence[:, cb_idx + 1, gen_idx][None]
             else:
                 audio_token = mx.array([[self.audio_padding_token]])
+            if (audio_token == self.ungenerated_token).any():
+                raise ValueError(f"ungenerated value in audio tokens cb: {cb_idx} step: {self.step_idx}")
+            assert audio_token.shape == (1, 1), "invalid audio-tokens shape"
             audio_tokens.append(audio_token)
         if (text_tokens == self.ungenerated_token).any():
             raise ValueError(f"ungenerated value in text tokens {self.step_idx}")
-        if (audio_tokens == self.ungenerated_token).any():
-            raise ValueError(f"ungenerated value in audio tokens {self.step_idx}")
-        print("<IN>")
-        print(text_tokens, "\n", text_tokens.shape)
-        print(audio_tokens)
+        assert text_tokens.shape == (1, 1), "invalid text-tokens shape"
         text_tokens, audio_tokens, cache = self.model.sample(
             text_tokens,
             audio_tokens,
@@ -81,14 +82,13 @@ class LmGen:
             self.audio_sampler,
             self.cache,
         )
-        print("OUT")
-        print(text_tokens, "\n", text_tokens.shape)
-        print(audio_tokens, "\n", audio_tokens.shape)
+        assert text_tokens.shape == (1, ), "invalid output text-token shape"
+        assert audio_tokens.shape == (8, ), "invalid output audio-token shape"
 
-        self.gen_sequence[:, 0, self.step_idx] = text_tokens[0][0]
-        for cb_idx, delay in enumerate(self.audio_delays):
+        self.gen_sequence[:, 0, self.step_idx] = text_tokens
+        for cb_idx, delay in enumerate(self.audio_delays[:self.main_codebooks]):
             gen_idx = self.step_idx - delay
             if gen_idx >= 0:
-                self.gen_sequence[:, cb_idx + 1, gen_idx] = audio_tokens[:, :, cb_idx]
+                self.gen_sequence[:, cb_idx + 1, gen_idx] = audio_tokens[cb_idx]
         self.cache = cache
         self.step_idx += 1

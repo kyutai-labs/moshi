@@ -13,6 +13,53 @@ from mlx.utils import tree_map_with_path
 
 import msh_mlx
 
+def run_audio_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
+    start_time = 0
+    gen = msh_mlx.models.LmGen(
+        model=model,
+        max_steps=steps + 5,
+        text_sampler=msh_mlx.utils.Sampler(),
+        audio_sampler=msh_mlx.utils.Sampler(),
+        check=False,
+    )
+    for i in range(steps + 1):
+        if i == 1:
+            start_time = time.time()
+        other_audio_tokens = mx.zeros(shape=(1, 8), dtype=mx.int32)
+        gen.step(other_audio_tokens)
+
+    print()
+    token_per_second = steps / (time.time() - start_time)
+    print(f"steps: {steps}, token per sec: {token_per_second}")
+
+def run_text_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
+    cache = None
+    start_time = 0
+    last_text_token = mx.array([[32000]])
+    text_sampler = msh_mlx.utils.Sampler()
+    audio_sampler = msh_mlx.utils.Sampler()
+    for i in range(steps + 1):
+        if i == 1:
+            start_time = time.time()
+        last_text_token, _, cache = model.sample(
+            last_text_token,
+            [],
+            text_sampler,
+            audio_sampler,
+            cache,
+        )
+        text_token = last_text_token[0].item()
+        if text_token not in (0, 3):
+            _text = text_tokenizer.id_to_piece(text_token)
+            _text = _text.replace("▁", " ")
+            print(_text, end='', flush=True)
+    
+        last_text_token = last_text_token[None]
+    print()
+    token_per_second = steps / (time.time() - start_time)
+    print(f"steps: {steps}, token per sec: {token_per_second}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokenizer", type=str)
@@ -50,37 +97,11 @@ def main():
     print(f"loading weights {model_file}")
     model.load_weights(model_file, strict=True)
     print("weights loaded")
-    
-    cache = None
-    start_time = 0
-    last_text_token = mx.array([[32000]])
-    last_audio_tokens = []
-    text_sampler = msh_mlx.utils.Sampler()
-    audio_sampler = msh_mlx.utils.Sampler()
-    for i in range(args.steps + 1):
-        if i == 1:
-            start_time = time.time()
-        last_text_token, last_audio_tokens, cache = model.sample(
-            last_text_token,
-            last_audio_tokens,
-            text_sampler,
-            audio_sampler,
-            cache,
-        )
-        text_token = last_text_token[0].item()
-        if text_token not in (0, 3):
-            _text = text_tokenizer.id_to_piece(text_token)
-            _text = _text.replace("▁", " ")
-            print(_text, end='', flush=True)
-    
-        last_text_token = last_text_token[None]
-        if args.text_only:
-            last_audio_tokens = []
-        else:
-            last_audio_tokens = [l for l in last_audio_tokens]
-    print()
-    token_per_second = args.steps / (time.time() - start_time)
-    print(f"steps: {args.steps}, token per sec: {token_per_second}")
+
+    if args.text_only:
+        run_text_gen(model, text_tokenizer, args.steps)
+    else:
+        run_audio_gen(model, text_tokenizer, args.steps)
 
 if __name__ == "__main__":
     main()
