@@ -122,12 +122,15 @@ class Lm(nn.Module):
     def sample(
         self,
         step_idx: int,
-        token_ids: mx.array,
+        text_token_ids: mx.array,
+        audio_token_ids: List[mx.array],
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
         cache: Optional[List[Tuple[mx.array, mx.array]]] = None,
     ) -> Tuple[mx.array, mx.array, List[Tuple[mx.array, mx.array]]]:
-        xs = self.text_emb(token_ids)
+        xs = self.text_emb(text_token_ids)
+        for (token_ids, emb) in zip(audio_token_ids, self.audio_embs):
+            xs = xs + emb(token_ids)
         transformer_out, upd_cache = self.transformer(xs, cache=cache)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
