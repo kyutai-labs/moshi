@@ -90,7 +90,7 @@ def streaming_test():
         for step in range(5):
             run_step()
     print()
-    prof.export_chrome_trace("/home/laurent/tmp/trace.json")
+    prof.export_chrome_trace("trace.json")
     main_audio = torch.cat(main_audio, dim=-1)
     print(main_audio.shape)
     torchaudio.save("gen_main.wav", main_audio.cpu(), SAMPLE_RATE)
