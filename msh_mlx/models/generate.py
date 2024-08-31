@@ -80,6 +80,7 @@ class LmGen:
         text_tokens, audio_tokens, cache = self.model.sample(
             text_tokens,
             audio_tokens,
+            self.step_idx,
             self.text_sampler,
             self.audio_sampler,
             self.cache,

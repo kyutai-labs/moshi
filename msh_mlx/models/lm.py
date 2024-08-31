@@ -71,13 +71,15 @@ class DepFormer(nn.Module):
     def sample(
         self,
         main_transformer_out: mx.array,
+        step_idx: int,
         sampler: sampling.Sampler,
         text_token: mx.array,
     ) -> mx.array:
         tokens = []
         last_token = text_token
         cache = None
-        for slice in self.slices:
+        for slice_idx, slice in enumerate(self.slices):
+            last_token = last_token if step_idx > 0 or slice_idx in (0, 1, 9) else mx.array(2048)
             xs = slice.linear_in(main_transformer_out) + slice.emb(last_token)
             xs, cache = slice.transformer(xs, cache=cache)
             logits = slice.linear_out(xs)
@@ -124,6 +126,7 @@ class Lm(nn.Module):
         self,
         text_token_ids: mx.array,
         audio_token_ids: List[mx.array],
+        step_idx: int,
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
         cache: Optional[List[Tuple[mx.array, mx.array]]] = None,
@@ -137,6 +140,7 @@ class Lm(nn.Module):
         text_token, _ = text_sampler(text_logits[:, 0])
         audio_tokens = self.depformer.sample(
             transformer_out,
+            step_idx,
             audio_sampler,
             text_token,
         )
@@ -200,6 +204,6 @@ def config_v0_1() -> LmConfig:
         text_in_vocab_size=32001,
         text_out_vocab_size=32000,
         audio_codebooks=16,
-        audio_delays=([1] + [0] * 7) * 2,
+        audio_delays=([0] + [1] * 7) * 2,
     )
 
