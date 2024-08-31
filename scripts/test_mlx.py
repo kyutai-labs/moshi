@@ -8,6 +8,7 @@ from pathlib import Path
 import sentencepiece
 
 import mlx.core as mx
+import mlx.nn as nn
 from mlx.utils import tree_map_with_path
 
 import msh_mlx
@@ -17,6 +18,7 @@ def main():
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--model", type=str)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--quantized", action="store_true")
     parser.add_argument("--steps", default=100, type=int)
     args = parser.parse_args()
     
@@ -38,7 +40,8 @@ def main():
     
     model = msh_mlx.models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
-    # nn.quantize(model, bits=8)
+    if args.quantized:
+        nn.quantize(model, bits=8)
 
     if args.verbose:
         tree_map_with_path(lambda p, t: print(p, t.shape), model.parameters())
