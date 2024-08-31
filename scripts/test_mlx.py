@@ -26,7 +26,14 @@ def run_audio_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
         if i == 1:
             start_time = time.time()
         other_audio_tokens = mx.zeros(shape=(1, 8), dtype=mx.int32)
-        gen.step(other_audio_tokens)
+        text_token = gen.step(other_audio_tokens)
+        text_token = text_token[0].item()
+        audio_tokens = gen.last_audio_tokens()
+        _text = None
+        if text_token not in (0, 3):
+            _text = text_tokenizer.id_to_piece(text_token)
+            _text = _text.replace("▁", " ")
+        print(i, text_token, _text, audio_tokens.shape if audio_tokens is not None else None)
 
     print()
     token_per_second = steps / (time.time() - start_time)

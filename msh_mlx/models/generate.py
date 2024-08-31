@@ -35,6 +35,7 @@ class LmGen:
         self.cache = None
         self.audio_padding_token = self.model.cfg.audio_padding_token
         self.audio_delays = self.model.cfg.audio_delays
+        self.max_delay = max(self.audio_delays)
         self.main_codebooks = self.model.cfg.depformer.num_slices
 
 
@@ -52,7 +53,8 @@ class LmGen:
         """
         return -2
 
-    def step(self, other_audio_tokens: mx.array):
+    # Runs one step of inference and return the generated text token.
+    def step(self, other_audio_tokens: mx.array) -> mx.array:
         if self.step_idx >= self.max_steps:
             raise ValueError(f"reached max-steps {self.max_steps}")
 
@@ -92,3 +94,15 @@ class LmGen:
                 self.gen_sequence[:, cb_idx + 1, gen_idx] = audio_tokens[cb_idx]
         self.cache = cache
         self.step_idx += 1
+        return text_tokens
+
+    def last_audio_tokens(self) -> Optional[mx.array]:
+        gen_idx = self.step_idx - 1 - self.max_delay
+        if gen_idx < 0:
+            return None
+        tokens = self.gen_sequence[:, 1:1+self.main_codebooks, gen_idx]
+        if (tokens == self.audio_padding_token).any():
+            return None
+        if (tokens == self.ungenerated_token).any():
+            raise ValueError(f"ungenerated value in last-audio tokens {self.step_idx}")
+        return tokens
