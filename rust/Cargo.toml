@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "mimi-pyo3",
     "moshi-cli",
     "moshi-core",
     "web-ui-backend",
