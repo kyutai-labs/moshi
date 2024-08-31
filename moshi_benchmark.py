@@ -21,6 +21,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--tokenizer", type=str)
 parser.add_argument("--moshi-weights", type=str)
 parser.add_argument("--mimi-weights", type=str)
+parser.add_argument("--steps", default=100, type=int)
+parser.add_argument("--profile", action="store_true")
 args = parser.parse_args()
 
 
@@ -82,15 +84,17 @@ def streaming_test():
         dt = time.time() - start_time
         print(f"step time: {1000 * dt:.2f}ms")
 
-    for step in range(20):
+    for step in range(args.steps):
         run_step()
-    with profile(
-        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True
-    ) as prof:
-        for step in range(5):
-            run_step()
     print()
-    prof.export_chrome_trace("trace.json")
+    if args.profile:
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True
+        ) as prof:
+            for step in range(5):
+                run_step()
+        print()
+        prof.export_chrome_trace("trace.json")
     main_audio = torch.cat(main_audio, dim=-1)
     print(main_audio.shape)
     torchaudio.save("gen_main.wav", main_audio.cpu(), SAMPLE_RATE)
