@@ -112,9 +112,12 @@ class Lm(nn.Module):
         token_ids: mx.array,
         cache: Optional[List[Tuple[mx.array, mx.array]]] = None,
     ) -> Tuple[mx.array, List[Tuple[mx.array, mx.array]]]:
+        # Note that this does not apply the depformer.
         xs = self.text_emb(token_ids)
-        logits, upd_cache = self.transformer(xs, cache=cache)
-        return logits, upd_cache
+        transformer_out, upd_cache = self.transformer(xs, cache=cache)
+        transformer_out = self.out_norm(transformer_out)
+        text_logits = self.text_linear(transformer_out)
+        return text_logits, upd_cache
 
 
 def config_v0_1() -> LmConfig:
