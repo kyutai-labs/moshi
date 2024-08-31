@@ -134,6 +134,35 @@ impl Tokenizer {
         Ok(codes.into_py(py))
     }
 
+    fn encode_step(
+        &mut self,
+        pcm_data: numpy::PyReadonlyArray3<f32>,
+        py: Python,
+    ) -> PyResult<PyObject> {
+        let pcm_data = pcm_data.as_array();
+        // TODO(laurent): maybe this should be run in another thread?
+        let codes = py
+            .allow_threads(|| {
+                let pcm_shape = pcm_data.shape().to_vec();
+                let pcm_data = pcm_data.iter().copied().collect::<Vec<_>>();
+                let pcm_data = candle::Tensor::from_vec(pcm_data, pcm_shape, &self.device)?
+                    .to_dtype(self.dtype)?;
+                let codes = self.encodec.encode_step(&pcm_data.into())?;
+                match codes.as_option() {
+                    Some(codes) => Ok::<_, candle::Error>(Some(codes.to_vec3::<u32>()?)),
+                    None => Ok(None),
+                }
+            })
+            .w()?;
+        match codes {
+            Some(codes) => {
+                let codes = numpy::PyArray3::from_vec3_bound(py, &codes)?;
+                Ok(codes.into_py(py))
+            }
+            None => Ok(py.None()),
+        }
+    }
+
     fn decode(&mut self, codes: numpy::PyReadonlyArray3<u32>, py: Python) -> PyResult<PyObject> {
         let codes = codes.as_array();
         // TODO(laurent): maybe this should be run in another thread?
@@ -148,6 +177,41 @@ impl Tokenizer {
             .w()?;
         let pcm = numpy::PyArray3::from_vec3_bound(py, &pcm)?;
         Ok(pcm.into_py(py))
+    }
+
+    fn decode_step(
+        &mut self,
+        codes: numpy::PyReadonlyArray3<u32>,
+        py: Python,
+    ) -> PyResult<PyObject> {
+        let codes = codes.as_array();
+        // TODO(laurent): maybe this should be run in another thread?
+        let pcm = py
+            .allow_threads(|| {
+                let codes_shape = codes.shape().to_vec();
+                let codes = codes.iter().copied().collect::<Vec<_>>();
+                let codes = candle::Tensor::from_vec(codes, codes_shape, &self.device)?;
+                let pcm = self.encodec.decode_step(&codes.into())?;
+                match pcm.as_option() {
+                    Some(pcm) => {
+                        let pcm = pcm.to_dtype(candle::DType::F32)?;
+                        Ok::<_, candle::Error>(Some(pcm.to_vec3::<f32>()?))
+                    }
+                    None => Ok(None),
+                }
+            })
+            .w()?;
+        match pcm {
+            Some(pcm) => {
+                let pcm = numpy::PyArray3::from_vec3_bound(py, &pcm)?;
+                Ok(pcm.into_py(py))
+            }
+            None => Ok(py.None()),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.encodec.reset_state()
     }
 }
 
