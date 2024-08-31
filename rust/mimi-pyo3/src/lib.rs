@@ -46,7 +46,7 @@ struct Tokenizer {
 impl Tokenizer {
     #[pyo3(signature = (path, *, dtype="f32"))]
     #[new]
-    fn new(path: &str, dtype: &str) -> PyResult<Self> {
+    fn new(path: std::path::PathBuf, dtype: &str) -> PyResult<Self> {
         let device = candle::Device::Cpu;
         let dtype = match dtype {
             "f32" => candle::DType::F32,
@@ -117,13 +117,13 @@ impl Tokenizer {
         Ok(Self { encodec, device, dtype })
     }
 
-    fn encode(&mut self, pcm_data: numpy::PyReadonlyArray3<f32>, py: Python) -> PyResult<PyObject> {
-        let pcm_data = pcm_data.as_array();
+    fn encode(&mut self, pcm_data: &numpy::PyArray3<f32>) -> PyResult<PyObject> {
+        let py = pcm_data.py();
+        let pcm_shape = pcm_data.shape().to_vec();
+        let pcm_data = pcm_data.to_vec()?;
         // TODO(laurent): maybe this should be run in another thread?
         let codes = py
             .allow_threads(|| {
-                let pcm_shape = pcm_data.shape().to_vec();
-                let pcm_data = pcm_data.iter().copied().collect::<Vec<_>>();
                 let pcm_data = candle::Tensor::from_vec(pcm_data, pcm_shape, &self.device)?
                     .to_dtype(self.dtype)?;
                 let codes = self.encodec.encode(&pcm_data)?;
@@ -134,17 +134,13 @@ impl Tokenizer {
         Ok(codes.into_py(py))
     }
 
-    fn encode_step(
-        &mut self,
-        pcm_data: numpy::PyReadonlyArray3<f32>,
-        py: Python,
-    ) -> PyResult<PyObject> {
-        let pcm_data = pcm_data.as_array();
+    fn encode_step(&mut self, pcm_data: &numpy::PyArray3<f32>) -> PyResult<PyObject> {
+        let py = pcm_data.py();
+        let pcm_shape = pcm_data.shape().to_vec();
+        let pcm_data = pcm_data.to_vec()?;
         // TODO(laurent): maybe this should be run in another thread?
         let codes = py
             .allow_threads(|| {
-                let pcm_shape = pcm_data.shape().to_vec();
-                let pcm_data = pcm_data.iter().copied().collect::<Vec<_>>();
                 let pcm_data = candle::Tensor::from_vec(pcm_data, pcm_shape, &self.device)?
                     .to_dtype(self.dtype)?;
                 let codes = self.encodec.encode_step(&pcm_data.into())?;
@@ -163,13 +159,12 @@ impl Tokenizer {
         }
     }
 
-    fn decode(&mut self, codes: numpy::PyReadonlyArray3<u32>, py: Python) -> PyResult<PyObject> {
-        let codes = codes.as_array();
+    fn decode(&mut self, codes: &numpy::PyArray3<u32>, py: Python) -> PyResult<PyObject> {
+        let codes_shape = codes.shape().to_vec();
+        let codes = codes.to_vec()?;
         // TODO(laurent): maybe this should be run in another thread?
         let pcm = py
             .allow_threads(|| {
-                let codes_shape = codes.shape().to_vec();
-                let codes = codes.iter().copied().collect::<Vec<_>>();
                 let codes = candle::Tensor::from_vec(codes, codes_shape, &self.device)?;
                 let pcm = self.encodec.decode(&codes)?.to_dtype(candle::DType::F32)?;
                 pcm.to_vec3::<f32>()
@@ -179,17 +174,12 @@ impl Tokenizer {
         Ok(pcm.into_py(py))
     }
 
-    fn decode_step(
-        &mut self,
-        codes: numpy::PyReadonlyArray3<u32>,
-        py: Python,
-    ) -> PyResult<PyObject> {
-        let codes = codes.as_array();
+    fn decode_step(&mut self, codes: &numpy::PyArray3<u32>, py: Python) -> PyResult<PyObject> {
+        let codes_shape = codes.shape().to_vec();
+        let codes = codes.to_vec()?;
         // TODO(laurent): maybe this should be run in another thread?
         let pcm = py
             .allow_threads(|| {
-                let codes_shape = codes.shape().to_vec();
-                let codes = codes.iter().copied().collect::<Vec<_>>();
                 let codes = candle::Tensor::from_vec(codes, codes_shape, &self.device)?;
                 let pcm = self.encodec.decode_step(&codes.into())?;
                 match pcm.as_option() {
@@ -223,19 +213,13 @@ impl Tokenizer {
 #[pyo3(signature = (filename, data, sample_rate))]
 fn write_wav(
     filename: std::path::PathBuf,
-    data: numpy::PyReadonlyArray1<f32>,
+    data: &numpy::PyArray1<f32>,
     sample_rate: u32,
 ) -> PyResult<()> {
     let w = std::fs::File::create(&filename).w_f(&filename)?;
     let mut w = std::io::BufWriter::new(w);
-    let data = data.as_array();
-    match data.as_slice() {
-        None => {
-            let data = data.to_vec();
-            mm::wav::write_pcm_as_wav(&mut w, data.as_ref(), sample_rate).w_f(&filename)?
-        }
-        Some(data) => mm::wav::write_pcm_as_wav(&mut w, data, sample_rate).w_f(&filename)?,
-    }
+    let data = data.to_vec()?;
+    mm::wav::write_pcm_as_wav(&mut w, &data, sample_rate).w_f(&filename)?;
     Ok(())
 }
 
