@@ -9,6 +9,9 @@ import torch
 import torchaudio
 import numpy as np
 import random
+import time
+
+from torch.profiler import profile, ProfilerActivity
 
 SAMPLE_RATE = msh.models.moshi.SAMPLE_RATE
 DEVICE = "cuda:0"
@@ -42,6 +45,7 @@ text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)
 
 print("loading moshi")
 lm = msh.models.moshi.get_lm(args.moshi_weights, DEVICE)
+lm.to(torch.bfloat16)
 print("lm loaded")
 
 
@@ -55,7 +59,10 @@ def streaming_test():
     lm_gen = msh.models.LMGen(lm, check=True, max_gen_len=max_gen_len)
 
     main_audio = []
-    for step in range(200):
+    main_text = []
+
+    def run_step():
+        start_time = time.time()
         # Chunk should contain the pcm data from the user, single channel with a sample rate of 24000.
         chunk = torch.zeros((1, 1, 1920), dtype=torch.float, device=DEVICE)
         codes, _scale = ec.encode(chunk)
@@ -65,14 +72,25 @@ def streaming_test():
             if text_token not in (0, 3):
                 _text = text_tokenizer.id_to_piece(text_token)
                 _text = _text.replace("▁", " ")
-                print(_text, end="", flush=True)
+                main_text.append(_text)
             if all([t < 2048 for t in tokens[1:]]):
                 tokens = torch.tensor(tokens[1:], device=DEVICE).reshape((1, 8, 1))
                 main_pcm = ec.decode(tokens, scale=None)
                 # main_pcm is the audio to be played back to the user, here we just append it and store it in
                 # a file once the loop is finished.
                 main_audio.append(main_pcm[0])
+        dt = time.time() - start_time
+        print(f"step time: {1000 * dt:.2f}ms")
+
+    for step in range(20):
+        run_step()
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True
+    ) as prof:
+        for step in range(5):
+            run_step()
     print()
+    prof.export_chrome_trace("/home/laurent/tmp/trace.json")
     main_audio = torch.cat(main_audio, dim=-1)
     print(main_audio.shape)
     torchaudio.save("gen_main.wav", main_audio.cpu(), SAMPLE_RATE)

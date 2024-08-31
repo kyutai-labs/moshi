@@ -4,7 +4,7 @@
 
 import msh
 import torch
-import safetensors
+from safetensors.torch import load_model
 from pathlib import Path
 import typing as tp
 
@@ -123,7 +123,7 @@ def get_encodec(filename: tp.Union[str, Path], device):
     ).to(device=device)
     model.eval()
     if _is_safetensors(filename):
-        safetensors.torch.load_model(model, filename)
+        load_model(model, filename)
     else:
         pkg = torch.load(
             filename,
@@ -141,7 +141,7 @@ def get_lm(filename: tp.Union[str, Path], device):
     model.eval()
     model.to(torch.bfloat16)
     if _is_safetensors(filename):
-        safetensors.torch.load_model(model, filename)
+        load_model(model, filename)
     else:
         pkg = torch.load(
             filename,
