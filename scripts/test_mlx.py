@@ -61,7 +61,6 @@ def main():
         if i == 1:
             start_time = time.time()
         last_text_token, last_audio_tokens, cache = model.sample(
-            i,
             last_text_token,
             last_audio_tokens,
             text_sampler,

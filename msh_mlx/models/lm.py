@@ -26,7 +26,15 @@ class LmConfig:
     text_out_vocab_size: int
     audio_vocab_size: int
     audio_codebooks: int
+    audio_delays: List[int]
 
+    @property 
+    def audio_eos_token(self) -> int:
+        return self.audio_vocab_size - 2
+
+    @property 
+    def audio_padding_token(self) -> int:
+        return self.audio_vocab_size - 1
 
 class DepFormerSlice(nn.Module):
     def __init__(self, in_vocab_size: int, out_vocab_size: int, main_transformer_dim: int, cfg: TransformerConfig):
@@ -46,8 +54,6 @@ class DepFormer(nn.Module):
     def __init__(self, cfg: LmConfig):
         super().__init__()
 
-        self.audio_eos_token = cfg.audio_vocab_size - 2
-        self.audio_padding_token = cfg.audio_vocab_size - 1
         self.slices: List[DepFormerSlice] = []
         for slice_idx in range(cfg.depformer.num_slices):
             in_vs = cfg.text_in_vocab_size if slice_idx == 0 else cfg.audio_vocab_size
@@ -64,7 +70,6 @@ class DepFormer(nn.Module):
 
     def sample(
         self,
-        step_idx: int,
         main_transformer_out: mx.array,
         sampler: sampling.Sampler,
         text_token: mx.array,
@@ -72,13 +77,8 @@ class DepFormer(nn.Module):
         tokens = []
         last_token = text_token
         cache = None
-        for slice_idx, slice in enumerate(self.slices):
-            xs = slice.linear_in(main_transformer_out)
-            # TODO: avoid hardcoding these...
-            # if slice_idx not in (0, 1, 9) and step_idx <= 1:
-            #    xs = mx.array([self.audio_padding_token])
-
-            xs = xs + slice.emb(last_token)
+        for slice in self.slices:
+            xs = slice.linear_in(main_transformer_out) + slice.emb(last_token)
             xs, cache = slice.transformer(xs, cache=cache)
             logits = slice.linear_out(xs)
             last_token, _ = sampler(logits[0])
@@ -95,6 +95,7 @@ class Lm(nn.Module):
         self.transformer = Transformer(cfg.transformer)
         self.depformer = DepFormer(cfg)
         self.text_emb = nn.Embedding(cfg.text_in_vocab_size, dim)
+        self.cfg: LmConfig = cfg
 
         if cfg.transformer.norm == "layer_norm":
             self.out_norm = nn.LayerNorm(dim, 1e-5)
@@ -121,7 +122,6 @@ class Lm(nn.Module):
 
     def sample(
         self,
-        step_idx: int,
         text_token_ids: mx.array,
         audio_token_ids: List[mx.array],
         text_sampler: sampling.Sampler,
@@ -136,7 +136,6 @@ class Lm(nn.Module):
         text_logits = self.text_linear(transformer_out)
         text_token, _ = text_sampler(text_logits[:, 0])
         audio_tokens = self.depformer.sample(
-            step_idx,
             transformer_out,
             audio_sampler,
             text_token,
@@ -201,5 +200,6 @@ def config_v0_1() -> LmConfig:
         text_in_vocab_size=32001,
         text_out_vocab_size=32000,
         audio_codebooks=16,
+        audio_delays=([1] + [0] * 7) * 2,
     )
 
