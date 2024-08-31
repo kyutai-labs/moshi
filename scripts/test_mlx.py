@@ -53,12 +53,18 @@ def main():
     cache = None
     start_time = 0
     last_token = mx.array([[32000]])
-    sampler = msh_mlx.utils.Sampler()
+    text_sampler = msh_mlx.utils.Sampler()
+    audio_sampler = msh_mlx.utils.Sampler()
     for i in range(args.steps + 1):
         if i == 1:
             start_time = time.time()
-        logits, cache = model(last_token, cache)
-        last_token, _ = sampler(logits[:, 0])
+        last_token, _audio_tokens, cache = model.sample(
+            i,
+            last_token,
+            text_sampler,
+            audio_sampler,
+            cache,
+        )
         text_token = last_token[0].item()
         if text_token not in (0, 3):
             _text = text_tokenizer.id_to_piece(text_token)

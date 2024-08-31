@@ -65,7 +65,7 @@ class DepFormer(nn.Module):
     def sample(
         self,
         step_idx: int,
-        main_xs: mx.array,
+        main_transformer_out: mx.array,
         sampler: sampling.Sampler,
         text_token: mx.array,
     ) -> mx.array:
@@ -73,15 +73,15 @@ class DepFormer(nn.Module):
         last_token = text_token
         cache = None
         for slice_idx, slice in enumerate(self.slices):
-            xs = slice.linear_in(main_xs)
+            xs = slice.linear_in(main_transformer_out)
             # TODO: avoid hardcoding these...
-            if slice_idx not in (0, 1, 9) and step_idx <= 1:
-                xs = mx.array([self.audio_padding_token])
+            # if slice_idx not in (0, 1, 9) and step_idx <= 1:
+            #    xs = mx.array([self.audio_padding_token])
 
-            xs = xs + slice.emb(mx.array([last_token]))
+            xs = xs + slice.emb(last_token)
             xs, cache = slice.transformer(xs, cache=cache)
             logits = slice.linear_out(xs)
-            last_token = sampler(logits)
+            last_token, _ = sampler(logits[0])
             tokens.append(last_token)
         tokens = mx.concatenate(tokens)
         return tokens
@@ -118,6 +118,27 @@ class Lm(nn.Module):
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
         return text_logits, upd_cache
+
+    def sample(
+        self,
+        step_idx: int,
+        token_ids: mx.array,
+        text_sampler: sampling.Sampler,
+        audio_sampler: sampling.Sampler,
+        cache: Optional[List[Tuple[mx.array, mx.array]]] = None,
+    ) -> Tuple[mx.array, mx.array, List[Tuple[mx.array, mx.array]]]:
+        xs = self.text_emb(token_ids)
+        transformer_out, upd_cache = self.transformer(xs, cache=cache)
+        transformer_out = self.out_norm(transformer_out)
+        text_logits = self.text_linear(transformer_out)
+        text_token, _ = text_sampler(text_logits[:, 0])
+        audio_tokens = self.depformer.sample(
+            step_idx,
+            transformer_out,
+            audio_sampler,
+            text_token,
+        )
+        return text_token, audio_tokens, upd_cache
 
 
 def config_v0_1() -> LmConfig:
