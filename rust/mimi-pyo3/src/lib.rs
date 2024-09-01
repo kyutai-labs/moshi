@@ -1,3 +1,7 @@
+// Copyright (c) Kyutai, all rights reserved.
+// This source code is licensed under the license found in the
+// LICENSE file in the root directory of this source tree.
+
 use pyo3::prelude::*;
 
 use ::moshi as mm;
@@ -204,9 +208,9 @@ impl Tokenizer {
     }
 }
 
-#[allow(unused)]
 #[pyclass]
 struct StreamTokenizer {
+    #[allow(unused)]
     dtype: candle::DType,
     encoder_rx: std::sync::mpsc::Receiver<Vec<Vec<u32>>>,
     encoder_tx: std::sync::mpsc::Sender<Vec<f32>>,
@@ -237,27 +241,37 @@ impl StreamTokenizer {
         let (e_tx, encoder_rx) = std::sync::mpsc::channel::<Vec<Vec<u32>>>();
         std::thread::spawn(move || {
             while let Ok(pcm_data) = e_rx.recv() {
-                let l = pcm_data.len();
-                let pcm_data = candle::Tensor::from_vec(pcm_data, (1, 1, l), &candle::Device::Cpu)?
-                    .to_dtype(dtype)?;
-                let codes = e_encodec.encode_step(&pcm_data.into())?;
-                if let Some(codes) = codes.as_option() {
-                    let mut codes = codes.to_vec3::<u32>()?;
-                    e_tx.send(codes.remove(0))?;
+                // Can't wait for try blocks to be a thing
+                if let Err(err) = (|| {
+                    let l = pcm_data.len();
+                    let pcm_data =
+                        candle::Tensor::from_vec(pcm_data, (1, 1, l), &candle::Device::Cpu)?
+                            .to_dtype(dtype)?;
+                    let codes = e_encodec.encode_step(&pcm_data.into())?;
+                    if let Some(codes) = codes.as_option() {
+                        let mut codes = codes.to_vec3::<u32>()?;
+                        e_tx.send(codes.remove(0))?;
+                    }
+                    Ok::<_, anyhow::Error>(())
+                })() {
+                    eprintln!("error in encoder thread {err:?}")
                 }
             }
-            Ok::<_, anyhow::Error>(())
         });
         std::thread::spawn(move || {
             while let Ok(codes) = d_rx.recv() {
-                let codes = candle::Tensor::new(codes, &candle::Device::Cpu)?;
-                let pcm_data = d_encodec.decode_step(&codes.into())?;
-                if let Some(pcm_data) = pcm_data.as_option() {
-                    let mut pcm_data = pcm_data.to_vec3::<f32>()?;
-                    d_tx.send(pcm_data.remove(0).remove(0))?;
+                if let Err(err) = (|| {
+                    let codes = candle::Tensor::new(codes, &candle::Device::Cpu)?;
+                    let pcm_data = d_encodec.decode_step(&codes.into())?;
+                    if let Some(pcm_data) = pcm_data.as_option() {
+                        let mut pcm_data = pcm_data.to_vec3::<f32>()?;
+                        d_tx.send(pcm_data.remove(0).remove(0))?;
+                    }
+                    Ok::<_, anyhow::Error>(())
+                })() {
+                    eprintln!("error in decoder thread {err:?}")
                 }
             }
-            Ok::<_, anyhow::Error>(())
         });
         Ok(Self { dtype, encoder_rx, encoder_tx, decoder_rx, decoder_tx })
     }
@@ -274,6 +288,32 @@ impl StreamTokenizer {
         let codes = codes.chunks_exact(dims[1]).map(|v| v.to_vec()).collect::<Vec<_>>();
         self.decoder_tx.send(codes).w()?;
         Ok(())
+    }
+
+    fn get_encoded(&mut self, py: Python) -> PyResult<PyObject> {
+        match self.encoder_rx.try_recv() {
+            Ok(codes) => {
+                let codes = numpy::PyArray2::from_vec2_bound(py, &codes)?;
+                Ok(codes.into_py(py))
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                py_bail!("worker thread disconnected")
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => Ok(py.None()),
+        }
+    }
+
+    fn get_decoded(&mut self, py: Python) -> PyResult<PyObject> {
+        match self.decoder_rx.try_recv() {
+            Ok(pcm) => {
+                let pcm = numpy::PyArray1::from_vec_bound(py, pcm);
+                Ok(pcm.into_py(py))
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                py_bail!("worker thread disconnected")
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => Ok(py.None()),
+        }
     }
 }
 
