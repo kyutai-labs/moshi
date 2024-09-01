@@ -132,10 +132,10 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
         start_time = time.time()
         while len(all_out_pcm) < steps - 1:
             data = audio_tokenizer.get_decoded()
-            stats.on_recv(time.time())
             if data is None:
                 await asyncio.sleep(0.001)
                 continue
+            stats.on_recv(time.time())
             all_out_pcm.append(data)
         print()
         token_per_second = steps / (time.time() - start_time)
