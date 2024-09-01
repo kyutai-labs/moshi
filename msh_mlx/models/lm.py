@@ -146,6 +146,21 @@ class Lm(nn.Module):
         )
         return text_token, audio_tokens, upd_cache
 
+    def warmup(self):
+        text, audio, _ = self.sample(
+            mx.array([[32000]]),
+            [mx.array([[0]])] * 8,
+            0,
+            text_sampler=sampling.Sampler(),
+            audio_sampler=sampling.Sampler(),
+            cache=None,
+        )
+        if text.sum().item() == 42:
+            raise ValueError(42)
+        if audio.sum().item() == 42:
+            raise ValueError(42)
+
+
 
 def config_v0_1() -> LmConfig:
     transformer = TransformerConfig(
