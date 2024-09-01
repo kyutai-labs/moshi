@@ -53,11 +53,7 @@ def run_audio_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, step
     all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
     mimi.write_wav("out.wav", all_out_pcm[0, 0], sample_rate=24000)
 
-def run_text_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
-    import mimi
-
-    audio_tokenizer = mimi.Tokenizer(mimi_path)
-    all_out_pcm = []
+def run_text_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
     cache = None
     start_time = 0
     last_text_token = mx.array([[32000]])
@@ -66,7 +62,7 @@ def run_text_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps
     for i in range(steps + 1):
         if i == 1:
             start_time = time.time()
-        last_text_token, audio_tokens, cache = model.sample(
+        last_text_token, _, cache = model.sample(
             last_text_token,
             [],
             i,
@@ -74,9 +70,6 @@ def run_text_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps
             audio_sampler,
             cache,
         )
-        audio_tokens = np.array(audio_tokens[None, :, None]).astype(np.uint32)
-        out_pcm = audio_tokenizer.decode_step(audio_tokens)
-        all_out_pcm.append(out_pcm)
         text_token = last_text_token[0].item()
         if text_token not in (0, 3):
             _text = text_tokenizer.id_to_piece(text_token)
@@ -86,8 +79,6 @@ def run_text_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps
         last_text_token = last_text_token[None]
     print()
     token_per_second = steps / (time.time() - start_time)
-    all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
-    mimi.write_wav("out.wav", all_out_pcm[0, 0], sample_rate=24000)
     print(f"steps: {steps}, token per sec: {token_per_second}")
 
 
@@ -131,7 +122,7 @@ def main():
     print("weights loaded")
 
     if args.text_only:
-        run_text_gen(model, args.mimi, text_tokenizer, args.steps)
+        run_text_gen(model, text_tokenizer, args.steps)
     else:
         run_audio_gen(model, args.mimi, text_tokenizer, args.steps)
 
