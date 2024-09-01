@@ -26,6 +26,7 @@ def main():
             start_time = time.time()
         pcm_data = np.array([[[0.] * 1920]]).astype(np.float32)
         out = model.encode_step(pcm_data)
+        print(out.shape)
         pcm_data = model.decode_step(out)
         print(pcm_data)
     token_per_second = steps / (time.time() - start_time)

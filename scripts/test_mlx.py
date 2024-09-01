@@ -4,6 +4,7 @@
 
 import argparse
 import asyncio
+import queue
 import time
 import numpy as np
 from pathlib import Path
@@ -58,6 +59,7 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
 
     audio_tokenizer = mimi.StreamTokenizer(mimi_path)
 
+    model.warmup()
     gen = msh_mlx.models.LmGen(
         model=model,
         max_steps=steps + 5,
@@ -65,31 +67,57 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
         audio_sampler=msh_mlx.utils.Sampler(),
         check=False,
     )
-    gen.model
-    pcm_data = np.array([[[0.] * 1920]]).astype(np.float32)
-    all_out_pcm = []
-    start_time = time.time()
-    for _ in range(steps + 1):
-        other_audio_tokens = audio_tokenizer.encode_step(pcm_data)
-        other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[:, :, :8]
-        text_token = gen.step(other_audio_tokens)
-        text_token = text_token[0].item()
-        audio_tokens = gen.last_audio_tokens()
-        _text = None
-        if text_token not in (0, 3):
-            _text = text_tokenizer.id_to_piece(text_token)
-            _text = _text.replace("▁", " ")
-            print(_text, end='', flush=True)
-        if audio_tokens is not None:
-            audio_tokens = np.array(audio_tokens[:, :, None]).astype(np.uint32)
-            out_pcm = audio_tokenizer.decode_step(audio_tokens)
-            all_out_pcm.append(out_pcm)
+    end_queue = queue.Queue()
 
-    print()
-    token_per_second = steps / (time.time() - start_time)
-    print(f"steps: {steps}, token per sec: {token_per_second}")
-    all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
-    mimi.write_wav("out.wav", all_out_pcm[0, 0], sample_rate=24000)
+    async def send_loop():
+        pcm_data = np.array([0.] * 1920).astype(np.float32)
+        for _ in range(steps):
+            await asyncio.sleep(1.0 / 13.0)
+            audio_tokenizer.encode(pcm_data)
+        await asyncio.sleep(1.0)
+        end_queue.put_nowait(True)
+
+
+    async def model_loop():
+        while True:
+            data = audio_tokenizer.get_encoded()
+            if data is None:
+                await asyncio.sleep(0.001)
+                try:
+                    end_queue.get(block=False)
+                    break
+                except queue.Empty:
+                    pass
+                continue
+            data = mx.array(data).transpose(1, 0)[:, :8]
+            text_token = gen.step(data)
+            text_token = text_token[0].item()
+            audio_tokens = gen.last_audio_tokens()
+            if text_token not in (0, 3):
+                _text = text_tokenizer.id_to_piece(text_token)
+                _text = _text.replace("▁", " ")
+                print(_text, end='', flush=True)
+            if audio_tokens is not None:
+                audio_tokens = np.array(audio_tokens).astype(np.uint32)
+                audio_tokenizer.decode(audio_tokens)
+
+    async def recv_loop():
+        all_out_pcm = []
+        start_time = time.time()
+        while len(all_out_pcm) < steps - 1:
+            data = audio_tokenizer.get_decoded()
+            if data is None:
+                await asyncio.sleep(0.001)
+                continue
+            all_out_pcm.append(data)
+        print()
+        token_per_second = steps / (time.time() - start_time)
+        print(f"steps: {steps}, token per sec: {token_per_second}")
+        all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
+        mimi.write_wav("out.wav", all_out_pcm, sample_rate=24000)
+
+    await asyncio.gather(recv_loop(), send_loop(), model_loop())
+
 
 def run_text_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
     cache = None
@@ -113,7 +141,7 @@ def run_text_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
             _text = text_tokenizer.id_to_piece(text_token)
             _text = _text.replace("▁", " ")
             print(_text, end='', flush=True)
-    
+
         last_text_token = last_text_token[None]
     print()
     token_per_second = steps / (time.time() - start_time)
@@ -130,7 +158,7 @@ def main():
     parser.add_argument("--steps", default=100, type=int)
     parser.add_argument("mode", default="text", type=str)
     args = parser.parse_args()
-    
+
     model_file = args.model
     tokenizer_file = args.tokenizer
     if model_file is None:
@@ -138,15 +166,15 @@ def main():
     if tokenizer_file is None:
         tokenizer_file = str(Path.home() / "tmp" / "tokenizer_spm_32k_3.model")
 
-    
+
     print(f"loading text tokenizer {tokenizer_file}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
     mx.random.seed(299792458)
-    
+
     lm_config = msh_mlx.models.config_v0_1()
     if args.verbose:
         print(f"model config:\n{lm_config}")
-    
+
     model = msh_mlx.models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if args.quantized:

@@ -261,7 +261,7 @@ impl StreamTokenizer {
         std::thread::spawn(move || {
             while let Ok(codes) = d_rx.recv() {
                 if let Err(err) = (|| {
-                    let codes = candle::Tensor::new(codes, &candle::Device::Cpu)?;
+                    let codes = candle::Tensor::new(codes, &candle::Device::Cpu)?.unsqueeze(2)?;
                     let pcm_data = d_encodec.decode_step(&codes.into())?;
                     if let Some(pcm_data) = pcm_data.as_option() {
                         let mut pcm_data = pcm_data.to_vec3::<f32>()?;
