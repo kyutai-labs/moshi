@@ -1,8 +1,9 @@
 # moshi-inference
 
-There are two separate versions of the moshi inference stack in this repo.
+There are three separate versions of the moshi inference stack in this repo.
 - The rust version used in production is in the `rust` directory.
-- The python version is in the `msh` directory.
+- The python version using PyTorch is in the `msh` directory.
+- The python version using MLX is in the `msh_mlx` directory.
 
 ## Rust
 
@@ -83,7 +84,7 @@ The format for the rest of the message, aka the payload, depends on `MT`.
 ```
 Messages with an unknow message types should be discarded.
  
-## Python
+## Python (PyTorch)
 
 The python api can be found in the `msh` directory. It provides streaming
 version of the audio tokenizer (mimi) and the lm model (moshi).
@@ -126,13 +127,28 @@ In order to test the audio tokenizer, you can run the following command.
 
 ```bash
 wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
-python mimi_test.py --weights .../tokenizer-de0e421d-checkpoint40.safetensors
+PYTHONPATH=. python scripts/mimi_test.py --weights .../tokenizer-de0e421d-checkpoint40.safetensors
 ```
 
 In order to test moshi, run the following.
 ```bash
-python moshi_test.py \
+PYTHONPATH=. python scripts/moshi_test.py \
     --mimi-weights tokenizer-de0e421d-checkpoint40.safetensors \
     --tokenizer tokenizer_spm_32k_3.model \
     --moshi-weights mimi_0abbed5f@100.safetensors 
+```
+
+## Python (MLX) for local inference on macOS
+
+You first have to compile and install the mimi extension.
+```bash
+maturin dev -r -m rust/mimi-pyo3/Cargo.toml
+```
+
+Then the model can be run with:
+```bash
+PYTHONPATH=. python scripts/local_mlx.py  \
+    --model ~/tmp/mimi_mlx_0abbed5f@100.q8.safetensors \
+    --mimi ~/tmp/tokenizer-de0e421d-checkpoint40.safetensors \
+    --quantized
 ```
