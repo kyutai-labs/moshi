@@ -5,16 +5,38 @@
 import argparse
 import asyncio
 import queue
+import json
 import time
 import numpy as np
 from pathlib import Path
 import sentencepiece
+import typing as tp
 
 import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_map_with_path
 
 import msh_mlx
+
+class Stats:
+    send_times: tp.List[float] = []
+    model_times: tp.List[tp.Tuple[float, float]] = []
+    recv_times: tp.List[float] = []
+
+    def __init__(self):
+        self.send_times = []
+        self.model_times = []
+        self.recv_times = []
+
+    def on_send(self, t: float):
+        self.send_times.append(t)
+
+    def on_model(self, t1: float, t2: float):
+        self.model_times.append((t1, t2))
+
+    def on_recv(self, t: float):
+        self.recv_times.append(t)
+
 
 def run_audio_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
     import mimi
@@ -58,6 +80,7 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
     import mimi
 
     audio_tokenizer = mimi.StreamTokenizer(mimi_path)
+    stats = Stats()
 
     model.warmup()
     gen = msh_mlx.models.LmGen(
@@ -73,6 +96,7 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
         pcm_data = np.array([0.] * 1920).astype(np.float32)
         for _ in range(steps):
             await asyncio.sleep(1.0 / 13.0)
+            stats.on_send(time.time())
             audio_tokenizer.encode(pcm_data)
         await asyncio.sleep(1.0)
         end_queue.put_nowait(True)
@@ -89,6 +113,7 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
                 except queue.Empty:
                     pass
                 continue
+            start_time = time.time()
             data = mx.array(data).transpose(1, 0)[:, :8]
             text_token = gen.step(data)
             text_token = text_token[0].item()
@@ -100,12 +125,14 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
             if audio_tokens is not None:
                 audio_tokens = np.array(audio_tokens).astype(np.uint32)
                 audio_tokenizer.decode(audio_tokens)
+            stats.on_model(start_time, time.time())
 
     async def recv_loop():
         all_out_pcm = []
         start_time = time.time()
         while len(all_out_pcm) < steps - 1:
             data = audio_tokenizer.get_decoded()
+            stats.on_recv(time.time())
             if data is None:
                 await asyncio.sleep(0.001)
                 continue
@@ -117,6 +144,14 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
         mimi.write_wav("out.wav", all_out_pcm, sample_rate=24000)
 
     await asyncio.gather(recv_loop(), send_loop(), model_loop())
+    stats = {
+        "send_times": stats.send_times,
+        "recv_times": stats.recv_times,
+        "model_times": stats.model_times,
+    }
+    with open('timings.json', 'w') as json_file:
+        json.dump(stats, json_file)
+
 
 
 def run_text_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):

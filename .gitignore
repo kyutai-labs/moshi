@@ -177,3 +177,4 @@ pkg
 log.*
 laurent/cuda-test/check
 client/node_modules
+timings.json
