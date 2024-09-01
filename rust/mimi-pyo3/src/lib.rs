@@ -35,6 +35,65 @@ macro_rules! py_bail {
     };
 }
 
+fn encodec_cfg() -> encodec::Config {
+    let seanet_cfg = seanet::Config {
+        dimension: 512,
+        channels: 1,
+        causal: true,
+        n_filters: 64,
+        n_residual_layers: 1,
+        activation: candle_nn::Activation::Elu(1.),
+        compress: 2,
+        dilation_base: 2,
+        disable_norm_outer_blocks: 0,
+        final_activation: None,
+        kernel_size: 7,
+        residual_kernel_size: 3,
+        last_kernel_size: 3,
+        lstm: 0,
+        norm: conv::Norm::WeightNorm,
+        pad_mode: conv::PadMode::Constant,
+        ratios: vec![8, 6, 5, 4],
+        true_skip: true,
+    };
+    let transformer_cfg = transformer::Config {
+        d_model: seanet_cfg.dimension,
+        num_heads: 8,
+        num_layers: 8,
+        causal: true,
+        norm_first: true,
+        bias_ff: false,
+        bias_attn: false,
+        layer_scale: Some(0.01),
+        context: 250,
+        conv_kernel_size: 5,
+        use_conv_bias: true,
+        use_conv_block: false,
+        max_period: 10000,
+        positional_embedding: transformer::PositionalEmbedding::Rope,
+        gating: None,
+        norm: mm::NormType::LayerNorm,
+
+        dim_feedforward: 2048,
+        kv_repeat: 1,
+        conv_layout: true, // see builders.py
+        cross_attention: false,
+        max_seq_len: 4096,
+    };
+    encodec::Config {
+        channels: 1,
+        sample_rate: 24_000.,
+        frame_rate: 12.5,
+        renormalize: true,
+        resample_method: encodec::ResampleMethod::Conv,
+        seanet: seanet_cfg,
+        transformer: transformer_cfg,
+        quantizer_n_q: 8,
+        quantizer_bins: 2048,
+        quantizer_dim: 256,
+    }
+}
+
 #[pyclass]
 struct Tokenizer {
     encodec: encodec::Encodec,
@@ -56,63 +115,7 @@ impl Tokenizer {
         };
         let vb =
             unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[path], dtype, &device).w()? };
-        let seanet_cfg = seanet::Config {
-            dimension: 512,
-            channels: 1,
-            causal: true,
-            n_filters: 64,
-            n_residual_layers: 1,
-            activation: candle_nn::Activation::Elu(1.),
-            compress: 2,
-            dilation_base: 2,
-            disable_norm_outer_blocks: 0,
-            final_activation: None,
-            kernel_size: 7,
-            residual_kernel_size: 3,
-            last_kernel_size: 3,
-            lstm: 0,
-            norm: conv::Norm::WeightNorm,
-            pad_mode: conv::PadMode::Constant,
-            ratios: vec![8, 6, 5, 4],
-            true_skip: true,
-        };
-        let transformer_cfg = transformer::Config {
-            d_model: seanet_cfg.dimension,
-            num_heads: 8,
-            num_layers: 8,
-            causal: true,
-            norm_first: true,
-            bias_ff: false,
-            bias_attn: false,
-            layer_scale: Some(0.01),
-            context: 250,
-            conv_kernel_size: 5,
-            use_conv_bias: true,
-            use_conv_block: false,
-            max_period: 10000,
-            positional_embedding: transformer::PositionalEmbedding::Rope,
-            gating: None,
-            norm: mm::NormType::LayerNorm,
-
-            dim_feedforward: 2048,
-            kv_repeat: 1,
-            conv_layout: true, // see builders.py
-            cross_attention: false,
-            max_seq_len: 4096,
-        };
-        let cfg = encodec::Config {
-            channels: 1,
-            sample_rate: 24_000.,
-            frame_rate: 12.5,
-            renormalize: true,
-            resample_method: encodec::ResampleMethod::Conv,
-            seanet: seanet_cfg,
-            transformer: transformer_cfg,
-            quantizer_n_q: 8,
-            quantizer_bins: 2048,
-            quantizer_dim: 256,
-        };
-
+        let cfg = encodec_cfg();
         let encodec = encodec::Encodec::new(cfg, vb).w()?;
         Ok(Self { encodec, device, dtype })
     }
@@ -121,7 +124,6 @@ impl Tokenizer {
         let py = pcm_data.py();
         let pcm_shape = pcm_data.shape().to_vec();
         let pcm_data = pcm_data.to_vec()?;
-        // TODO(laurent): maybe this should be run in another thread?
         let codes = py
             .allow_threads(|| {
                 let pcm_data = candle::Tensor::from_vec(pcm_data, pcm_shape, &self.device)?
@@ -138,7 +140,6 @@ impl Tokenizer {
         let py = pcm_data.py();
         let pcm_shape = pcm_data.shape().to_vec();
         let pcm_data = pcm_data.to_vec()?;
-        // TODO(laurent): maybe this should be run in another thread?
         let codes = py
             .allow_threads(|| {
                 let pcm_data = candle::Tensor::from_vec(pcm_data, pcm_shape, &self.device)?
@@ -162,7 +163,6 @@ impl Tokenizer {
     fn decode(&mut self, codes: &numpy::PyArray3<u32>, py: Python) -> PyResult<PyObject> {
         let codes_shape = codes.shape().to_vec();
         let codes = codes.to_vec()?;
-        // TODO(laurent): maybe this should be run in another thread?
         let pcm = py
             .allow_threads(|| {
                 let codes = candle::Tensor::from_vec(codes, codes_shape, &self.device)?;
@@ -177,7 +177,6 @@ impl Tokenizer {
     fn decode_step(&mut self, codes: &numpy::PyArray3<u32>, py: Python) -> PyResult<PyObject> {
         let codes_shape = codes.shape().to_vec();
         let codes = codes.to_vec()?;
-        // TODO(laurent): maybe this should be run in another thread?
         let pcm = py
             .allow_threads(|| {
                 let codes = candle::Tensor::from_vec(codes, codes_shape, &self.device)?;
@@ -205,6 +204,79 @@ impl Tokenizer {
     }
 }
 
+#[allow(unused)]
+#[pyclass]
+struct StreamTokenizer {
+    dtype: candle::DType,
+    encoder_rx: std::sync::mpsc::Receiver<Vec<Vec<u32>>>,
+    encoder_tx: std::sync::mpsc::Sender<Vec<f32>>,
+    decoder_rx: std::sync::mpsc::Receiver<Vec<f32>>,
+    decoder_tx: std::sync::mpsc::Sender<Vec<Vec<u32>>>,
+}
+
+#[pymethods]
+impl StreamTokenizer {
+    #[pyo3(signature = (path, *, dtype="f32"))]
+    #[new]
+    fn new(path: std::path::PathBuf, dtype: &str) -> PyResult<Self> {
+        let device = candle::Device::Cpu;
+        let dtype = match dtype {
+            "f32" => candle::DType::F32,
+            "f16" => candle::DType::F16,
+            "bf16" => candle::DType::BF16,
+            dtype => py_bail!("unsupported dtype '{dtype}'"),
+        };
+        let vb =
+            unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[path], dtype, &device).w()? };
+        let cfg = encodec_cfg();
+        let mut e_encodec = encodec::Encodec::new(cfg, vb).w()?;
+        let mut d_encodec = e_encodec.clone();
+        let (encoder_tx, e_rx) = std::sync::mpsc::channel::<Vec<f32>>();
+        let (decoder_tx, d_rx) = std::sync::mpsc::channel::<Vec<Vec<u32>>>();
+        let (d_tx, decoder_rx) = std::sync::mpsc::channel::<Vec<f32>>();
+        let (e_tx, encoder_rx) = std::sync::mpsc::channel::<Vec<Vec<u32>>>();
+        std::thread::spawn(move || {
+            while let Ok(pcm_data) = e_rx.recv() {
+                let l = pcm_data.len();
+                let pcm_data = candle::Tensor::from_vec(pcm_data, (1, 1, l), &candle::Device::Cpu)?
+                    .to_dtype(dtype)?;
+                let codes = e_encodec.encode_step(&pcm_data.into())?;
+                if let Some(codes) = codes.as_option() {
+                    let mut codes = codes.to_vec3::<u32>()?;
+                    e_tx.send(codes.remove(0))?;
+                }
+            }
+            Ok::<_, anyhow::Error>(())
+        });
+        std::thread::spawn(move || {
+            while let Ok(codes) = d_rx.recv() {
+                let codes = candle::Tensor::new(codes, &candle::Device::Cpu)?;
+                let pcm_data = d_encodec.decode_step(&codes.into())?;
+                if let Some(pcm_data) = pcm_data.as_option() {
+                    let mut pcm_data = pcm_data.to_vec3::<f32>()?;
+                    d_tx.send(pcm_data.remove(0).remove(0))?;
+                }
+            }
+            Ok::<_, anyhow::Error>(())
+        });
+        Ok(Self { dtype, encoder_rx, encoder_tx, decoder_rx, decoder_tx })
+    }
+
+    fn encode(&mut self, pcm_data: &numpy::PyArray1<f32>) -> PyResult<()> {
+        let pcm_data = pcm_data.to_vec()?;
+        self.encoder_tx.send(pcm_data).w()?;
+        Ok(())
+    }
+
+    fn decode(&mut self, codes: &numpy::PyArray2<u32>) -> PyResult<()> {
+        let dims = codes.shape();
+        let codes = codes.to_vec().w()?;
+        let codes = codes.chunks_exact(dims[1]).map(|v| v.to_vec()).collect::<Vec<_>>();
+        self.decoder_tx.send(codes).w()?;
+        Ok(())
+    }
+}
+
 /// Writes an audio file using the wav format based on pcm data from a numpy array.
 ///
 /// This only supports a single channel at the moment so the input array data is expected to have a
@@ -226,6 +298,7 @@ fn write_wav(
 #[pymodule]
 fn mimi(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Tokenizer>()?;
+    m.add_class::<StreamTokenizer>()?;
     m.add_function(wrap_pyfunction!(write_wav, m)?)?;
     Ok(())
 }
