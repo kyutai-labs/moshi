@@ -67,6 +67,28 @@ async def main():
         audio_sampler=msh_mlx.utils.Sampler(),
         check=False,
     )
+    input_queue = queue.Queue()
+    output_queue = queue.Queue()
+
+    async def send_loop():
+        print("send queue loop")
+        while True:
+            await asyncio.sleep(0.001)
+            try:
+                pcm_data = input_queue.get(block=False)
+                audio_tokenizer.encode(pcm_data)
+            except queue.Empty:
+                continue
+
+
+    async def recv_loop():
+        print("recv queue loop")
+        while True:
+            data = audio_tokenizer.get_decoded()
+            if data is None:
+                await asyncio.sleep(0.001)
+                continue
+            output_queue.put_nowait(data)
 
     async def model_loop():
         while True:
@@ -87,8 +109,8 @@ async def main():
                 audio_tokenizer.decode(audio_tokens)
 
     def on_input(in_data, frames, time, status):
-        in_data = in_data[0].astype(np.float32)
-        audio_tokenizer.encode(in_data)
+        in_data = in_data[:, 0].astype(np.float32)
+        input_queue.put_nowait(in_data)
 
     in_stream = sd.InputStream(
         samplerate=SAMPLE_RATE, channels=CHANNELS, blocksize=1920, callback=on_input
@@ -97,12 +119,13 @@ async def main():
     def on_output(out_data, frames, time, status):
         assert out_data.shape == (1920, 1), out_data.shape
         try:
-            pcm_data = audio_tokenizer.get_decoded()
+            pcm_data = output_queue.get(block=False)
+            # TODO: handle other shapes by using some form of fifo/ring buffer.
             assert pcm_data.shape == (1920,), pcm_data.shape
             out_data[:, 0] = pcm_data
         except queue.Empty:
-            print("SKIP AUDIO")
             out_data.fill(0)
+
 
     out_stream = sd.OutputStream(
         samplerate=SAMPLE_RATE,
@@ -113,7 +136,7 @@ async def main():
 
     print("starting the inference loop")
     with in_stream, out_stream:
-        await model_loop()
+        await asyncio.gather(recv_loop(), send_loop(), model_loop())
 
 if __name__ == "__main__":
     asyncio.run(main())
