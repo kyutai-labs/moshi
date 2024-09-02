@@ -255,6 +255,9 @@ impl DepFormer {
             let xs = slice.linear_in.forward(xs)?;
             let xs = match last_token {
                 Some(last_token) => {
+                    // TODO(laurent): this seems a bit weird, does it mean that the acoustic delay
+                    // is somewhat hardcoded to ([1] + [0] * 7) * 2?
+                    // Maybe step_idx > 1 should be step_idx > 0 instead?
                     let last_token = if slice_idx < 2 || slice_idx == 9 || step_idx > 1 {
                         last_token
                     } else {
@@ -335,6 +338,8 @@ impl DepFormer {
             let xs = slice.linear_in.forward(xs)?;
             let xs = match last_token {
                 Some(last_token) => {
+                    // TODO(laurent): same as above, this seems to hardcode some delays and it's not
+                    // obvious why it should be step_idx > 1 rather than step_idx > 0.
                     let last_token = if slice_idx < 2 || step_idx > 1 {
                         last_token
                     } else {
