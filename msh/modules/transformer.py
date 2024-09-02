@@ -23,7 +23,6 @@ from xformers import ops
 from .gating import make_gating
 from .rope import RotaryEmbedding
 from .streaming import StreamingModule
-from ..utils.compile import torch_compile_lazy
 
 from xformers.ops.fmha.attn_bias import (
     LowerTriangularFromBottomRightMask,
@@ -39,7 +38,6 @@ class LayerNormF32(nn.LayerNorm):
         return out_f32.to(input.dtype)
 
 
-@torch_compile_lazy
 def _rms_norm(
     x: torch.Tensor,
     alpha: torch.Tensor,

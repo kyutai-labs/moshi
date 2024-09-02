@@ -10,7 +10,6 @@ from torch.nn import functional as F
 from ..utils.utils import torch_compile_lazy
 
 
-@torch_compile_lazy
 def gating_forward_kernel(
     weight_in: torch.Tensor, weight_out: torch.Tensor, activation, x: torch.Tensor
 ):

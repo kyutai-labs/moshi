@@ -433,6 +433,7 @@ class LMGen(StreamingModule):
         self.audio_offset = lm_model.audio_offset
         set_attention_context(lm_model.transformer, lm_model.context)
         self.offset = 0
+        self.depformer_graph = None
 
     @torch.no_grad()
     def step(
@@ -476,59 +477,69 @@ class LMGen(StreamingModule):
         # Depformer gives us tokens one by one instead of K at once.
         assert next_token.shape[1] == 1, next_token.shape[1]
         next_token = next_token[:, 0]  # Now shape is B.
-        depformer_tokens: tp.List[torch.Tensor] = []
-        for cb_index in range(lm_model.dep_q + 1):
-            if cb_index == 0:
-                # No need to generate, `next_token` is actually the next text token.
-                # We just need to only keep the new token if the value wasn't provided
-                # in the prompt.
-                next_token = torch.where(
-                    this_gen_step[:, 0] == self.ungenerated,
-                    next_token,
-                    this_gen_step[:, 0],
-                )
-            else:
-                input_ = next_token[:, None, None]
-                if self.check:
-                    # Check that we are not feeding in any value that is not generated yet.
-                    assert not (input_ == self.ungenerated).any()
-                    if cb_index == 1:
-                        assert (input_ <= lm_model.text_card).all()
+
+        if self.depformer_graph is None:
+            self.depformer_graph = torch.cuda.CUDAGraph()
+            self.depformer_in = next_token
+            with torch.cuda.graph(self.depformer_graph):
+                depformer_tokens: tp.List[torch.Tensor] = []
+                for cb_index in range(lm_model.dep_q + 1):
+                    if cb_index == 0:
+                        # No need to generate, `next_token` is actually the next text token.
+                        # We just need to only keep the new token if the value wasn't provided
+                        # in the prompt.
+                        next_token = torch.where(
+                            this_gen_step[:, 0] == self.ungenerated,
+                            next_token,
+                            this_gen_step[:, 0],
+                        )
                     else:
-                        assert (input_ <= lm_model.card).all()
-                logits = lm_model.forward_depformer(
-                    cb_index - 1, input_, transformer_out
-                )
-                next_token = lm_model._sample_next_token(
-                    logits,
-                    self.use_sampling,
-                    self.temp,
-                    self.top_k,
-                    self.top_p,
-                )
-                assert next_token.shape[-1] == 1
-                next_token = next_token[:, 0, 0]  # shape is [B, K]
-                next_token = torch.where(
-                    this_gen_step[:, cb_index] == self.ungenerated,
-                    next_token,
-                    this_gen_step[:, cb_index],
-                )
+                        input_ = next_token[:, None, None]
+                        if False:  # self.check:
+                            # Check that we are not feeding in any value that is not generated yet.
+                            assert not (input_ == self.ungenerated).any()
+                            if cb_index == 1:
+                                assert (input_ <= lm_model.text_card).all()
+                            else:
+                                assert (input_ <= lm_model.card).all()
+                        logits = lm_model.forward_depformer(
+                            cb_index - 1, input_, transformer_out
+                        )
+                        next_token = lm_model._sample_next_token(
+                            logits,
+                            False,  # self.use_sampling,
+                            self.temp,
+                            self.top_k,
+                            self.top_p,
+                        )
+                        assert next_token.shape[-1] == 1
+                        next_token = next_token[:, 0, 0]  # shape is [B, K]
+                        next_token = torch.where(
+                            this_gen_step[:, cb_index] == self.ungenerated,
+                            next_token,
+                            this_gen_step[:, cb_index],
+                        )
 
-            original_offset = self.offset - lm_model.delays[cb_index]
-            if original_offset < 0:
-                # We are not currently generating this codebook, we replace with a special token.
-                next_token[:] = self.initial[:, cb_index, 0]
-            depformer_tokens.append(next_token)
+                    original_offset = self.offset - lm_model.delays[cb_index]
+                    if original_offset < 0:
+                        # We are not currently generating this codebook, we replace with a special token.
+                        next_token[:] = self.initial[:, cb_index, 0]
+                    depformer_tokens.append(next_token)
 
-        assert len(depformer_tokens) == lm_model.dep_q + 1, (
-            len(depformer_tokens),
-            lm_model.dep_q,
-        )
-        next_token = torch.stack(depformer_tokens, dim=1)
-        assert next_token.shape == (
-            self.num_samples,
-            lm_model.dep_q + 1,
-        ), next_token.shape
+                assert len(depformer_tokens) == lm_model.dep_q + 1, (
+                    len(depformer_tokens),
+                    lm_model.dep_q,
+                )
+                next_token = torch.stack(depformer_tokens, dim=1)
+                assert next_token.shape == (
+                    self.num_samples,
+                    lm_model.dep_q + 1,
+                ), next_token.shape
+                self.depformer_out = next_token
+        else:
+            self.depformer_in.copy_(next_token)
+            self.depformer_graph.replay()
+            next_token = self.depformer_out
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
         self.offset += 1
