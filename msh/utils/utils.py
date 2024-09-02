@@ -37,6 +37,8 @@ def multinomial(
     input_ = input.reshape(-1, input.shape[-1])
     # We should probably be able to remove this once the following PR has landed:
     # https://github.com/pytorch/pytorch/pull/134818/files
+    # In the meantime, we specialize the case no-replacement, nsamples=1 so as not
+    # to have a synchronization point.
     if replacement or num_samples != 1:
         output_ = torch.multinomial(
             input_,

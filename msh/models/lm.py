@@ -493,6 +493,7 @@ class LMGen(StreamingModule):
             self.transformer_out.copy_(transformer_out)
             self.depformer_graph.replay()
         next_token = self.depformer_out
+        print(self.offset, next_token)
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
         self.offset += 1
@@ -543,7 +544,6 @@ class LMGen(StreamingModule):
                 )
                 next_token = lm_model._sample_next_token(
                     logits,
-                    # TODO(laurent): enable this...
                     self.use_sampling,
                     self.temp,
                     self.top_k,
