@@ -484,6 +484,9 @@ class LMGen(StreamingModule):
                     self.this_gen_step,
                     self.transformer_out,
                 )
+            # It is important to evaluate the graph here as otherwise self.depformer_out would
+            # not contain the appropriate values.
+            self.depformer_graph.replay()
         else:
             self.depformer_in.copy_(next_token)
             self.this_gen_step.copy_(this_gen_step)
