@@ -39,7 +39,6 @@ class LayerNormF32(nn.LayerNorm):
         return out_f32.to(input.dtype)
 
 
-@torch_compile_lazy
 def _rms_norm(
     x: torch.Tensor,
     alpha: torch.Tensor,

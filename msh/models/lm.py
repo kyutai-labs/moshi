@@ -433,6 +433,7 @@ class LMGen(StreamingModule):
         self.audio_offset = lm_model.audio_offset
         set_attention_context(lm_model.transformer, lm_model.context)
         self.offset = 0
+        self.depformer_graph = None
 
     @torch.no_grad()
     def step(
@@ -472,7 +473,48 @@ class LMGen(StreamingModule):
         next_token = next_token[:, :, 0]  # shape is [B, K]
         this_gen_step = self.gen_sequence[:, :, self.offset + 1]
 
-        assert lm_model.depformer is not None
+        if self.depformer_graph is None:
+            self.depformer_graph = torch.cuda.CUDAGraph()
+            self.depformer_in = next_token.clone()
+            self.this_gen_step = this_gen_step.clone()
+            self.transformer_out = transformer_out.clone()
+            with torch.cuda.graph(self.depformer_graph):
+                self.depformer_out = self.depformer_step(
+                    self.depformer_in,
+                    self.this_gen_step,
+                    self.transformer_out,
+                )
+            # It is important to evaluate the graph here as otherwise self.depformer_out would
+            # not contain the appropriate values.
+            self.depformer_graph.replay()
+        else:
+            self.depformer_in.copy_(next_token)
+            self.this_gen_step.copy_(this_gen_step)
+            self.transformer_out.copy_(transformer_out)
+            self.depformer_graph.replay()
+        next_token = self.depformer_out
+
+        # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
+        self.offset += 1
+        self.gen_sequence[..., : lm_model.dep_q + 1, self.offset] = next_token
+
+        out = []
+        for k in range(1 + lm_model.dep_q):
+            delay = lm_model.delays[k]
+            if self.offset < delay:
+                return None
+            _out = self.gen_sequence[0, k, self.offset - delay].item()
+            out.append(_out)
+
+        return out
+
+    def depformer_step(
+        self,
+        next_token: torch.Tensor,
+        this_gen_step: torch.Tensor,
+        transformer_out: torch.Tensor,
+    ):
+        lm_model = self.lm_model
         # Depformer gives us tokens one by one instead of K at once.
         assert next_token.shape[1] == 1, next_token.shape[1]
         next_token = next_token[:, 0]  # Now shape is B.
@@ -489,7 +531,7 @@ class LMGen(StreamingModule):
                 )
             else:
                 input_ = next_token[:, None, None]
-                if self.check:
+                if False:  # self.check:
                     # Check that we are not feeding in any value that is not generated yet.
                     assert not (input_ == self.ungenerated).any()
                     if cb_index == 1:
@@ -514,10 +556,11 @@ class LMGen(StreamingModule):
                     this_gen_step[:, cb_index],
                 )
 
-            original_offset = self.offset - lm_model.delays[cb_index]
-            if original_offset < 0:
-                # We are not currently generating this codebook, we replace with a special token.
-                next_token[:] = self.initial[:, cb_index, 0]
+            # TODO(laurent): does the following really matter?
+            # original_offset = self.offset - lm_model.delays[cb_index]
+            # if original_offset < 0:
+            #     # We are not currently generating this codebook, we replace with a special token.
+            #     next_token[:] = self.initial[:, cb_index, 0]
             depformer_tokens.append(next_token)
 
         assert len(depformer_tokens) == lm_model.dep_q + 1, (
@@ -529,17 +572,4 @@ class LMGen(StreamingModule):
             self.num_samples,
             lm_model.dep_q + 1,
         ), next_token.shape
-
-        # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
-        self.offset += 1
-        self.gen_sequence[..., : lm_model.dep_q + 1, self.offset] = next_token
-
-        out = []
-        for k in range(1 + lm_model.dep_q):
-            delay = lm_model.delays[k]
-            if self.offset < delay:
-                return None
-            _out = self.gen_sequence[0, k, self.offset - delay].item()
-            out.append(_out)
-
-        return out
+        return next_token
