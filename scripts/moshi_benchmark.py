@@ -97,6 +97,8 @@ def streaming_test():
         prof.export_chrome_trace("trace.json")
     main_audio = torch.cat(main_audio, dim=-1)
     print(main_audio.shape)
+    print("generated text:")
+    print("".join(main_text))
     torchaudio.save("gen_main.wav", main_audio.cpu(), SAMPLE_RATE)
 
 
