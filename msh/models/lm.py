@@ -482,6 +482,7 @@ class LMGen(StreamingModule):
             self.depformer_graph = torch.cuda.CUDAGraph()
             self.depformer_in = next_token
             self.transformer_out = transformer_out
+            self.this_gen_step = this_gen_step.clone()
             with torch.cuda.graph(self.depformer_graph):
                 depformer_tokens: tp.List[torch.Tensor] = []
                 for cb_index in range(lm_model.dep_q + 1):
@@ -490,9 +491,9 @@ class LMGen(StreamingModule):
                         # We just need to only keep the new token if the value wasn't provided
                         # in the prompt.
                         next_token = torch.where(
-                            this_gen_step[:, 0] == self.ungenerated,
+                            self.this_gen_step[:, 0] == self.ungenerated,
                             next_token,
-                            this_gen_step[:, 0],
+                            self.this_gen_step[:, 0],
                         )
                     else:
                         input_ = next_token[:, None, None]
@@ -516,9 +517,9 @@ class LMGen(StreamingModule):
                         assert next_token.shape[-1] == 1
                         next_token = next_token[:, 0, 0]  # shape is [B, K]
                         next_token = torch.where(
-                            this_gen_step[:, cb_index] == self.ungenerated,
+                            self.this_gen_step[:, cb_index] == self.ungenerated,
                             next_token,
-                            this_gen_step[:, cb_index],
+                            self.this_gen_step[:, cb_index],
                         )
 
                     original_offset = self.offset - lm_model.delays[cb_index]
@@ -540,6 +541,7 @@ class LMGen(StreamingModule):
         else:
             self.depformer_in.copy_(next_token)
             self.transformer_out.copy_(transformer_out)
+            self.this_gen_step.copy_(this_gen_step)
             self.depformer_graph.replay()
             next_token = self.depformer_out
 
