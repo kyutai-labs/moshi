@@ -544,7 +544,7 @@ class LMGen(StreamingModule):
                 next_token = lm_model._sample_next_token(
                     logits,
                     # TODO(laurent): enable this...
-                    None,  # self.use_sampling,
+                    self.use_sampling,
                     self.temp,
                     self.top_k,
                     self.top_p,

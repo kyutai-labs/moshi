@@ -35,10 +35,19 @@ def multinomial(
             located in the last dimension of tensor input.
     """
     input_ = input.reshape(-1, input.shape[-1])
-    # TODO one day: the following leads to a sync point, which slows down a bit generation.
-    output_ = torch.multinomial(
-        input_, num_samples=num_samples, replacement=replacement, generator=generator
-    )
+    # We should probably be able to remove this once the following PR has landed:
+    # https://github.com/pytorch/pytorch/pull/134818/files
+    if replacement or num_samples != 1:
+        output_ = torch.multinomial(
+            input_,
+            num_samples=num_samples,
+            replacement=replacement,
+            generator=generator,
+        )
+    else:
+        q = torch.empty_like(input_).exponential_(1, generator=generator)
+        q = input_ / q
+        output_ = q.argmax(dim=-1, keepdim=True)
     output = output_.reshape(*list(input.shape[:-1]), -1)
     return output
 
