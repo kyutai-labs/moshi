@@ -433,6 +433,7 @@ class LMGen(StreamingModule):
         self.audio_offset = lm_model.audio_offset
         set_attention_context(lm_model.transformer, lm_model.context)
         self.offset = 0
+        self.depformer_graph = None
 
     @torch.no_grad()
     def step(
@@ -472,11 +473,23 @@ class LMGen(StreamingModule):
         next_token = next_token[:, :, 0]  # shape is [B, K]
         this_gen_step = self.gen_sequence[:, :, self.offset + 1]
 
-        next_token = self.depformer_step(
-            next_token,
-            this_gen_step,
-            transformer_out,
-        )
+        if self.depformer_graph is None:
+            self.depformer_graph = torch.cuda.CUDAGraph()
+            self.depformer_in = next_token.clone()
+            self.this_gen_step = this_gen_step.clone()
+            self.transformer_out = transformer_out.clone()
+            with torch.cuda.graph(self.depformer_graph):
+                self.depformer_out = self.depformer_step(
+                    self.depformer_in,
+                    self.this_gen_step,
+                    self.transformer_out,
+                )
+        else:
+            self.depformer_in.copy_(next_token)
+            self.this_gen_step.copy_(this_gen_step)
+            self.transformer_out.copy_(transformer_out)
+            self.depformer_graph.replay()
+        next_token = self.depformer_out
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
         self.offset += 1
@@ -515,7 +528,7 @@ class LMGen(StreamingModule):
                 )
             else:
                 input_ = next_token[:, None, None]
-                if self.check:
+                if False:  # self.check:
                     # Check that we are not feeding in any value that is not generated yet.
                     assert not (input_ == self.ungenerated).any()
                     if cb_index == 1:
@@ -527,7 +540,8 @@ class LMGen(StreamingModule):
                 )
                 next_token = lm_model._sample_next_token(
                     logits,
-                    self.use_sampling,
+                    # TODO(laurent): enable this...
+                    None,  # self.use_sampling,
                     self.temp,
                     self.top_k,
                     self.top_p,
