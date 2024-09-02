@@ -481,6 +481,7 @@ class LMGen(StreamingModule):
         if self.depformer_graph is None:
             self.depformer_graph = torch.cuda.CUDAGraph()
             self.depformer_in = next_token
+            self.transformer_out = transformer_out
             with torch.cuda.graph(self.depformer_graph):
                 depformer_tokens: tp.List[torch.Tensor] = []
                 for cb_index in range(lm_model.dep_q + 1):
@@ -538,6 +539,7 @@ class LMGen(StreamingModule):
                 self.depformer_out = next_token
         else:
             self.depformer_in.copy_(next_token)
+            self.transformer_out.copy_(transformer_out)
             self.depformer_graph.replay()
             next_token = self.depformer_out
 
