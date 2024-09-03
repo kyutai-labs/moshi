@@ -19,7 +19,7 @@ from torch.nn import functional as F
 
 from .gating import make_gating
 from .rope import RotaryEmbedding
-from .streaming import StreamingModule
+from .streaming import StreamingModule, StreamingContainer
 
 
 class LayerNormF32(nn.LayerNorm):
@@ -260,7 +260,7 @@ class _MHAState:
     offset: torch.Tensor
     offset_cpu: int
 
-class StreamingMultiheadAttention(StreamingModule):
+class StreamingMultiheadAttention(StreamingModule[_MHAState]):
     """Similar to `nn.MultiheadAttention` but with support for streaming, causal evaluation.
 
     Args:
@@ -378,7 +378,12 @@ class StreamingMultiheadAttention(StreamingModule):
         return x
 
 
-class StreamingTransformerLayer(StreamingModule):
+@dataclass
+class _LayerState:
+    offset_cpu: int
+
+
+class StreamingTransformerLayer(StreamingModule[_LayerState]):
     """TransformerLayer with Streaming / Causal support.
 
     Args:
@@ -491,11 +496,15 @@ class StreamingTransformerLayer(StreamingModule):
             self.layer_scale_1 = LayerScale(d_model, layer_scale, **factory_kwargs)
             self.layer_scale_2 = LayerScale(d_model, layer_scale, **factory_kwargs)
 
+    def _init_streaming_state(self, batch_size: int) -> _LayerState:
+        return _LayerState(offset_cpu=0)
+
     # feed forward block
     def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
+        state = self._streaming_state
         offset = 0
-        if self._is_streaming:
-            offset = int(self._streaming_state["offset"].item())
+        if state is not None:
+            offset = state.offset_cpu
         x_orig = x
         x = self.norm2(x)
         if self.gating is None:
@@ -524,18 +533,20 @@ class StreamingTransformerLayer(StreamingModule):
         return x_orig + self.layer_scale_1(update)
 
     def forward(self, x: torch.Tensor):
-        if self._is_streaming:
-            if "offset" not in self._streaming_state:
-                self._streaming_state["offset"] = torch.tensor(0)
-
         x = self._sa_block(x)
         x = self._ff_block(x)
-        if self._is_streaming:
-            self._streaming_state["offset"] += x.shape[1]
+        state = self._streaming_state
+        if state:
+            state.offset_cpu += x.shape[1]
         return x
 
 
-class StreamingTransformer(StreamingModule):
+@dataclass
+class _TransformerState:
+    offset: torch.Tensor
+
+
+class StreamingTransformer(StreamingModule[_TransformerState]):
     """Transformer with Streaming / Causal support.
 
     Args:
@@ -602,17 +613,22 @@ class StreamingTransformer(StreamingModule):
                 )
             )
 
+    def _init_streaming_state(self, batch_size: int) -> _TransformerState:
+        device = next(self.parameters()).device
+        return _TransformerState(offset=torch.zeros(1, device=device, dtype=torch.long))
+
     def forward(self, x: torch.Tensor, *args, **kwargs):
         B, T, C = x.shape
 
-        if "offsets" in self._streaming_state:
-            offsets = self._streaming_state["offsets"]
+        state = self._streaming_state
+        if state is None:
+            offset = torch.zeros(1, dtype=torch.long, device=x.device)
         else:
-            offsets = torch.zeros(B, dtype=torch.long, device=x.device)
+            offset = state.offset
 
         if self.positional_embedding in {"sin", "sin_rope"}:
             positions = torch.arange(T, device=x.device).view(1, -1, 1)
-            positions = positions + offsets.view(-1, 1, 1)
+            positions = positions + offset.view(-1, 1, 1)
             pos_emb = create_sin_embedding(
                 positions, C, max_period=self.max_period, dtype=x.dtype
             )
@@ -621,13 +637,12 @@ class StreamingTransformer(StreamingModule):
         for layer in self.layers:
             x = layer(x, *args, **kwargs)
 
-        if self._is_streaming:
-            self._streaming_state["offsets"] = offsets + T
-
+        if state is not None:
+            state.offset.add_(T)
         return x
 
 
-class ProjectedTransformer(nn.Module):
+class ProjectedTransformer(StreamingContainer):
     """Transformer with optional projections of the input and output to different dimensions when needed.
     Supports multiple outputs.
 
