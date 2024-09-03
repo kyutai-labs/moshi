@@ -31,7 +31,7 @@ from ..utils.compile import no_compile
 logger = logging.getLogger()
 
 
-class CompressionModel(ABC, StreamingContainer):
+class CompressionModel(StreamingContainer):
     """Base API for all compression model that aim at being used as audio tokenizers
     with a language model.
     """
@@ -108,9 +108,6 @@ class EncodecModel(CompressionModel):
         torch_compile_encoder_decoder (bool): if True, uses torch.compile on the encoder / decoder.
             Deactivated by default for training as this is incompatible at the moment with weight norm.
             See https://github.com/pytorch/pytorch/issues/121902
-
-    ..Warning:: autocast to float16 for EnCodec will not use a grad scaler. This is because
-        the loss balancer will cancel out the grad scaling, and lead to weird effects.
     """
 
     def __init__(

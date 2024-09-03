@@ -3,33 +3,23 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Transformer model, with streaming support, xformer attention support
-and easy causal attention with a potentially finite receptive field.
+Transformer model, with streaming support, + CUDA Graphable.
+Optimized for inference.
 
 See `StreamingTransformer` for more information.
-
-Unlike regular PyTorch Transformer, we make the hard choice that batches are first.
 """
 
-import math
+from dataclasses import dataclass
 import typing as tp
 
 from einops import rearrange
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from xformers import ops
 
 from .gating import make_gating
 from .rope import RotaryEmbedding
 from .streaming import StreamingModule
-from ..utils.compile import torch_compile_lazy
-
-from xformers.ops.fmha.attn_bias import (
-    BlockDiagonalCausalWithOffsetPaddedKeysMask,
-    _SeqLenInfo,
-    _PaddedSeqLenInfo,
-)
 
 
 class LayerNormF32(nn.LayerNorm):
@@ -203,38 +193,25 @@ def set_attention_context(model: nn.Module, context: tp.Optional[int] = None) ->
 class KVCacheResult(tp.NamedTuple):
     keys: torch.Tensor
     values: torch.Tensor
-    seq_start: torch.Tensor
-    seq_len: torch.Tensor
-    kv_padding: int
+    distance_to_last: torch.Tensor
 
     @staticmethod
     def from_kv(keys: torch.Tensor, values: torch.Tensor) -> 'KVCacheResult':
-        B, T, H, D = keys.shape
-        assert tuple(values.shape[:-1]) == (B, T, H)
-        keys = keys.view(1, B * T, H, D)
-        values = values.view(1, B * T, H, -1)
-        seq_start = torch.arange(0, (B + 1) * T, T, device=keys.device, dtype=torch.int)
-        seq_len = torch.full((B,), T, device=keys.device, dtype=torch.int)
-        return KVCacheResult(keys, values, seq_start, seq_len, T)
+        B, H, T, D = keys.shape
+        assert tuple(values.shape[:-1]) == (B, H, T)
+        distance_to_last = torch.arange(T - 1, -1, -1, device=keys.device, dtype=torch.long)
+        return KVCacheResult(keys, values, distance_to_last)
 
 
-class GraphableKVCache:
+class RingKVCache:
     """Efficient streaming KVCache to be compatible with Cuda Graph.
 
     Args:
         batch_size (int): Batch size.
         num_heads (int): Number of heads in the attention.
         dim_per_head (int): Dimension per head.
-        context (int, optional): Context size for the attention, if None, will grow exponentially,
-            otherwise will use a fix allocation with a bit overhead.
-        growth (float): Growth factor for the exponential growth, fraction of overhead when context is not None.
-        initial_size (int): Initial size of the cache, used only when context is None.
         device (torch.device): Device on which to initialize the cache.
         dtype (torch.dtype): dtype to use for the cache.
-        cache (torch.Tensor, optional): Initial cache, if provided. Shouldn't be used directly,
-            use `clone()` instead.
-        current_end (int): Current end of the cache, used only when cache is provided. Shouldn't be used directly,
-            use `clone()` instead.
     """
 
     def __init__(
@@ -242,51 +219,46 @@ class GraphableKVCache:
         batch_size: int,
         num_heads: int,
         dim_per_head: int,
-        capacity: int | None = None,
-        context: int | None = None,
+        capacity: int,
         device: torch.device = torch.device("cuda"),
         dtype: torch.dtype = torch.bfloat16,
     ):
-        if context is None:
-            assert capacity is not None, "Need at least context or capacity."
-        else:
-            if capacity is None:
-                capacity = int(context * (1.2))
-            else:
-                assert capacity >= context
-        assert capacity is not None
-        self.context = context
         self.capacity = capacity
-        self.context = context
         self.cache = torch.full(
-            (2, batch_size, capacity, num_heads, dim_per_head),
+            (2, batch_size, num_heads, capacity, dim_per_head),
             float("NaN"),
             device=device,
             dtype=dtype)
         self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
 
-    def rotate(self, ):
-        pass
-
     def complete(self, k: torch.Tensor, v: torch.Tensor) -> KVCacheResult:
         assert k.shape[:-1] == v.shape[:-1]
-        B, T, H, D = k.shape
+        B, H, T, D = k.shape
         indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype) + self.end_offset
-        self.cache[0].index_copy_(1, indexes, k)
-        self.cache[1].index_copy_(1, indexes, v)
+        indexes = indexes % self.capacity
+        self.cache[0].index_copy_(2, indexes, k)
+        self.cache[1].index_copy_(2, indexes, v)
         self.end_offset.add_(T)
 
         keys = self.cache[0]
         values = self.cache[1]
-        seq_len = self.end_offset.expand(B)
-        kv_padding = self.capacity
 
-        seq_start = torch.arange(0, (B + 1) * kv_padding, kv_padding, device=indexes.device, dtype=torch.int)
+        steps = torch.arange(self.capacity, device=self.end_offset.device, dtype=torch.long)
+        invalid = steps >= self.end_offset
 
-        keys = keys.view(1, B * kv_padding, H, D)
-        values = values.view(1, B * kv_padding, H, -1)
-        return KVCacheResult(keys, values, seq_start.to(torch.int), seq_len.to(torch.int), kv_padding)
+        last = self.end_offset % self.capacity
 
+        distance_to_last = torch.where(steps <= last, last - steps, last - steps + self.capacity)
+        distance_to_last = torch.where(invalid, torch.full_like(distance_to_last, -1), distance_to_last)
+
+        return KVCacheResult(keys, values, distance_to_last)
+
+
+@dataclass
+class _MHAState:
+    kv_cache: RingKVCache
+    offset: torch.Tensor
+    offset_cpu: int
 
 class StreamingMultiheadAttention(StreamingModule):
     """Similar to `nn.MultiheadAttention` but with support for streaming, causal evaluation.
@@ -299,8 +271,6 @@ class StreamingMultiheadAttention(StreamingModule):
             When causal, can access `context` time steps into the past, and when non causal,
             can access `context // 2` steps in the past, and the same in the future.
         rope (`RotaryEmbedding`, optional): Rope embedding to use.
-        kv_repeat (int): If > 1, will repeat keys and queries multiple times (need to divide num_heads).
-            This will lead to faster decoding time on A100 or other GPUs with tensorcore.
         weights_per_step (int): use different weights per time step. If non zero, should correspond to the
             number of possible time steps.
         device (torch.device, optional): Device on which to initialize.
@@ -343,94 +313,68 @@ class StreamingMultiheadAttention(StreamingModule):
             embed_dim, mult * embed_dim, bias=False, **factory_kwargs
         )
 
-    def _complete_kv(self, k, v) -> KVCacheResult:
-        B, T, H, D = k.shape
-        if self._is_streaming:
-            if 'kv_cache' not in self._streaming_state:
-                if self.context is None:
-                    capacity = self.weights_per_step or 1024
-                else:
-                    capacity = None
-                self._streaming_state['kv_cache'] = GraphableKVCache(  # type: ignore
-                    B, H, D,
-                    context=self.context,
-                    capacity=capacity,
-                    device=k.device,
-                    dtype=k.dtype)
-            kv_cache: GraphableKVCache = self._streaming_state['kv_cache']  # type: ignore
-            result = kv_cache.complete(k, v)
-            return result
+    def _init_streaming_state(self, batch_size: int) -> _MHAState:
+        if self.context is None:
+            if self.weights_per_step:
+                capacity = self.weights_per_step
+            else:
+                raise RuntimeError("Cannot create a streaming KVCache without a context to estimate capacity.")
         else:
+            capacity = self.context
+        device = self.in_proj_weight.device
+        kv_cache = RingKVCache(batch_size, self.num_heads, self.dim_per_head, capacity, self.device)
+        return _MHAState(kv_cache, offset=torch.zeros(1, device=device, dtype=torch.long), offset_cpu=0)
+
+
+    def _complete_kv(self, k, v) -> KVCacheResult:
+        state = self._streaming_state
+        if state is None:
             return KVCacheResult.from_kv(k, v)
+        else:
+            return state.kv_cache.complete(k, v)
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
-        streaming_offset: torch.Tensor
-        streaming_offset_cpu: torch.Tensor
-        if self._is_streaming:
-            if 'offset' not in self._streaming_state:
-                self._streaming_state['offset'] = torch.zeros(1, device=key.device, dtype=torch.long)
-                self._streaming_state['offset_cpu'] = torch.zeros(1, dtype=torch.long)
-            streaming_offset = self._streaming_state['offset']
-            streaming_offset_cpu = self._streaming_state['offset_cpu']
+        state = self._streaming_state
+
+        if state is None:
+            offset = torch.zeros(1, device=query.device, dtype=torch.long)
+            offset_cpu = 0
         else:
-            streaming_offset = torch.zeros(1, device=key.device, dtype=torch.long)
-            streaming_offset_cpu = torch.zeros(1, dtype=torch.long)
-
-        assert streaming_offset.device.type == "cuda"
-
-        if self._is_streaming:
             assert self.causal, "Streaming only available for causal"
+            offset = state.offset
+            offset_cpu = state.offset_cpu
 
         if self.weights_per_step:
             projected = multi_linear(
-                self.weights_per_step, self.in_proj_weight, query, int(streaming_offset_cpu.item())
+                self.weights_per_step, self.in_proj_weight, query, offset_cpu
             )
         else:
             projected = nn.functional.linear(query, self.in_proj_weight)
-        packed = rearrange(projected, "b t (p h d) -> b t p h d", p=3, h=self.num_heads)
-        q, k, v = ops.unbind(packed, dim=2)
+        q, k, v = rearrange(projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads)
 
         if self.rope:
-            q, k = self.rope(q, k, offset=streaming_offset)
+            q, k = self.rope(q, k, offset, time_before_heads=False)
 
-        kv_result = self._complete_kv(k, v)
-        k, v = kv_result[:2]
-        B, T, H, D = q.shape
+        k, v, distance_to_last = self._complete_kv(k, v)
         if self.causal:
-            q = q.view(1, B * T, H, D)
-            q_seqstart = torch.arange(0, T * (B + 1), T, device=q.device, dtype=torch.int)
-            q_info = _SeqLenInfo(q_seqstart, T, T, list(range(0, T * B, B)))
-            k_info = _PaddedSeqLenInfo(
-                kv_result.seq_start,
-                kv_result.kv_padding, 1,
-                [None] * (B + 1),
-                kv_result.seq_len, [None] * B,
-                kv_result.kv_padding)
-            attn_mask = BlockDiagonalCausalWithOffsetPaddedKeysMask(q_info, k_info)
+            attn_bias = (distance_to_last >= 0)
+            if self.context is not None:
+                attn_bias = attn_bias & (distance_to_last < self.context)
         else:
-            attn_mask = None
-            assert "Not supported for now"
-        dtype = q.dtype
-
-        if q.device.type == "cpu":
             attn_bias = None
-            if attn_mask is not None:
-                attn_bias = attn_mask.materialize((q.shape[1], k.shape[1]))
-            q, k, v = [x.transpose(1, 2) for x in [q, k, v]]
-            x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)
-            x = x.transpose(1, 2)
-        else:
-            x = ops.memory_efficient_attention(q, k, v, attn_mask, p=0)
-            x = x.to(dtype)
-        x = rearrange(x, "b t h d -> b t (h d)")
+        x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)
+
+        x = rearrange(x, "b h t d -> b t (h d)")
         if self.weights_per_step:
             x = multi_linear(
-                self.weights_per_step, self.out_proj.weight, x, int(streaming_offset_cpu.item()),
+                self.weights_per_step, self.out_proj.weight, x, offset_cpu
             )
         else:
             x = self.out_proj(x)
-        streaming_offset += T
-        streaming_offset_cpu += T
+        T = x.shape[1]
+        if state is not None:
+            state.offset.add_(T)
+            state.offset_cpu += T
         return x
 
 

@@ -5,12 +5,13 @@
 from torch import nn
 import math
 import torch
-from ..utils.utils import torch_compile_lazy
+from ..utils.compile import torch_compile_lazy
 
 
 @torch_compile_lazy
 def apply_rope(
-    q: torch.Tensor, k: torch.Tensor, offset: torch.Tensor, max_period: float = 10_000
+    q: torch.Tensor, k: torch.Tensor, offset: torch.Tensor, max_period: float = 10_000,
+    time_before_heads: bool = False,
 ):
     """
     Args:
@@ -18,9 +19,13 @@ def apply_rope(
         k (torch.Tensor): keys, shape `[B, T, H, D]`.
         offset (int): current offset, e.g. when streaming.
         max_period (float): maximum period for the cos and sin.
+        time_before_heads (bool):  if True, expected [B, T, H, D], else [B, H, T ,D]
     """
 
-    B, T, H, D = q.shape
+    if time_before_heads:
+        B, T, H, D = q.shape
+    else:
+        B, H, T, D = q.shape
     assert k.shape == q.shape
     assert D > 0
     assert D % 2 == 0
@@ -28,12 +33,16 @@ def apply_rope(
 
     ds = torch.arange(D // 2, device=q.device, dtype=torch.float32)
     freqs = torch.exp(ds * (-math.log(max_period) * 2 / D))
-    ts = offset.float() + torch.arange(T, device=q.device, dtype=torch.float32).view(
-        -1, 1, 1
-    )
+    ts = offset.float() + torch.arange(T, device=q.device, dtype=torch.float32)
+    if time_before_heads:
+        ts = ts.view(-1, 1, 1)
+    else:
+        ts = ts.view(1, -1, 1)
 
-    q = q.view(B, T, H, D // 2, 2)
-    k = k.view(B, T, H, D // 2, 2)
+
+    dims = q.shape[:-1]
+    q = q.view(*dims, D // 2, 2)
+    k = k.view(*dims, D // 2, 2)
 
     # convention is `r` suffix is real part, `i` is imaginary.
     qr = q[..., 0].float()
@@ -68,6 +77,6 @@ class RotaryEmbedding(nn.Module):
         super().__init__()
         self.max_period = max_period
 
-    def forward(self, q: torch.Tensor, k: torch.Tensor, offset: torch.Tensor):
+    def forward(self, q: torch.Tensor, k: torch.Tensor, offset: torch.Tensor, time_before_heads: bool = False):
         """Apply rope rotation to query or key tensor."""
-        return apply_rope(q, k, offset, self.max_period)
+        return apply_rope(q, k, offset, self.max_period, time_before_heads)

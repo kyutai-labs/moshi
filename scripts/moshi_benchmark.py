@@ -55,10 +55,8 @@ def cb(step, total):
     print(f"{step:06d} / {total:06d}", end="\r")
 
 
-def streaming_test():
-    lm.reset_streaming()
-    max_gen_len = 256
-    lm_gen = msh.models.LMGen(lm, check=True, max_gen_len=max_gen_len)
+def streaming_test(bs):
+    lm_gen = msh.models.LMGen(lm)
 
     main_audio = []
     main_text = []
@@ -67,8 +65,9 @@ def streaming_test():
         print('plop')
         start_time = time.time()
         # Chunk should contain the pcm data from the user, single channel with a sample rate of 24000.
-        chunk = torch.zeros((1, 1, 1920), dtype=torch.float, device=DEVICE)
-        codes, _scale = ec.encode(chunk)
+        chunk = torch.zeros((bs, 1, 1920), dtype=torch.float, device=DEVICE)
+        codes = ec.encode(chunk)
+        assert codes.shape[-1] == 1
         for c in range(codes.shape[-1]):
             be = time.time()
             ev = torch.cuda.Event(enable_timing=True)
@@ -84,7 +83,7 @@ def streaming_test():
             text_tokens = tokens[0]
             tokens = tokens[1:].view(1, 8, 1)
             # assert tokens.amax() < 2048, tokens
-            main_pcm = ec.decode(tokens, scale=None)
+            main_pcm = ec.decode(tokens)
             # main_pcm is the audio to be played back to the user, here we just append it and store it in
             # a file once the loop is finished.
             main_audio.append(main_pcm[0])
@@ -118,6 +117,7 @@ def streaming_test():
 
 
 print("streaming test")
+bs = 1
 with torch.no_grad():
-    with ec.streaming():
-        streaming_test()
+    with ec.streaming(bs), lm.streaming(bs):
+        streaming_test(bs)

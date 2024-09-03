@@ -115,7 +115,6 @@ def get_encodec(filename: tp.Union[str, Path], device):
         sample_rate=SAMPLE_RATE,
         frame_rate=FRAME_RATE,
         encoder_frame_rate=SAMPLE_RATE / encoder.hop_length,
-        renormalize=False,
         causal=True,
         resample_method="conv",
         encoder_transformer=encoder_transformer,
@@ -149,7 +148,4 @@ def get_lm(filename: tp.Union[str, Path], device):
             "cpu",
         )
         model.load_state_dict(pkg["fsdp_best_state"]["model"])
-    model.autocast = msh.utils.autocast.TorchAutocast(
-        enabled=True, dtype=torch.bfloat16, device_type=model.device.type
-    )
     return model

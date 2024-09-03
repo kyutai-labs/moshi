@@ -15,11 +15,11 @@ import torch.nn as nn
 
 from .conv import StreamingConv1d, StreamingConvTranspose1d
 from .lstm import StreamingLSTM
-from .streaming import StreamingModule, StreamingAdd
+from .streaming import StreamingContainer, StreamingAdd
 from ..utils.compile import torch_compile_lazy
 
 
-class SEANetResnetBlock(StreamingModule):
+class SEANetResnetBlock(StreamingContainer):
     """Residual block from SEANet model.
 
     Args:
@@ -95,7 +95,7 @@ class SEANetResnetBlock(StreamingModule):
         return self.add(u, v)
 
 
-class SEANetEncoder(StreamingModule):
+class SEANetEncoder(StreamingContainer):
     """SEANet encoder.
 
     Args:
@@ -248,7 +248,7 @@ class SEANetEncoder(StreamingModule):
         return self.model(x)
 
 
-class SEANetDecoder(StreamingModule):
+class SEANetDecoder(StreamingContainer):
     """SEANet decoder.
 
     Args:

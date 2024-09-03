@@ -73,9 +73,6 @@ class LMModel(StreamingContainer):
         depformer_multi_linear (bool): if True, uses one linear layer per codebook to project the
             output of the main transformer to the Depformer latent space.
         depformer_dim_feedforward (int| list[int]| None): If None, defaults to hidden_scale * depformer_dim.
-        autocast (TorchAutocast): autocast to use when evaluating the LM. This is better than
-            wrapping calls to the LMModel with autocast, as this allows to exclude the conditioning
-            computation.
         existing_text_padding_id (bool): if True, will use a different token for the initial text token, and
             the text padding token.
         same_initial (bool): if True, uses the same initial tokens for both text and audio mode.

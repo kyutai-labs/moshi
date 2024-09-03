@@ -12,6 +12,7 @@
 Streaming module API that should be implemented by all Streaming components,
 """
 
+import abc
 from contextlib import contextmanager
 from dataclasses import dataclass
 import itertools
@@ -24,7 +25,7 @@ import torch
 State = tp.TypeVar('State')
 
 
-class StreamingModule(tp.Generic[State], nn.Module):
+class StreamingModule(abc.ABC, tp.Generic[State], nn.Module):
     """Common API for streaming components.
 
     Each streaming component has a streaming state, which is just a dict[str, Tensor].
@@ -88,8 +89,9 @@ class StreamingModule(tp.Generic[State], nn.Module):
 
         self._apply_named_streaming(_stop_streaming)
 
+    @abc.abstractmethod
     def _init_streaming_state(self, batch_size: int) -> State:
-        raise NotImplementedError("need to be implemented.")
+        ...
 
     def streaming_forever(self, batch_size: int):
         self.streaming(batch_size).__enter__()
@@ -289,8 +291,8 @@ def test():
     for kernel, stride in itertools.product(kernel_sizes, strides):
         if stride > kernel:
             continue
-        conv = StreamingConv1d(chin, chout, kernel, stride).to(device)
-        convtr = StreamingConvTranspose1d(chout, chin, kernel, stride).to(device)
+        conv = RawStreamingConv1d(chin, chout, kernel, stride).to(device)
+        convtr = RawStreamingConvTranspose1d(chout, chin, kernel, stride).to(device)
 
         for length in [4, 8, 32, 54, 65, 128, 1043]:
             print(f"ksize {kernel} strides {stride} len {length}")

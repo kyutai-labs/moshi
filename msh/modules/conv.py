@@ -122,7 +122,7 @@ class NormConv1d(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        self.conv = apply_parametrization_norm(StreamingConv1d(*args, **kwargs), norm)
+        self.conv = apply_parametrization_norm(RawStreamingConv1d(*args, **kwargs), norm)
         self.norm_type = norm
 
     def forward(self, x):
@@ -145,7 +145,7 @@ class NormConvTranspose1d(nn.Module):
     ):
         super().__init__()
         self.convtr = apply_parametrization_norm(
-            StreamingConvTranspose1d(*args, **kwargs), norm
+            RawStreamingConvTranspose1d(*args, **kwargs), norm
         )
         self.norm_type = norm
 

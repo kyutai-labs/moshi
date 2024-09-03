@@ -11,7 +11,7 @@
 from torch import nn
 
 
-class Streaming(nn.Module):
+class StreamingLSTM(nn.Module):
     """LSTM without worrying about the hidden state, nor the layout of the data.
     Expects input as convolutional layout.
     """
