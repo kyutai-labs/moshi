@@ -173,7 +173,7 @@ class _StreamingConvState:
     previous: torch.Tensor | None = None
 
 
-class StreamingConv1d(nn.Conv1d, StreamingModule[_StreamingConvState]):
+class RawStreamingConv1d(nn.Conv1d, StreamingModule[_StreamingConvState]):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         assert self.padding[0] == 0, "Padding should be handled outside."
@@ -220,7 +220,7 @@ class _StreamingConvTrState:
     partial: torch.Tensor | None = None
 
 
-class StreamingConvTranspose1d(nn.ConvTranspose1d, StreamingModule[_StreamingConvTrState]):
+class RawStreamingConvTranspose1d(nn.ConvTranspose1d, StreamingModule[_StreamingConvTrState]):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         assert self.padding[0] == 0, "Padding should be handled outside."

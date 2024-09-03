@@ -13,8 +13,8 @@ import typing as tp
 import numpy as np
 import torch.nn as nn
 
-from .conv import StreamableConv1d, StreamableConvTranspose1d
-from .lstm import StreamableLSTM
+from .conv import StreamingConv1d, StreamingConvTranspose1d
+from .lstm import StreamingLSTM
 from .streaming import StreamingModule, StreamingAdd
 from ..utils.compile import torch_compile_lazy
 
@@ -63,7 +63,7 @@ class SEANetResnetBlock(StreamingModule):
             out_chs = dim if i == len(kernel_sizes) - 1 else hidden
             block += [
                 act(**activation_params),
-                StreamableConv1d(
+                StreamingConv1d(
                     in_chs,
                     out_chs,
                     kernel_size=kernel_size,
@@ -80,7 +80,7 @@ class SEANetResnetBlock(StreamingModule):
         if true_skip:
             self.shortcut = nn.Identity()
         else:
-            self.shortcut = StreamableConv1d(
+            self.shortcut = StreamingConv1d(
                 dim,
                 dim,
                 kernel_size=1,
@@ -172,7 +172,7 @@ class SEANetEncoder(StreamingModule):
         act = getattr(nn, activation)
         mult = 1
         model: tp.List[nn.Module] = [
-            StreamableConv1d(
+            StreamingConv1d(
                 channels,
                 mult * n_filters,
                 kernel_size,
@@ -208,7 +208,7 @@ class SEANetEncoder(StreamingModule):
             # Add downsampling layers
             model += [
                 act(**activation_params),
-                StreamableConv1d(
+                StreamingConv1d(
                     mult * n_filters,
                     mult * n_filters * 2,
                     kernel_size=ratio * 2,
@@ -224,11 +224,11 @@ class SEANetEncoder(StreamingModule):
                 model += [mask_fn]
 
         if lstm:
-            model += [StreamableLSTM(mult * n_filters, num_layers=lstm)]
+            model += [StreamingLSTM(mult * n_filters, num_layers=lstm)]
 
         model += [
             act(**activation_params),
-            StreamableConv1d(
+            StreamingConv1d(
                 mult * n_filters,
                 dimension,
                 last_kernel_size,
@@ -325,7 +325,7 @@ class SEANetDecoder(StreamingModule):
         act = getattr(nn, activation)
         mult = int(2 ** len(self.ratios))
         model: tp.List[nn.Module] = [
-            StreamableConv1d(
+            StreamingConv1d(
                 dimension,
                 mult * n_filters,
                 kernel_size,
@@ -339,7 +339,7 @@ class SEANetDecoder(StreamingModule):
         ]
 
         if lstm:
-            model += [StreamableLSTM(mult * n_filters, num_layers=lstm)]
+            model += [StreamingLSTM(mult * n_filters, num_layers=lstm)]
 
         # Upsample to raw audio scale
         for i, ratio in enumerate(self.ratios):
@@ -351,7 +351,7 @@ class SEANetDecoder(StreamingModule):
             # Add upsampling layers
             model += [
                 act(**activation_params),
-                StreamableConvTranspose1d(
+                StreamingConvTranspose1d(
                     mult * n_filters,
                     mult * n_filters // 2,
                     kernel_size=ratio * 2,
@@ -385,7 +385,7 @@ class SEANetDecoder(StreamingModule):
         # Add final layers
         model += [
             act(**activation_params),
-            StreamableConv1d(
+            StreamingConv1d(
                 n_filters,
                 channels,
                 last_kernel_size,
