@@ -10,6 +10,7 @@ import os
 import typing as tp
 
 import torch
+from torch import cuda
 
 
 _compile_disabled: bool = False
@@ -133,3 +134,26 @@ def simple_checkpoint(module: torch.nn.Module, *args, **kwargs):
             break
         new_args.append(bounded.arguments[name])
     return Checkpoint.apply(module, *new_args)
+
+
+_in_cuda_graph = False
+_disable_cuda_graph = False
+
+
+def in_cuda_graph() -> bool:
+    return _in_cuda_graph
+
+
+@contextmanager
+def no_cuda_graph():
+    global _disable_cuda_graph
+    old_value = _disable_cuda_graph
+    _disable_cuda_graph = True
+    try:
+        yield
+    finally:
+        _disable_cuda_graph = old_value
+
+class CudaGraphed:
+    def __init__(self, func, *args, **kwargs):
+        self.graph": "

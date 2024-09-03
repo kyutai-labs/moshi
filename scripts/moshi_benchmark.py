@@ -64,6 +64,7 @@ def streaming_test():
     main_text = []
 
     def run_step():
+        print('plop')
         start_time = time.time()
         # Chunk should contain the pcm data from the user, single channel with a sample rate of 24000.
         chunk = torch.zeros((1, 1, 1920), dtype=torch.float, device=DEVICE)
@@ -72,25 +73,31 @@ def streaming_test():
             be = time.time()
             ev = torch.cuda.Event(enable_timing=True)
             ev.record()
-            tokens = lm_gen.step(codes[0, :, c].tolist())
+            tokens = lm_gen.step(codes[0, :, c])
+            if tokens is None:
+                print("Skipping")
+                return
             evb = torch.cuda.Event(enable_timing=True)
             evb.record()
             dt_step = time.time() - be
-            text_token = tokens[0]
-            if text_token not in (0, 3):
-                _text = text_tokenizer.id_to_piece(text_token)
-                _text = _text.replace("▁", " ")
-                main_text.append(_text)
-            if all([t < 2048 for t in tokens[1:]]):
-                tokens = torch.tensor(tokens[1:], device=DEVICE).reshape((1, 8, 1))
-                main_pcm = ec.decode(tokens, scale=None)
-                # main_pcm is the audio to be played back to the user, here we just append it and store it in
-                # a file once the loop is finished.
-                main_audio.append(main_pcm[0])
-        dt = time.time() - start_time
+            # if all([t < 2048 for t in tokens[1:]]):
+            text_tokens = tokens[0]
+            tokens = tokens[1:].view(1, 8, 1)
+            # assert tokens.amax() < 2048, tokens
+            main_pcm = ec.decode(tokens, scale=None)
+            # main_pcm is the audio to be played back to the user, here we just append it and store it in
+            # a file once the loop is finished.
+            main_audio.append(main_pcm[0])
         evb.synchronize()
         dg = ev.elapsed_time(evb)
+        torch.cuda.synchronize()
+        dt = time.time() - start_time
         print(f"step time: {1000 * dt:.2f}ms, lm step: {1000 * dt_step:.2f}, gpu step {dg:.2f}")
+        text_token = text_tokens.item()
+        if text_token not in (0, 3):
+            _text = text_tokenizer.id_to_piece(text_token)
+            _text = _text.replace("▁", " ")
+            main_text.append(_text)
 
     for step in range(args.steps):
         run_step()

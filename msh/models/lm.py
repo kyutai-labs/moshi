@@ -318,12 +318,13 @@ class LMModel(StreamingModule):
 
         if self._transformer_graph is None:
             if self.transformer.get_streaming_state():
-                print("GRAPHING")
                 self._transformer_graph = torch.cuda.CUDAGraph()
+                input_ = input_.clone()
                 with torch.cuda.graph(self._transformer_graph):
                     transformer_out = self.transformer(input_)
                 self._transformer_output = transformer_out
                 self._transformer_input = input_
+                self._transformer_graph.replay()
             else:
                 transformer_out = self.transformer(input_)
         else:
@@ -332,6 +333,7 @@ class LMModel(StreamingModule):
             self._transformer_input.copy_(input_)
             self._transformer_graph.replay()
             transformer_out = self._transformer_output
+
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
         assert isinstance(transformer_out, torch.Tensor)
@@ -456,8 +458,8 @@ class LMGen(StreamingModule):
     @torch.no_grad()
     def step(
         self,
-        input_tokens: tp.List[int],
-    ) -> tp.Union[None, tp.List[int]]:
+        input_tokens: torch.Tensor,
+    ) -> torch.Tensor | None:
         lm_model = self.lm_model
         # `offset` measures position in the output tensor with no delays.
         # In particular, there is a shift of 1 with the `gen_sequence` that includes
@@ -468,8 +470,11 @@ class LMGen(StreamingModule):
             kk = lm_model.dep_q + 1 + k
             delay = lm_model.delays[kk]
             idx = self.offset + delay
-            if self.gen_sequence[:, kk, idx] == self.ungenerated:
-                self.gen_sequence[:, kk, idx] = tok
+            # if self.gen_sequence[:, kk, idx] == self.ungenerated:
+            #     self.gen_sequence[:, kk, idx] = tok
+            self.gen_sequence[:, kk, idx] = torch.where(
+                self.gen_sequence[:, kk, idx] == self.ungenerated, tok,
+                self.gen_sequence[:, kk, idx])
 
         input_ = self.gen_sequence[:, :, self.offset : self.offset + 1]
 
@@ -517,14 +522,15 @@ class LMGen(StreamingModule):
         self.gen_sequence[..., : lm_model.dep_q + 1, self.offset] = next_token
 
         out = []
+        max_delay = max(lm_model.delays)
         for k in range(1 + lm_model.dep_q):
             delay = lm_model.delays[k]
-            if self.offset < delay:
+            if self.offset - 1 < delay:
                 return None
-            _out = self.gen_sequence[0, k, self.offset - delay].item()
+            _out = self.gen_sequence[0, k, self.offset - max_delay + delay]
             out.append(_out)
 
-        return out
+        return torch.stack(out)
 
     def depformer_step(
         self,

@@ -265,6 +265,9 @@ class GraphableKVCache:
             dtype=dtype)
         self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
 
+    def rotate(self, ):
+        pass
+
     def complete(self, k: torch.Tensor, v: torch.Tensor) -> KVCacheResult:
         assert k.shape[:-1] == v.shape[:-1]
         B, T, H, D = k.shape
