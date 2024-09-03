@@ -99,10 +99,10 @@ def get_encodec(filename: tp.Union[str, Path], device):
     encoder = msh.modules.SEANetEncoder(**seanet_kwargs)
     decoder = msh.modules.SEANetDecoder(**seanet_kwargs)
     encoder_transformer = msh.modules.transformer.ProjectedTransformer(
-        **transformer_kwargs
+        device=device, **transformer_kwargs
     )
     decoder_transformer = msh.modules.transformer.ProjectedTransformer(
-        **transformer_kwargs
+        device=device, **transformer_kwargs
     )
     quantizer = msh.quantization.SplitResidualVectorQuantizer(
         **quantizer_kwargs,
@@ -136,6 +136,7 @@ def get_encodec(filename: tp.Union[str, Path], device):
 
 def get_lm(filename: tp.Union[str, Path], device):
     model = msh.models.LMModel(
+        device=device,
         **lm_kwargs,
     ).to(device=device)
     model.eval()
