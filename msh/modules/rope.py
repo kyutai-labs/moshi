@@ -63,7 +63,7 @@ def apply_rope(
     qo = torch.stack([qor.to(dtype), qoi.to(dtype)], dim=-1)
     ko = torch.stack([kor.to(dtype), koi.to(dtype)], dim=-1)
 
-    return qo.view(B, T, H, D), ko.view(B, T, H, D)
+    return qo.view(*dims, D), ko.view(*dims, D)
 
 
 class RotaryEmbedding(nn.Module):

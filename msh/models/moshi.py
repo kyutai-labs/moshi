@@ -134,12 +134,13 @@ def get_encodec(filename: tp.Union[str, Path], device):
 
 
 def get_lm(filename: tp.Union[str, Path], device):
+    dtype = torch.bfloat16
     model = msh.models.LMModel(
         device=device,
+        dtype=dtype,
         **lm_kwargs,
-    ).to(device=device)
+    ).to(device=device, dtype=dtype)
     model.eval()
-    model.to(torch.bfloat16)
     if _is_safetensors(filename):
         load_model(model, filename)
     else:

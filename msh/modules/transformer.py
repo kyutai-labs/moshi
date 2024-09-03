@@ -232,7 +232,7 @@ class RingKVCache:
         self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
 
     def complete(self, k: torch.Tensor, v: torch.Tensor) -> KVCacheResult:
-        assert k.shape[:-1] == v.shape[:-1]
+        assert k.shape[:-1] == v.shape[:-1], (k.shape, v.shape)
         B, H, T, D = k.shape
         indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype) + self.end_offset
         indexes = indexes % self.capacity
@@ -322,7 +322,10 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         else:
             capacity = self.context
         device = self.in_proj_weight.device
-        kv_cache = RingKVCache(batch_size, self.num_heads, self.dim_per_head, capacity, self.device)
+        # TODO: the following estimation will not work great with FSDP.
+        dtype = self.in_proj_weight.dtype
+        dim_per_head = self.embed_dim // self.num_heads
+        kv_cache = RingKVCache(batch_size, self.num_heads, dim_per_head, capacity, device, dtype)
         return _MHAState(kv_cache, offset=torch.zeros(1, device=device, dtype=torch.long), offset_cpu=0)
 
 
@@ -359,6 +362,8 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         if self.causal:
             attn_bias = (distance_to_last >= 0)
             if self.context is not None:
+                # TODO: extend for q
+                # TODO: print shit to debug
                 attn_bias = attn_bias & (distance_to_last < self.context)
         else:
             attn_bias = None

@@ -50,13 +50,14 @@ lm = msh.models.moshi.get_lm(args.moshi_weights, DEVICE)
 lm.to(torch.bfloat16)
 print("lm loaded")
 
+lm_gen = msh.models.LMGen(lm)
+
 
 def cb(step, total):
     print(f"{step:06d} / {total:06d}", end="\r")
 
 
 def streaming_test(bs):
-    lm_gen = msh.models.LMGen(lm)
 
     main_audio = []
     main_text = []
@@ -72,6 +73,7 @@ def streaming_test(bs):
             be = time.time()
             ev = torch.cuda.Event(enable_timing=True)
             ev.record()
+            # TODO: MAKE THINGS CONSISTENT IN TERMS OF SHAPE INPUT / OUTPUT
             tokens = lm_gen.step(codes[0, :, c])
             if tokens is None:
                 print("Skipping")
@@ -119,5 +121,5 @@ def streaming_test(bs):
 print("streaming test")
 bs = 1
 with torch.no_grad():
-    with ec.streaming(bs), lm.streaming(bs):
+    with ec.streaming(bs), lm_gen.streaming(bs):
         streaming_test(bs)
