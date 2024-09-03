@@ -58,15 +58,25 @@ class StreamingModule(nn.Module):
                 fn(name, module)
 
     def _set_streaming(self, streaming: bool):
-        def _set_streaming(name, module):
+        def _set_streaming(name: str, module: StreamingModule):
+            if streaming and module._is_streaming:
+                raise RuntimeError(f"Module {name} was already streaming.")
             module._is_streaming = streaming
 
         self._apply_named_streaming(_set_streaming)
 
+    def _start_streaming(self, batch_size: int):
+        pass
+
     @contextmanager
-    def streaming(self):
+    def streaming(self, batch_size: int = 1):
         """Context manager to enter streaming mode. Reset streaming state on exit."""
+
+        def fn(name: str, module: StreamingModule):
+            module._start_streaming(batch_size)
         self._set_streaming(True)
+        self._apply_named_streaming(fn)
+
         try:
             yield
         finally:

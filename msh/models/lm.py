@@ -224,6 +224,9 @@ class LMModel(StreamingModule):
         self.linears = nn.ModuleList(
             [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
         )
+        self._transformer_graph = None
+        self._transformer_input = None
+        self._transformer_output = None
 
     @property
     def initial_token_id(self) -> int:
@@ -313,7 +316,22 @@ class LMModel(StreamingModule):
         text_emb = self.text_emb(input_sequence[:, 0])
         input_ = text_emb if input_ is None else input_ + text_emb
 
-        transformer_out = self.transformer(input_)
+        if self._transformer_graph is None:
+            if self.transformer.get_streaming_state():
+                print("GRAPHING")
+                self._transformer_graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(self._transformer_graph):
+                    transformer_out = self.transformer(input_)
+                self._transformer_output = transformer_out
+                self._transformer_input = input_
+            else:
+                transformer_out = self.transformer(input_)
+        else:
+            assert self._transformer_input is not None
+            assert self._transformer_output is not None
+            self._transformer_input.copy_(input_)
+            self._transformer_graph.replay()
+            transformer_out = self._transformer_output
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
         assert isinstance(transformer_out, torch.Tensor)

@@ -69,7 +69,13 @@ def streaming_test():
         chunk = torch.zeros((1, 1, 1920), dtype=torch.float, device=DEVICE)
         codes, _scale = ec.encode(chunk)
         for c in range(codes.shape[-1]):
+            be = time.time()
+            ev = torch.cuda.Event(enable_timing=True)
+            ev.record()
             tokens = lm_gen.step(codes[0, :, c].tolist())
+            evb = torch.cuda.Event(enable_timing=True)
+            evb.record()
+            dt_step = time.time() - be
             text_token = tokens[0]
             if text_token not in (0, 3):
                 _text = text_tokenizer.id_to_piece(text_token)
@@ -82,7 +88,9 @@ def streaming_test():
                 # a file once the loop is finished.
                 main_audio.append(main_pcm[0])
         dt = time.time() - start_time
-        print(f"step time: {1000 * dt:.2f}ms")
+        evb.synchronize()
+        dg = ev.elapsed_time(evb)
+        print(f"step time: {1000 * dt:.2f}ms, lm step: {1000 * dt_step:.2f}, gpu step {dg:.2f}")
 
     for step in range(args.steps):
         run_step()

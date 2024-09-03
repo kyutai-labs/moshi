@@ -10,7 +10,7 @@ from ..utils.utils import torch_compile_lazy
 
 @torch_compile_lazy
 def apply_rope(
-    q: torch.Tensor, k: torch.Tensor, offset: int = 0, max_period: float = 10_000
+    q: torch.Tensor, k: torch.Tensor, offset: torch.Tensor, max_period: float = 10_000
 ):
     """
     Args:
@@ -28,7 +28,7 @@ def apply_rope(
 
     ds = torch.arange(D // 2, device=q.device, dtype=torch.float32)
     freqs = torch.exp(ds * (-math.log(max_period) * 2 / D))
-    ts = torch.arange(offset, offset + T, device=q.device, dtype=torch.float32).view(
+    ts = offset.float() + torch.arange(T, device=q.device, dtype=torch.float32).view(
         -1, 1, 1
     )
 
@@ -68,6 +68,6 @@ class RotaryEmbedding(nn.Module):
         super().__init__()
         self.max_period = max_period
 
-    def forward(self, q: torch.Tensor, k: torch.Tensor, offset: int = 0):
+    def forward(self, q: torch.Tensor, k: torch.Tensor, offset: torch.Tensor):
         """Apply rope rotation to query or key tensor."""
         return apply_rope(q, k, offset, self.max_period)
