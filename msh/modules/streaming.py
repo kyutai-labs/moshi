@@ -51,15 +51,30 @@ class StreamingModule(tp.Generic[State], nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self._streaming_state: State | None = None
+        self._streaming_propagate: bool = True
 
     @property
     def is_streaming(self):
         return self._streaming_state is not None
 
+    def set_streaming_propagate(self, streaming_propagate: bool):
+        self._streaming_propagate = streaming_propagate
+
     def _apply_named_streaming(self, fn: tp.Any):
-        for name, module in self.named_modules():
+        def _handle_module(prefix: str, module: nn.Module):
+            propagate = True
             if isinstance(module, StreamingModule):
-                fn(name, module)
+                if module._streaming_propagate:
+                    fn(prefix, module)
+                else:
+                    propagate = False
+            if propagate:
+                for name, child in module.named_children():
+                    _handle_module(prefix + "." + name, child)
+
+        _handle_module('', self)
+        for name, child in self.named_children():
+            _handle_module(name, child)
 
     def _start_streaming(self, batch_size: int):
         def _start_streaming(name: str, module: StreamingModule):

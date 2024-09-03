@@ -16,13 +16,12 @@ import typing as tp
 import torch
 from torch import nn
 
-from ..utils import utils
-from ..utils.autocast import TorchAutocast
-from ..modules.streaming import StreamingModule
+from ..utils.sampling import sample_token
+from ..utils.compile import CUDAGraphed
+from ..modules.streaming import StreamingContainer, StreamingModule
 from ..modules.transformer import (
     StreamingTransformer,
     create_norm_fn,
-    set_attention_context,
 )
 
 
@@ -56,38 +55,7 @@ class ScaledEmbedding(nn.Embedding):
         return y
 
 
-def _undelay_sequence(
-    delays: tp.List[int],
-    tensor: torch.Tensor,
-    fill_value: tp.Union[int, float] = float("NaN"),
-) -> tp.Tuple[torch.Tensor, torch.Tensor]:
-    B, K, T, *_ = tensor.shape
-    assert len(delays) == K
-    mask = torch.ones(B, K, T, dtype=torch.bool, device=tensor.device)
-    outs = []
-    if all([delay == 0 for delay in delays]):
-        return tensor, mask
-    for k, delay in enumerate(delays):
-        assert delay >= 0
-        line = tensor[:, k].roll(-delay, dims=1)
-        if delay > 0:
-            line[:, -delay:] = fill_value
-            mask[:, k, -delay:] = 0
-        outs.append(line)
-    return torch.stack(outs, dim=1), mask
-
-
-@dataclass
-class LMOutput:
-    # The logits are already re-aligned with the input codes
-    # hence no extra shift is required, e.g. when computing CE
-    logits: tp.Optional[torch.Tensor]  # [B, K, T, card]
-    mask: tp.Optional[torch.Tensor]  # [B, K, T]
-    text_logits: tp.Optional[torch.Tensor]  # [B, 1, T, text_card]
-    text_mask: tp.Optional[torch.Tensor]  # [B, 1, T]
-
-
-class LMModel(StreamingModule):
+class LMModel(StreamingContainer):
     """Transformer-based language model on multiple streams of codes.
 
     Args:
@@ -132,10 +100,8 @@ class LMModel(StreamingModule):
         depformer_multi_linear: bool = False,
         depformer_weights_per_step: bool = False,
         depformer_pos_emb: str = "sin",
-        autocast: TorchAutocast = TorchAutocast(enabled=False),
         existing_text_padding_id: tp.Optional[int] = None,
         context: tp.Optional[int] = None,
-        same_initial: bool = False,
         device=None,
         dtype=None,
         **kwargs,
@@ -150,8 +116,6 @@ class LMModel(StreamingModule):
         self.dim = dim
         self.existing_text_padding_id = existing_text_padding_id
         self.context = context
-        self.same_initial = same_initial
-        self.autocast = autocast
         kwargs["context"] = context
         EmbeddingFactory = partial(
             ScaledEmbedding,
@@ -219,14 +183,12 @@ class LMModel(StreamingModule):
             dtype=dtype,
             **kwargs_dep,
         )
+        self.depformer.set_streaming_propagate(False)
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
         self.linears = nn.ModuleList(
             [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
         )
-        self._transformer_graph = None
-        self._transformer_input = None
-        self._transformer_output = None
 
     @property
     def initial_token_id(self) -> int:
@@ -301,7 +263,7 @@ class LMModel(StreamingModule):
     def forward_text(
         self,
         sequence: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         B, K, S = sequence.shape
         assert (
             K == self.num_codebooks
@@ -348,12 +310,9 @@ class LMModel(StreamingModule):
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
         B, K, S = sequence.shape
-        assert (
-            K == 1
-        ), f"Codebooks for Depformer streaming should be passed 1 by 1, got {K}."
-        # Depformer doesn't care about past latent space of the transformers, in particular for the prompt.
-        # We only need the timestep for which we need to provide a prediction.
-        transformer_out = transformer_out[:, -1:]
+        assert K == 1, f"Codebooks for Depformer streaming should be passed 1 by 1, got {K}."
+        assert S == 1, f"Steps for Depformer streaming should be passed 1 by 1, got {S}."
+        assert transformer_out.shape[1] == 1, "Transformer out should be a for a single step."
         last_token_input: tp.Optional[torch.Tensor] = None
         depformer_input = transformer_out
         if self.depformer_multi_linear:
@@ -361,7 +320,6 @@ class LMModel(StreamingModule):
         else:
             depformer_input = self.depformer_in[0](depformer_input)
         if depformer_cb_index == 0:
-            self.depformer.reset_streaming()
             last_token_input = self.depformer_text_emb(sequence[:, 0])
         else:
             assert sequence.shape[2] == 1
@@ -378,34 +336,19 @@ class LMModel(StreamingModule):
         assert logits.dim() == 4, logits.shape  # [B, Ka, S, card]
         return logits
 
-    def _sample_next_token(
-        self,
-        logits: torch.Tensor,
-        use_sampling: bool = False,
-        temp: float = 1.0,
-        top_k: int = 0,
-        top_p: float = 0.0,
-    ) -> torch.Tensor:
-        logits = logits[:, :, -1, :].float()  # [B, K, card]
-        # Apply softmax for sampling if temp > 0. Else, do greedy sampling to avoid zero division error.
-        if use_sampling and temp > 0.0:
-            probs = torch.softmax(logits / temp, dim=-1)
-            if top_p > 0.0:
-                next_token = utils.sample_top_p(probs, p=top_p)
-            elif top_k > 0:
-                next_token = utils.sample_top_k(probs, k=top_k)
-            else:
-                next_token = utils.multinomial(probs, num_samples=1)
-        else:
-            next_token = torch.argmax(logits, dim=-1, keepdim=True)
-        return next_token
+
+@dataclass
+class _LMGenState:
+    cache: torch.Tensor
+    graphed_main: CUDAGraphed
+    graphed_depth: CUDAGraphed
+    offset: int = 0
 
 
-class LMGen(StreamingModule):
+class LMGen(StreamingModule[_LMGenState]):
     def __init__(
         self,
         lm_model: LMModel,
-        max_gen_len: int = 256,
         use_sampling: bool = True,
         temp: float = 1.0,
         top_k: int = 250,
@@ -415,185 +358,120 @@ class LMGen(StreamingModule):
         assert not lm_model.training, "generation shouldn't be used in training mode."
         super().__init__()
 
-        lm_model.reset_streaming()
-        lm_model._set_streaming(True)
-        device = lm_model.device
         self.lm_model = lm_model
-        self.max_gen_len = max_gen_len
         self.use_sampling = use_sampling
         self.temp = temp
         self.top_k = top_k
         self.top_p = top_p
         self.check = check
-        self.ungenerated = (
-            lm_model.ungenerated_token_id
-        )  # special value to indicate tokens to generate
-        self.max_delay = max(
-            lm_model.delays
-        )  # with delays, we need to generate a few more time steps.
+        self.max_delay = max(lm_model.delays)  # with delays, we need to generate a few more time steps.
+        self.delays_cuda = torch.tensor(lm_model.delays, device=lm_model.device, dtype=torch.long)
+        self._warmed_up = False
 
-        self.num_samples = 1
-        self.initial = lm_model._get_initial_token().expand(self.num_samples, -1, -1)
-        self.gen_sequence = torch.full(
-            (
-                self.num_samples,
-                lm_model.num_codebooks,
-                max_gen_len + self.max_delay + 1,
-            ),
-            self.ungenerated,
-            device=device,
-            dtype=torch.long,
-        )
-        for cb_idx, delay in enumerate(lm_model.delays):
-            for i in range(1 + delay):
-                self.gen_sequence[:, cb_idx, i] = self.initial[:, cb_idx, 0]
-        self.zero = torch.full(
-            [1], lm_model.zero_token_id, device=device, dtype=torch.long
-        )
-        self.audio_offset = lm_model.audio_offset
-        set_attention_context(lm_model.transformer, lm_model.context)
-        self.offset = 0
-        self.depformer_graph = None
+    def _init_streaming_state(self, batch_size: int) -> _LMGenState:
+        lm_model = self.lm_model
+        initial = lm_model._get_initial_token()
+        cache = torch.full(
+            (batch_size, self.lm_model.num_codebooks, self.max_delay + 2), lm_model.ungenerated_token_id,
+            device=lm_model.device, dtype=torch.long)
+        for cb, delay in enumerate(lm_model.delays):
+            cache[:, cb, 0: delay + 1] = initial[:, cb]
+
+        warmup_steps = 0 if self._warmed_up else 1
+        graphed_main = CUDAGraphed(lm_model.forward_text, warmup_steps=warmup_steps)
+        graphed_depth = CUDAGraphed(self.depformer_step, warmup_steps=warmup_steps)
+
+        return _LMGenState(cache, graphed_main, graphed_depth)
 
     @torch.no_grad()
-    def step(
-        self,
-        input_tokens: torch.Tensor,
-    ) -> torch.Tensor | None:
+    def step(self, input_tokens: torch.Tensor) -> torch.Tensor | None:
+        state = self._streaming_state
+        if state is None:
+            raise RuntimeError("You should wrap those calls with a `with lm_gen.streaming(): ...`.")
         lm_model = self.lm_model
-        # `offset` measures position in the output tensor with no delays.
-        # In particular, there is a shift of 1 with the `gen_sequence` that includes
-        # the initial empty token.
-        logger.debug("Offset %d / %d", self.offset, self.max_gen_len + self.max_delay)
 
-        for k, tok in enumerate(input_tokens):
-            kk = lm_model.dep_q + 1 + k
-            delay = lm_model.delays[kk]
-            idx = self.offset + delay
-            # if self.gen_sequence[:, kk, idx] == self.ungenerated:
-            #     self.gen_sequence[:, kk, idx] = tok
-            self.gen_sequence[:, kk, idx] = torch.where(
-                self.gen_sequence[:, kk, idx] == self.ungenerated, tok,
-                self.gen_sequence[:, kk, idx])
+        assert input_tokens.dim() == 3, "Shape should be [B, K, T]."
+        assert input_tokens.shape[2] == 1, "Only support being given steps one by one."
 
-        input_ = self.gen_sequence[:, :, self.offset : self.offset + 1]
+        CT = self.cache.shape[2]
+
+        for q_other, token in enumerate(input_tokens):
+            k = lm_model.dep_q + 1 + q_other
+            delay = lm_model.delays[k]
+            write_position = (state.offset + delay + 1) % CT
+            state.cache[:, k, write_position] = token
+
+
+        position = state.offset % CT
+        for k, delay in enumerate(lm_model.delays):
+            # Only for the very beginning, we extend the initial token for the acoustic
+            # token that are delayed, and thus have no good value to take.
+            if 0 < state.offset <= delay:
+                state.cache[:, k, position] = state.cache[:, k, 0]
+        input_ = state.cache[:, :, position: position + 1]
 
         if self.check:
             # Check that we are not feeding in any value that is not generated yet.
-            assert not (input_ == self.ungenerated).any(), (self.offset, input_)
+            assert not (input_ == self.ungenerated).any(), (state.offset, input_)
             assert (input_[:, lm_model.audio_offset :] <= lm_model.card).all(), input_
             assert (input_[:, :1] <= lm_model.text_card).all()
 
-        transformer_out, text_logits = lm_model.forward_text(input_)
-        next_token = lm_model._sample_next_token(
-            text_logits,
+        transformer_out, text_logits = state.graphed_main(input_)
+        # Shape of text_logits should be [B, K_text=1, T=1, Card_text]
+        text_token = lm_model._sample_next_token(
+            text_logits[:, :, 0].float(),
             self.use_sampling,
             self.temp,
             self.top_k,
             self.top_p,
         )
-        assert next_token.shape[-1] == 1
-        next_token = next_token[:, :, 0]  # shape is [B, K]
-        this_gen_step = self.gen_sequence[:, :, self.offset + 1]
-
-        if self.depformer_graph is None:
-            self.depformer_graph = torch.cuda.CUDAGraph()
-            self.depformer_in = next_token.clone()
-            self.this_gen_step = this_gen_step.clone()
-            self.transformer_out = transformer_out.clone()
-            with torch.cuda.graph(self.depformer_graph):
-                self.depformer_out = self.depformer_step(
-                    self.depformer_in,
-                    self.this_gen_step,
-                    self.transformer_out,
-                )
-            # It is important to evaluate the graph here as otherwise self.depformer_out would
-            # not contain the appropriate values.
-            self.depformer_graph.replay()
-        else:
-            self.depformer_in.copy_(next_token)
-            self.this_gen_step.copy_(this_gen_step)
-            self.transformer_out.copy_(transformer_out)
-            self.depformer_graph.replay()
-        next_token = self.depformer_out
+        assert text_token.dim() == 3
+        assert text_token.shape[:, :, 0] == 1
+        assert text_token.shape[1] == 1, "Only one text stream supported."
+        text_token = text_token[:, 0, 0]  # shape is [B]
+        audio_tokens = self.depformer_step(text_token, transformer_out)
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
-        self.offset += 1
-        self.gen_sequence[..., : lm_model.dep_q + 1, self.offset] = next_token
+        state.offset += 1
+        position = state.offset % CT
+        state.cache[:, 0, self.offset] = text_token
+        state.cache[:, 1: lm_model.dep_q + 1, self.offset] = audio_tokens
 
-        out = []
-        max_delay = max(lm_model.delays)
-        for k in range(1 + lm_model.dep_q):
-            delay = lm_model.delays[k]
-            if self.offset - 1 < delay:
-                return None
-            _out = self.gen_sequence[0, k, self.offset - max_delay + delay]
-            out.append(_out)
-
-        return torch.stack(out)
+        if state.offset <= self.max_delay:
+            return None
+        B = state.cache.shape[0]
+        index = ((state.offset - self.delays_cuda) % CT).view(1, -1, 1).expand(B, -1, 1)
+        out = state.cache[:, ].gather(dim=2, index=index)
+        self._warmed_up = True
+        return out
 
     def depformer_step(
         self,
-        next_token: torch.Tensor,
-        this_gen_step: torch.Tensor,
+        text_token: torch.Tensor,
         transformer_out: torch.Tensor,
-    ):
+    ) -> torch.Tensor:
+        B, = text_token.shape
+        prev_token = text_token
         lm_model = self.lm_model
-        # Depformer gives us tokens one by one instead of K at once.
-        assert next_token.shape[1] == 1, next_token.shape[1]
-        next_token = next_token[:, 0]  # Now shape is B.
-        depformer_tokens: tp.List[torch.Tensor] = []
-        for cb_index in range(lm_model.dep_q + 1):
-            if cb_index == 0:
-                # No need to generate, `next_token` is actually the next text token.
-                # We just need to only keep the new token if the value wasn't provided
-                # in the prompt.
-                next_token = torch.where(
-                    this_gen_step[:, 0] == self.ungenerated,
-                    next_token,
-                    this_gen_step[:, 0],
-                )
-            else:
-                input_ = next_token[:, None, None]
-                if False:  # self.check:
-                    # Check that we are not feeding in any value that is not generated yet.
-                    assert not (input_ == self.ungenerated).any()
-                    if cb_index == 1:
-                        assert (input_ <= lm_model.text_card).all()
-                    else:
-                        assert (input_ <= lm_model.card).all()
-                logits = lm_model.forward_depformer(
-                    cb_index - 1, input_, transformer_out
-                )
-                next_token = lm_model._sample_next_token(
+        depformer_tokens: list[torch.Tensor] = []
+        assert not lm_model.depformer.is_streaming
+        with lm_model.depformer.streaming(B):
+            for cb_index in range(lm_model.dep_q):
+                input_ = prev_token[:, None, None]
+                logits = lm_model.forward_depformer(cb_index, input_, transformer_out)
+                next_token = sample_token(
                     logits,
                     self.use_sampling,
                     self.temp,
                     self.top_k,
                     self.top_p,
                 )
-                assert next_token.shape[-1] == 1
-                next_token = next_token[:, 0, 0]  # shape is [B, K]
-                next_token = torch.where(
-                    this_gen_step[:, cb_index] == self.ungenerated,
-                    next_token,
-                    this_gen_step[:, cb_index],
-                )
+                assert next_token.shape == (B, 1, 1)
+                next_token = next_token[:, 0, 0]  # shape is B
+                depformer_tokens.append(next_token)
+                prev_token = next_token
 
-            # TODO(laurent): does the following really matter?
-            # original_offset = self.offset - lm_model.delays[cb_index]
-            # if original_offset < 0:
-            #     # We are not currently generating this codebook, we replace with a special token.
-            #     next_token[:] = self.initial[:, cb_index, 0]
-            depformer_tokens.append(next_token)
-
-        assert len(depformer_tokens) == lm_model.dep_q + 1, (
-            len(depformer_tokens),
-            lm_model.dep_q,
-        )
-        next_token = torch.stack(depformer_tokens, dim=1)
-        assert next_token.shape == (
-            self.num_samples,
-            lm_model.dep_q + 1,
-        ), next_token.shape
-        return next_token
+        assert len(depformer_tokens) == lm_model.dep_q, (len(depformer_tokens), lm_model.dep_q)
+        out = torch.stack(depformer_tokens, dim=1)
+        assert out.shape == (B, lm_model.dep_q), out.shape
+        return out

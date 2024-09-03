@@ -155,6 +155,15 @@ def _set_in_cuda_graph():
         _in_cuda_graph = False
 
 
+def _is_cuda_graph_enabled() -> bool:
+    if _disable_cuda_graph:
+        return False
+    no_cuda_graph = os.environ.get('NO_CUDA_GRAPH', '')
+    if no_cuda_graph.lower() not in {'0', 'no', 'n', ''}:
+        return False
+    return True
+
+
 @contextmanager
 def no_cuda_graph():
     global _disable_cuda_graph
@@ -180,10 +189,10 @@ class CUDAGraphed:
         self._output = None
         self._args = None
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args, **kwargs) -> tp.Any:
         if kwargs:
             raise RuntimeError("Named arguments not supported for now.")
-        if _disable_cuda_graph or in_cuda_graph():
+        if not _is_cuda_graph_enabled() or in_cuda_graph():
             return self.func(*args, **kwargs)
 
         def _clone_tensors(args: tuple) -> tuple:
@@ -233,7 +242,6 @@ class CUDAGraphed:
 
 
 def cuda_graph(func: tp.Callable, warmup_steps: int = 1):
-    no_cuda_graph = os.environ.get('NO_CUDA_GRAPH', '')
-    if no_cuda_graph.lower() not in {'0', 'no', 'n', ''}:
+    if not _is_cuda_graph_enabled():
         return func
-    return
+    return CUDAGraphed(func, warmup_steps)
