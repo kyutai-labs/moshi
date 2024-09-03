@@ -145,6 +145,17 @@ def in_cuda_graph() -> bool:
 
 
 @contextmanager
+def _set_in_cuda_graph():
+    global _in_cuda_graph
+    assert not _in_cuda_graph
+    _in_cuda_graph = True
+    try:
+        yield
+    finally:
+        _in_cuda_graph = False
+
+
+@contextmanager
 def no_cuda_graph():
     global _disable_cuda_graph
     old_value = _disable_cuda_graph
@@ -154,6 +165,75 @@ def no_cuda_graph():
     finally:
         _disable_cuda_graph = old_value
 
-class CudaGraphed:
-    def __init__(self, func, *args, **kwargs):
-        self.graph": "
+
+class CUDAGraphed:
+    def __init__(self, func: tp.Callable, warmup_steps: int = 1):
+        self.func = func
+        self.warmup_steps = warmup_steps
+        self._graph: cuda.CUDAGraph | None = None
+        self._output: tuple | None = None
+        self._args: tuple | None = None
+
+    def reset(self, warmup_steps: int = 0) -> None:
+        self.warmup_steps = warmup_steps
+        self._graph = None
+        self._output = None
+        self._args = None
+
+    def __call__(self, *args, **kwargs):
+        if kwargs:
+            raise RuntimeError("Named arguments not supported for now.")
+        if _disable_cuda_graph or in_cuda_graph():
+            return self.func(*args, **kwargs)
+
+        def _clone_tensors(args: tuple) -> tuple:
+            out: list = []
+            for arg in args:
+                if isinstance(arg, torch.Tensor):
+                    arg = arg.clone()
+                out.append(arg)
+            return tuple(out)
+
+        def _match_values_copy_tensors(args: tuple, target_args: tuple) -> None:
+            if len(args) != len(target_args):
+                raise ValueError(f"Expected {len(target_args)}, but got {args} for CUDA Graphed function.")
+            for idx, (source, target) in enumerate(zip(args, target_args)):
+                if isinstance(target, torch.Tensor):
+                    if not isinstance(source, torch.Tensor):
+                        raise ValueError(f"Argument #{idx} was a tensor, and is no longer (now {source}).")
+                    target.copy_(source)
+                else:
+                    if isinstance(source, torch.Tensor):
+                        raise ValueError(f"Argument #{idx} was not a tensor {target}, but is now one.")
+                    if source is not target and source != target:
+                        raise ValueError(f"Argument #{idx} changed value from {target} to {source}.")
+
+        with _set_in_cuda_graph():
+            # Prevent any one under us to try and CUDA Graph things.
+            if self._graph is None:
+                if self.warmup_steps <= 0:
+                    print("graphing", self.func)
+                    self.graph = cuda.CUDAGraph()
+                    # Making a copy just to ensure those are not used else where.
+                    self._args = _clone_tensors(args)
+                    with cuda.graph(self.graph):
+                        self._output = self.func(*self._args)
+                    # At this point nothing really happened, so we have to make it run for real.
+                    self.graph.replay()
+                    return self._output
+                else:
+                    self.warmup_steps -= 1
+                    return self.func(*args)
+            else:
+                assert self._args is not None
+                assert self._output is not None
+                _match_values_copy_tensors(args, self._args)
+                self.graph.replay()
+                return self._output
+
+
+def cuda_graph(func: tp.Callable, warmup_steps: int = 1):
+    no_cuda_graph = os.environ.get('NO_CUDA_GRAPH', '')
+    if no_cuda_graph.lower() not in {'0', 'no', 'n', ''}:
+        return func
+    return

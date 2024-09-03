@@ -74,15 +74,15 @@ class ServerState:
                 codes, _scale = self.ec.encode(chunk)
                 main_pcm = None
                 for c in range(codes.shape[-1]):
-                    tokens = lm_gen.step(codes[0, :, c].tolist())
-                    if all([t < self.ec.cardinality for t in tokens[1:]]):
-                        tokens = torch.tensor(tokens[1:], device=DEVICE).reshape(
-                            (1, 8, 1)
-                        )
-                        main_pcm = self.ec.decode(tokens, scale=None)
-                        print(main_pcm.shape)
+                    tokens = lm_gen.step(codes[0, :, c])
+                    if tokens is None:
+                        continue
+                    tokens = tokens[1:].view(1, 8, 1)
+                    main_pcm = self.ec.decode(tokens, scale=None)
+                    print(main_pcm.shape)
                 if main_pcm is not None:
                     break
+        torch.cuda.synchronize()
 
     async def handle_conn(self, websocket, path):
         print(websocket, path)
@@ -127,21 +127,20 @@ class ServerState:
                     codes, _scale = self.ec.encode(chunk)
                     print("codes to process", codes.shape)
                     for c in range(codes.shape[-1]):
-                        tokens = lm_gen.step(codes[0, :, c].tolist())
-                        text_token = tokens[0]
-                        print("generated", tokens)
+                        print("WTF", codes)
+                        tokens = lm_gen.step(codes[0, :, c])
+                        if tokens is None:
+                            continue
+                        print(tokens)
+                        main_pcm = self.ec.decode(tokens[1:].view(1, 8, 1), scale=None)
+                        main_pcm = main_pcm.cpu().numpy()
+                        text_token = tokens[0].item()
                         if text_token not in (0, 3):
                             _text = self.text_tokenizer.id_to_piece(text_token)
                             _text = _text.replace("▁", " ")
                             msg = b"\x02" + bytes(_text, encoding="utf8")
                             print("text token", msg)
                             await websocket.send(msg)
-                        if all([t < self.ec.cardinality for t in tokens[1:]]):
-                            tokens = torch.tensor(tokens[1:], device=DEVICE).reshape(
-                                (1, 8, 1)
-                            )
-                            main_pcm = self.ec.decode(tokens, scale=None)
-                            main_pcm = main_pcm.cpu().numpy()
                             opus_writer.append_pcm(main_pcm[0][0])
 
         async def send_loop():

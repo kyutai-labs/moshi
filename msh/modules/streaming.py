@@ -13,6 +13,7 @@ Streaming module API that should be implemented by all Streaming components,
 """
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 import itertools
 import math
 import typing as tp
@@ -20,10 +21,10 @@ from torch import nn
 import torch
 
 
-State = tp.Dict[str, torch.Tensor]
+State = tp.TypeVar('State')
 
 
-class StreamingModule(nn.Module):
+class StreamingModule(tp.Generic[State], nn.Module):
     """Common API for streaming components.
 
     Each streaming component has a streaming state, which is just a dict[str, Tensor].
@@ -49,96 +50,80 @@ class StreamingModule(nn.Module):
 
     def __init__(self) -> None:
         super().__init__()
-        self._streaming_state: State = {}
-        self._is_streaming = False
+        self._streaming_state: State | None = None
 
     def _apply_named_streaming(self, fn: tp.Any):
         for name, module in self.named_modules():
             if isinstance(module, StreamingModule):
                 fn(name, module)
 
-    def _set_streaming(self, streaming: bool):
-        def _set_streaming(name: str, module: StreamingModule):
-            if streaming and module._is_streaming:
-                raise RuntimeError(f"Module {name} was already streaming.")
-            module._is_streaming = streaming
-
-        self._apply_named_streaming(_set_streaming)
-
     def _start_streaming(self, batch_size: int):
-        pass
+        def _start_streaming(name: str, module: StreamingModule):
+            module._streaming_state = module._init_streaming_state(batch_size)
+
+        self._apply_named_streaming(_start_streaming)
+
+    def _stop_streaming(self):
+        def _stop_streaming(name: str, module: StreamingModule):
+            module._streaming_state = None
+
+        self._apply_named_streaming(_stop_streaming)
+
+    def _init_streaming_state(self, batch_size: int) -> State:
+        raise NotImplementedError("Should implement")
+
+    def streaming_forever(self, batch_size: int):
+        self.streaming(batch_size).__enter__()
 
     @contextmanager
-    def streaming(self, batch_size: int = 1):
+    def streaming(self, batch_size: int):
         """Context manager to enter streaming mode. Reset streaming state on exit."""
 
-        def fn(name: str, module: StreamingModule):
-            module._start_streaming(batch_size)
-        self._set_streaming(True)
-        self._apply_named_streaming(fn)
-
+        self._set_streaming(batch_size)
         try:
             yield
         finally:
-            self._set_streaming(False)
-            self.reset_streaming()
+            self._stop_streaming()
 
-    def reset_streaming(self):
+    def reset_streaming(self, batch_size: int):
         """Reset the streaming state."""
+        self._start_streaming(batch_size)
 
-        def _reset(name: str, module: StreamingModule):
-            module._streaming_state.clear()
-
-        self._apply_named_streaming(_reset)
-
-    def get_streaming_state(self) -> State:
-        """Return the streaming state, including that of sub-modules."""
-        state: State = {}
+    def get_streaming_state(self) -> dict[str, tp.Any]:
+        """Return the complete streaming state, including that of sub-modules."""
+        state: dict[str, tp.Any] = {}
 
         def _add(name: str, module: StreamingModule):
-            if name:
-                name += "."
-            for key, value in module._streaming_state.items():
-                state[name + key] = value
+            state[name] = module._streaming_state
 
         self._apply_named_streaming(_add)
         return state
 
-    def set_streaming_state(self, state: State):
+    def set_streaming_state(self, state: dict[str, tp.Any]):
         """Set the streaming state, including that of sub-modules."""
         state = dict(state)
-
         def _set(name: str, module: StreamingModule):
-            if name:
-                name += "."
-            module._streaming_state.clear()
-            for key, value in list(state.items()):
-                # complexity is not ideal here, but probably fine.
-                if key.startswith(name):
-                    local_key = key[len(name) :]
-                    if "." not in local_key:
-                        module._streaming_state[local_key] = value
-                        del state[key]
+            if name in state:
+                module._streaming_state = state[name]
+                state.pop(name)
+            else:
+                raise RuntimeError(f"Expected to find a streaming state for {name}.")
 
         self._apply_named_streaming(_set)
-        assert len(state) == 0, list(state.keys())
-
-    def flush(self, x: tp.Optional[torch.Tensor] = None):
-        """Flush any remaining outputs that were waiting for completion.
-        Typically, for convolutions, this will add the final padding
-        and process the last buffer.
-
-        This should take an optional argument `x`, which will be provided
-        if a module before this one in the streaming pipeline has already
-        spitted out a flushed out buffer.
-        """
-        if x is None:
-            return None
-        else:
-            return self(x)
+        if state:
+            raise RuntimeError(f"Some states were not consumed: {list(state.keys())}")
 
 
-class StreamingAdd(StreamingModule):
+@dataclass
+class _StreamingSkipState:
+    saved: torch.Tensor
+
+
+class StreamingSkip(StreamingModule[_StreamingSkipState]):
+    def __init__(self, channels: int, max_delay: int = 10):
+        super().__init__()
+        self.channels = channels
+        self.max_delay = max_delay
     def forward(self, x: torch.Tensor, y: torch.Tensor):
         if self._is_streaming:
             prev_x = self._streaming_state.get("previous_x")
@@ -153,18 +138,6 @@ class StreamingAdd(StreamingModule):
             return x[..., :m_l] + y[..., :m_l]
         else:
             return x + y
-
-
-class StreamingSequential(nn.Sequential, StreamingModule):
-    """A streaming compatible alternative of `nn.Sequential`."""
-
-    def flush(self, x: tp.Optional[torch.Tensor] = None):
-        for module in self:
-            if isinstance(module, StreamingModule):
-                x = module.flush(x)
-            elif x is not None:
-                x = module(x)
-        return x
 
 
 class StreamingConv1d(nn.Conv1d, StreamingModule):
