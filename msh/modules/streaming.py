@@ -119,6 +119,15 @@ class StreamingModule(tp.Generic[State], nn.Module):
 
 
 @dataclass
+class _NullState:
+    pass
+
+
+class StreamingContainer(StreamingModule[_NullState]):
+    def _init_streaming_state(self, batch_size: int) -> _NullState:
+        return _NullState()
+
+@dataclass
 class _StreamingAddState:
     previous_x: torch.Tensor | None = None
     previous_y: torch.Tensor | None = None
