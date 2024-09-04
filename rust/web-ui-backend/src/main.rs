@@ -50,6 +50,9 @@ pub struct BenchmarkArgs {
 
     #[clap(long)]
     chrome_tracing: bool,
+
+    #[clap(long)]
+    moshi_only: bool,
 }
 
 #[derive(Debug, clap::Subcommand)]

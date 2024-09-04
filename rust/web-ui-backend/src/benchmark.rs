@@ -78,41 +78,64 @@ pub async fn run(args: &crate::BenchmarkArgs, config: &Config) -> Result<()> {
         repetition_penalty_context: None,
         repetition_penalty: None,
     };
-    let standalone_args = crate::StandaloneArgs { cpu: args.cpu };
-    let state = std::sync::Arc::new(AppStateInner::new(&standalone_args, config)?);
-    for _i in 0..args.reps {
-        let sm = StreamingModel::new(&state, session_config.clone());
-        let (in_pcm_tx, in_pcm_rx) = mpsc::channel();
-        let (stream_out_tx, mut stream_out_rx) = tokio::sync::mpsc::unbounded_channel();
-        let w = tokio::task::spawn_blocking(move || sm.run(in_pcm_rx, stream_out_tx, None));
-
-        let task = tokio::spawn({
-            let stat_file = args.stat_file.clone();
-            async move {
-                let mut st = StatsTracker::new();
-                while let Some(out) = stream_out_rx.recv().await {
-                    st.on_update(out)
-                }
-                tracing::info!("stream-out receiver closed");
-                if let Some(stat_file) = stat_file {
-                    use std::io::Write;
-
-                    let json_string = serde_json::to_string_pretty(&st).unwrap();
-                    let mut stat_file = std::fs::File::create(stat_file).unwrap();
-                    stat_file.write_all(json_string.as_bytes()).unwrap()
-                }
+    if args.moshi_only {
+        let device = crate::standalone::device(args.cpu)?;
+        let encodec_device =
+            if config.use_cpu_for_encodec { &candle::Device::Cpu } else { &device };
+        let mut encodec_model = moshi::encodec::load(
+            &config.encodec_model_file,
+            Some(config.encodec_num_codebooks),
+            encodec_device,
+        )?;
+        let config = encodec_model.config();
+        let frame_length = (config.sample_rate / config.frame_rate).ceil() as usize;
+        for _step in 0..args.steps {
+            let fake_pcm =
+                candle::Tensor::zeros((1, 1, frame_length), candle::DType::F32, encodec_device)?;
+            let codes = encodec_model.encode_step(&fake_pcm.into())?;
+            let ys = encodec_model.decode_step(&codes)?;
+            if ys.as_option().is_none() {
+                anyhow::bail!("Expected Encodec to output some stuff, but nothing came out.");
             }
-        });
-        let zeros = vec![0f32; 48000 / 25];
-        let start_time = tokio::time::Instant::now();
-        for step in 0..args.steps + 20 {
-            let target_time =
-                start_time + tokio::time::Duration::from_millis(80).mul_f64(step as f64);
-            tokio::time::sleep_until(target_time).await;
-            in_pcm_tx.send(zeros.to_vec())?;
+            device.synchronize()?;
         }
-        let _ = task.await;
-        let _ = w.await;
+    } else {
+        let standalone_args = crate::StandaloneArgs { cpu: args.cpu };
+        let state = std::sync::Arc::new(AppStateInner::new(&standalone_args, config)?);
+        for _i in 0..args.reps {
+            let sm = StreamingModel::new(&state, session_config.clone());
+            let (in_pcm_tx, in_pcm_rx) = mpsc::channel();
+            let (stream_out_tx, mut stream_out_rx) = tokio::sync::mpsc::unbounded_channel();
+            let w = tokio::task::spawn_blocking(move || sm.run(in_pcm_rx, stream_out_tx, None));
+
+            let task = tokio::spawn({
+                let stat_file = args.stat_file.clone();
+                async move {
+                    let mut st = StatsTracker::new();
+                    while let Some(out) = stream_out_rx.recv().await {
+                        st.on_update(out)
+                    }
+                    tracing::info!("stream-out receiver closed");
+                    if let Some(stat_file) = stat_file {
+                        use std::io::Write;
+
+                        let json_string = serde_json::to_string_pretty(&st).unwrap();
+                        let mut stat_file = std::fs::File::create(stat_file).unwrap();
+                        stat_file.write_all(json_string.as_bytes()).unwrap()
+                    }
+                }
+            });
+            let zeros = vec![0f32; 48000 / 25];
+            let start_time = tokio::time::Instant::now();
+            for step in 0..args.steps + 20 {
+                let target_time =
+                    start_time + tokio::time::Duration::from_millis(80).mul_f64(step as f64);
+                tokio::time::sleep_until(target_time).await;
+                in_pcm_tx.send(zeros.to_vec())?;
+            }
+            let _ = task.await;
+            let _ = w.await;
+        }
     }
     Ok(())
 }
