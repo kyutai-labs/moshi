@@ -295,6 +295,7 @@ impl StreamingModule for StreamableConv1d {
     }
 
     fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
+        let _enter = self.span.enter();
         let xs = match xs.as_option() {
             None => return Ok(().into()),
             Some(xs) => xs.clone(),
@@ -398,6 +399,7 @@ impl StreamingModule for StreamableConvTranspose1d {
     }
 
     fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
+        let _enter = self.span.enter();
         let xs = match xs.as_option() {
             Some(xs) => xs,
             None => return Ok(StreamTensor::empty()),

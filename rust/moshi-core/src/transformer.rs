@@ -327,7 +327,9 @@ impl StreamingMultiheadCrossAttention {
 #[derive(Debug, Clone)]
 pub enum Mlp {
     NoGating {
+        span1: tracing::Span,
         linear1: Linear,
+        span2: tracing::Span,
         linear2: Linear,
         span: tracing::Span,
     },
@@ -346,9 +348,11 @@ impl Mlp {
 
         match cfg.gating {
             None => {
+                let span1 = tracing::span!(tracing::Level::TRACE, "lin1");
+                let span2 = tracing::span!(tracing::Level::TRACE, "lin2");
                 let linear1 = linear(d_model, cfg.dim_feedforward, cfg.bias_ff, vb.pp("linear1"))?;
                 let linear2 = linear(cfg.dim_feedforward, d_model, cfg.bias_ff, vb.pp("linear2"))?;
-                Ok(Self::NoGating { linear1, linear2, span })
+                Ok(Self::NoGating { linear1, linear2, span, span1, span2 })
             }
             Some(activation) => {
                 let vb = vb.pp("gating");
@@ -369,9 +373,17 @@ impl Mlp {
 impl Module for Mlp {
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
         match self {
-            Self::NoGating { linear1, linear2, span } => {
+            Self::NoGating { linear1, linear2, span, span1, span2 } => {
                 let _enter = span.enter();
-                xs.apply(linear1)?.gelu_erf()?.apply(linear2)
+                let xs = {
+                    let _enter = span1.enter();
+                    xs.apply(linear1)?
+                };
+                let xs = xs.gelu_erf()?;
+                {
+                    let _enter = span2.enter();
+                    xs.apply(linear2)
+                }
             }
             Self::Gating { linear_in, linear_out, activation, span } => {
                 let _enter = span.enter();
