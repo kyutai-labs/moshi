@@ -67,6 +67,7 @@ def streaming_test(bs):
         start_time = time.time()
         # Chunk should contain the pcm data from the user, single channel with a sample rate of 24000.
         chunk = torch.zeros((bs, 1, 1920), dtype=torch.float, device=DEVICE)
+        print("ENCODE")
         codes = ec.encode(chunk)
         assert codes.shape[-1] == 1
         print(codes)

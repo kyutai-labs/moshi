@@ -375,7 +375,6 @@ class EncodecModel(CompressionModel):
             emb = self.decoder_transformer(emb)[0]
         with self._context_for_encoder_decoder:
             out = self.decoder(emb)
-        out = self.postprocess(out)
         # out contains extra padding added by the encoder and decoder
         return out
 

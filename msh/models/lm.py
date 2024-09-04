@@ -320,6 +320,7 @@ class LMModel(StreamingContainer):
 @dataclass
 class _LMGenState:
     cache: torch.Tensor
+    initial: torch.Tensor
     graphed_main: CUDAGraphed
     graphed_depth: CUDAGraphed
     offset: int = 0
@@ -354,14 +355,12 @@ class LMGen(StreamingModule[_LMGenState]):
         cache = torch.full(
             (batch_size, self.lm_model.num_codebooks, self.max_delay + 2), lm_model.ungenerated_token_id,
             device=lm_model.device, dtype=torch.long)
-        for cb, delay in enumerate(lm_model.delays):
-            cache[:, cb, 0: delay + 1] = initial[:, cb]
 
         warmup_steps = 0 if self._warmed_up else 1
         graphed_main = CUDAGraphed(lm_model.forward_text, warmup_steps=warmup_steps)
         graphed_depth = CUDAGraphed(self.depformer_step, warmup_steps=warmup_steps)
 
-        return _LMGenState(cache, graphed_main, graphed_depth)
+        return _LMGenState(cache, initial, graphed_main, graphed_depth)
 
     @torch.no_grad()
     def step(self, input_tokens: torch.Tensor) -> torch.Tensor | None:
@@ -371,7 +370,10 @@ class LMGen(StreamingModule[_LMGenState]):
         lm_model = self.lm_model
 
         assert input_tokens.dim() == 3, "Shape should be [B, K, T]."
-        assert input_tokens.shape[2] == 1, "Only support being given steps one by one."
+        B, Ki, S = input_tokens.shape
+        assert S == 1, "Only support being given steps one by one."
+        needed_tokens = lm_model.num_codebooks - lm_model.dep_q - 1
+        assert Ki == needed_tokens, f"We expect {needed_tokens} tokens from the user stream, got {Ki}."
 
         CT = state.cache.shape[2]
 
@@ -386,8 +388,8 @@ class LMGen(StreamingModule[_LMGenState]):
         for k, delay in enumerate(lm_model.delays):
             # Only for the very beginning, we extend the initial token for the acoustic
             # token that are delayed, and thus have no good value to take.
-            if 0 < state.offset <= delay:
-                state.cache[:, k, position] = state.cache[:, k, 0]
+            if state.offset <= delay:
+                state.cache[:, k, position] = state.initial[:, k, 0]
         input_ = state.cache[:, :, position: position + 1]
 
         if self.check:
@@ -414,13 +416,13 @@ class LMGen(StreamingModule[_LMGenState]):
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
         state.offset += 1
         position = state.offset % CT
-        state.cache[:, 0, state.offset] = text_token
-        state.cache[:, 1: lm_model.dep_q + 1, state.offset] = audio_tokens
+        state.cache[:, 0, position] = text_token
+        state.cache[:, 1: lm_model.dep_q + 1, position] = audio_tokens
 
         if state.offset <= self.max_delay:
             return None
         B = state.cache.shape[0]
-        index = ((state.offset - self.delays_cuda) % CT).view(1, -1, 1).expand(B, -1, 1)
+        index = ((state.offset - self.max_delay + self.delays_cuda) % CT).view(1, -1, 1).expand(B, -1, 1)
         out = state.cache[:, ].gather(dim=2, index=index)
         self._warmed_up = True
         return out
