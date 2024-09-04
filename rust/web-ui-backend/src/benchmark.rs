@@ -78,7 +78,7 @@ pub async fn run(args: &crate::BenchmarkArgs, config: &Config) -> Result<()> {
         repetition_penalty_context: None,
         repetition_penalty: None,
     };
-    if args.moshi_only {
+    if args.mimi_only {
         let device = crate::standalone::device(args.cpu)?;
         let encodec_device =
             if config.use_cpu_for_encodec { &candle::Device::Cpu } else { &device };
