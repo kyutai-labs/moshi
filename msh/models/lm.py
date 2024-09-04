@@ -387,7 +387,7 @@ class LMGen(StreamingModule):
         lm_model: LMModel,
         max_gen_len: int = 256,
         use_sampling: bool = True,
-        temp: float = 1.0,
+        temp: float = 0.8,
         top_k: int = 250,
         top_p: float = 0.0,
         check: bool = False,
@@ -501,9 +501,9 @@ class LMGen(StreamingModule):
         out = []
         for k in range(1 + lm_model.dep_q):
             delay = lm_model.delays[k]
-            if self.offset < delay:
+            if self.offset <= delay:
                 return None
-            _out = self.gen_sequence[0, k, self.offset - delay].item()
+            _out = self.gen_sequence[0, k, self.offset - self.max_delay + delay].item()
             out.append(_out)
 
         return out

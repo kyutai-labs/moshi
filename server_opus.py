@@ -75,6 +75,8 @@ class ServerState:
                 main_pcm = None
                 for c in range(codes.shape[-1]):
                     tokens = lm_gen.step(codes[0, :, c].tolist())
+                    if tokens is None:
+                        continue
                     if all([t < self.ec.cardinality for t in tokens[1:]]):
                         tokens = torch.tensor(tokens[1:], device=DEVICE).reshape(
                             (1, 8, 1)
@@ -128,6 +130,8 @@ class ServerState:
                     print("codes to process", codes.shape)
                     for c in range(codes.shape[-1]):
                         tokens = lm_gen.step(codes[0, :, c].tolist())
+                        if tokens is None:
+                            continue
                         text_token = tokens[0]
                         print("generated", tokens)
                         if text_token not in (0, 3):
