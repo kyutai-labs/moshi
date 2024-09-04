@@ -325,15 +325,18 @@ class _LMGenState:
     graphed_depth: CUDAGraphed
     offset: int = 0
 
+    def reset(self):
+        self.offset = 0
 
 class LMGen(StreamingModule[_LMGenState]):
     def __init__(
         self,
         lm_model: LMModel,
         use_sampling: bool = True,
-        temp: float = 1.0,
+        temp: float = 0.8,
+        temp_text: float = 0.7,
         top_k: int = 250,
-        top_p: float = 0.0,
+        top_k_text: int = 25,
         check: bool = False,
     ):
         assert not lm_model.training, "generation shouldn't be used in training mode."
@@ -342,8 +345,9 @@ class LMGen(StreamingModule[_LMGenState]):
         self.lm_model = lm_model
         self.use_sampling = use_sampling
         self.temp = temp
+        self.temp_text = temp_text
         self.top_k = top_k
-        self.top_p = top_p
+        self.top_k_text = top_k_text
         self.check = check
         self.max_delay = max(lm_model.delays)  # with delays, we need to generate a few more time steps.
         self.delays_cuda = torch.tensor(lm_model.delays, device=lm_model.device, dtype=torch.long)
@@ -403,9 +407,8 @@ class LMGen(StreamingModule[_LMGenState]):
         text_token = sample_token(
             text_logits.float(),
             self.use_sampling,
-            self.temp,
-            self.top_k,
-            self.top_p,
+            self.temp_text,
+            self.top_k_text,
         )
         assert text_token.dim() == 3, text_token.shape
         assert text_token.shape[2] == 1
@@ -446,7 +449,6 @@ class LMGen(StreamingModule[_LMGenState]):
                     self.use_sampling,
                     self.temp,
                     self.top_k,
-                    self.top_p,
                 )
                 assert next_token.shape == (B, 1, 1)
                 next_token = next_token[:, 0, 0]  # shape is B

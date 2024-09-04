@@ -117,6 +117,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
             if state is None:
                 raise ValueError(f"Trying to reset streaming, but {name} wasn't streaming.")
             state.reset()
+        self._apply_named_streaming(_reset)
 
     def get_streaming_state(self) -> dict[str, tp.Any]:
         """Return the complete streaming state, including that of sub-modules."""
