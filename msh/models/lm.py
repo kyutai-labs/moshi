@@ -394,7 +394,7 @@ class LMGen(StreamingModule[_LMGenState]):
 
         if self.check:
             # Check that we are not feeding in any value that is not generated yet.
-            assert not (input_ == self.ungenerated).any(), (state.offset, input_)
+            assert not (input_ == lm_model.ungenerated_token_id).any(), (state.offset, input_)
             assert (input_[:, lm_model.audio_offset :] <= lm_model.card).all(), input_
             assert (input_[:, :1] <= lm_model.text_card).all()
 

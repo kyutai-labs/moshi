@@ -157,6 +157,10 @@ class NormConvTranspose1d(nn.Module):
 @dataclass
 class _StreamingConv1dState:
     padding_to_add: int
+    original_padding_to_add: int
+
+    def reset(self):
+        self.padding_to_add = self.original_padding_to_add
 
 
 class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
@@ -219,7 +223,7 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
 
     def _init_streaming_state(self, batch_size: int) -> _StreamingConv1dState:
         assert self.causal, "streaming is only supported for causal convs"
-        return _StreamingConv1dState(self._padding_total)
+        return _StreamingConv1dState(self._padding_total, self._padding_total)
 
 
     def forward(self, x):
@@ -250,6 +254,9 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
 @dataclass
 class _StreamingConvTr1dState:
     pass
+
+    def reset(self):
+        pass
 
 
 class StreamingConvTranspose1d(StreamingModule[_StreamingConvTr1dState]):

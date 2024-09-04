@@ -22,7 +22,11 @@ from torch import nn
 import torch
 
 
-State = tp.TypeVar('State')
+class Resetable(tp.Protocol):
+    def reset(self) -> None:
+        pass
+
+State = tp.TypeVar('State', bound=Resetable)
 
 
 class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
@@ -106,9 +110,13 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
         finally:
             self._stop_streaming()
 
-    def reset_streaming(self, batch_size: int):
+    def reset_streaming(self):
         """Reset the streaming state."""
-        self._start_streaming(batch_size)
+        def _reset(name: str, module: StreamingModule):
+            state = module._streaming_state
+            if state is None:
+                raise ValueError(f"Trying to reset streaming, but {name} wasn't streaming.")
+            state.reset()
 
     def get_streaming_state(self) -> dict[str, tp.Any]:
         """Return the complete streaming state, including that of sub-modules."""
@@ -139,6 +147,9 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
 class _NullState:
     pass
 
+    def reset(self) -> None:
+        pass
+
 
 class StreamingContainer(StreamingModule[_NullState]):
     def _init_streaming_state(self, batch_size: int) -> _NullState:
@@ -148,6 +159,10 @@ class StreamingContainer(StreamingModule[_NullState]):
 class _StreamingAddState:
     previous_x: torch.Tensor | None = None
     previous_y: torch.Tensor | None = None
+
+    def reset(self):
+        self.previous_x = None
+        self.previous_y = None
 
 
 class StreamingAdd(StreamingModule[_StreamingAddState]):
@@ -173,6 +188,9 @@ class StreamingAdd(StreamingModule[_StreamingAddState]):
 @dataclass
 class _StreamingConvState:
     previous: torch.Tensor | None = None
+
+    def reset(self):
+        self.previous = None
 
 
 class RawStreamingConv1d(nn.Conv1d, StreamingModule[_StreamingConvState]):
@@ -220,6 +238,9 @@ class RawStreamingConv1d(nn.Conv1d, StreamingModule[_StreamingConvState]):
 @dataclass
 class _StreamingConvTrState:
     partial: torch.Tensor | None = None
+
+    def reset(self):
+        self.partial = None
 
 
 class RawStreamingConvTranspose1d(nn.ConvTranspose1d, StreamingModule[_StreamingConvTrState]):

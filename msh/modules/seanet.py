@@ -14,7 +14,6 @@ import numpy as np
 import torch.nn as nn
 
 from .conv import StreamingConv1d, StreamingConvTranspose1d
-from .lstm import StreamingLSTM
 from .streaming import StreamingContainer, StreamingAdd
 from ..utils.compile import torch_compile_lazy
 
@@ -119,7 +118,6 @@ class SEANetEncoder(StreamingContainer):
         true_skip (bool): Whether to use true skip connection or a simple
             (streamable) convolution as the skip connection in the residual network blocks.
         compress (int): Reduced dimensionality in residual branches (from Demucs v3).
-        lstm (int): Number of LSTM layers at the end of the encoder.
         disable_norm_outer_blocks (int): Number of blocks for which we don't apply norm.
             For the encoder, it corresponds to the N first blocks.
         mask_fn (nn.Module): Optional mask function to apply after convolution layers.
@@ -146,7 +144,6 @@ class SEANetEncoder(StreamingContainer):
         pad_mode: str = "reflect",
         true_skip: bool = True,
         compress: int = 2,
-        lstm: int = 0,
         disable_norm_outer_blocks: int = 0,
         mask_fn: tp.Optional[nn.Module] = None,
         mask_position: tp.Optional[int] = None,
@@ -223,9 +220,6 @@ class SEANetEncoder(StreamingContainer):
             if mask_fn is not None and mask_position == i + 1:
                 model += [mask_fn]
 
-        if lstm:
-            model += [StreamingLSTM(mult * n_filters, num_layers=lstm)]
-
         model += [
             act(**activation_params),
             StreamingConv1d(
@@ -272,7 +266,6 @@ class SEANetDecoder(StreamingContainer):
         true_skip (bool): Whether to use true skip connection or a simple.
             (streamable) convolution as the skip connection in the residual network blocks.
         compress (int): Reduced dimensionality in residual branches (from Demucs v3).
-        lstm (int): Number of LSTM layers at the end of the encoder.
         disable_norm_outer_blocks (int): Number of blocks for which we don't apply norm.
             For the decoder, it corresponds to the N last blocks.
         trim_right_ratio (float): Ratio for trimming at the right of the transposed convolution under the causal setup.
@@ -300,7 +293,6 @@ class SEANetDecoder(StreamingContainer):
         pad_mode: str = "reflect",
         true_skip: bool = True,
         compress: int = 2,
-        lstm: int = 0,
         disable_norm_outer_blocks: int = 0,
         trim_right_ratio: float = 1.0,
     ):
@@ -337,9 +329,6 @@ class SEANetDecoder(StreamingContainer):
                 pad_mode=pad_mode,
             )
         ]
-
-        if lstm:
-            model += [StreamingLSTM(mult * n_filters, num_layers=lstm)]
 
         # Upsample to raw audio scale
         for i, ratio in enumerate(self.ratios):

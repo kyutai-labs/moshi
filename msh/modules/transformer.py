@@ -229,7 +229,9 @@ class RingKVCache:
             device=device,
             dtype=dtype)
         self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
-        self.positions = torch.arange(self.capacity, device=device, dtype=torch.long)
+
+    def reset(self):
+        self.end_offset.zero_()
 
     def complete(self, k: torch.Tensor, v: torch.Tensor) -> KVCacheResult:
         assert k.shape[:-1] == v.shape[:-1], (k.shape, v.shape)
@@ -264,6 +266,12 @@ class _MHAState:
     kv_cache: RingKVCache
     offset: torch.Tensor
     offset_cpu: int
+
+    def reset(self):
+        self.kv_cache.reset()
+        self.offset.zero_()
+        self.offset_cpu = 0
+
 
 class StreamingMultiheadAttention(StreamingModule[_MHAState]):
     """Similar to `nn.MultiheadAttention` but with support for streaming, causal evaluation.
@@ -392,6 +400,9 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 @dataclass
 class _LayerState:
     offset_cpu: int
+
+    def reset(self):
+        self.offset_cpu = 0
 
 
 class StreamingTransformerLayer(StreamingModule[_LayerState]):
@@ -555,6 +566,9 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
 @dataclass
 class _TransformerState:
     offset: torch.Tensor
+
+    def reset(self):
+        self.offset.zero_()
 
 
 class StreamingTransformer(StreamingModule[_TransformerState]):

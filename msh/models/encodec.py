@@ -24,7 +24,7 @@ from torch.nn import functional as F
 
 from .. import quantization as qt
 from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
-from ..modules.streaming import StreamingModule, State, _NullState
+from ..modules.streaming import StreamingModule, State
 from ..utils.compile import no_compile, CUDAGraphed
 
 
@@ -88,6 +88,9 @@ class CompressionModel(StreamingModule[State]):
 class _EncodecState:
     graphed_tr_enc: CUDAGraphed | None
     graphed_tr_dec: CUDAGraphed | None
+
+    def reset(self):
+        pass
 
 
 class EncodecModel(CompressionModel[_EncodecState]):

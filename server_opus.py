@@ -52,7 +52,7 @@ seed_all(42424242)
 class ServerState:
     ec: msh.models.EncodecModel
     text_tokenizer: sentencepiece.SentencePieceProcessor
-    lm: msh.models.LMModel
+    lm_gen: msh.models.LMGen
 
     def __init__(self):
         print("loading mimi")
@@ -61,36 +61,33 @@ class ServerState:
         self.text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)
 
         print("loading moshi")
-        self.lm = msh.models.moshi.get_lm(args.moshi_weights, DEVICE)
+        lm = msh.models.moshi.get_lm(args.moshi_weights, DEVICE)
+        self.lm_gen = msh.models.LMGen(lm)
+
+        self.ec.streaming_forever(1)
+        self.lm_gen.streaming_forever(1)
         print("lm loaded")
 
     def warmup(self):
-        self.lm.reset_streaming()
-        self.ec.reset_streaming()
-        lm_gen = msh.models.LMGen(self.lm, check=True, max_gen_len=64)
-        with self.ec.streaming():
-            while True:
-                chunk = torch.zeros(1, 1, 1920, dtype=torch.float32, device=DEVICE)
-                codes, _scale = self.ec.encode(chunk)
-                main_pcm = None
-                for c in range(codes.shape[-1]):
-                    tokens = lm_gen.step(codes[0, :, c])
-                    if tokens is None:
-                        continue
-                    tokens = tokens[1:].view(1, 8, 1)
-                    main_pcm = self.ec.decode(tokens, scale=None)
-                    print(main_pcm.shape)
-                if main_pcm is not None:
-                    break
+        while True:
+            chunk = torch.zeros(1, 1, 1920, dtype=torch.float32, device=DEVICE)
+            codes = self.ec.encode(chunk)
+            main_pcm = None
+            for c in range(codes.shape[-1]):
+                tokens = self.lm_gen.step(codes[:, :, c: c + 1])
+                if tokens is None:
+                    continue
+                main_pcm = self.ec.decode(tokens[:, 1:])
+            if main_pcm is not None:
+                break
         torch.cuda.synchronize()
 
     async def handle_conn(self, websocket, path):
-        print(websocket, path)
-        self.lm.reset_streaming()
-        self.ec.reset_streaming()
-        lm_gen = msh.models.LMGen(self.lm, check=True, max_gen_len=args.max_gen_len)
         opus_writer = sphn.OpusStreamWriter(24000)
         opus_reader = sphn.OpusStreamReader(24000)
+
+        self.ec.reset_streaming()
+        self.lm_gen.reset_streaming()
 
         async def recv_loop():
             async for message in websocket:
@@ -119,22 +116,21 @@ class ServerState:
                     all_pcm_data = pcm
                 else:
                     all_pcm_data = np.concatenate((all_pcm_data, pcm))
-                if all_pcm_data.shape[-1] >= 1920:
+                while all_pcm_data.shape[-1] >= 1920:
                     chunk = all_pcm_data[:1920]
-                    all_pcm_data = np.array(all_pcm_data[1920:])
-                    chunk = torch.tensor(chunk, device=DEVICE)[None, None]
+                    all_pcm_data = all_pcm_data[1920:]
+                    chunk = torch.from_numpy(chunk).to(device=DEVICE)[None, None]
                     print("pcm to process", chunk.shape)
-                    codes, _scale = self.ec.encode(chunk)
+                    codes = self.ec.encode(chunk)
                     print("codes to process", codes.shape)
                     for c in range(codes.shape[-1]):
                         print("WTF", codes)
-                        tokens = lm_gen.step(codes[0, :, c])
+                        tokens = self.lm_gen.step(codes[:, :, c: c + 1])
                         if tokens is None:
                             continue
-                        print(tokens)
-                        main_pcm = self.ec.decode(tokens[1:].view(1, 8, 1), scale=None)
+                        main_pcm = self.ec.decode(tokens[1:])
                         main_pcm = main_pcm.cpu().numpy()
-                        text_token = tokens[0].item()
+                        text_token = tokens[0, 0, 0].item()
                         if text_token not in (0, 3):
                             _text = self.text_tokenizer.id_to_piece(text_token)
                             _text = _text.replace("▁", " ")
@@ -150,8 +146,7 @@ class ServerState:
                 if len(msg) > 0:
                     await websocket.send(b"\x01" + msg)
 
-        with self.ec.streaming():
-            await asyncio.gather(opus_loop(), recv_loop(), send_loop())
+        await asyncio.gather(opus_loop(), recv_loop(), send_loop())
 
 
 async def main():
