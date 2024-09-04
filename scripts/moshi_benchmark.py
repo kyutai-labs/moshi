@@ -6,7 +6,7 @@ import argparse
 import msh
 import sentencepiece
 import torch
-import torchaudio
+import sphn
 import numpy as np
 import random
 import time
@@ -99,7 +99,9 @@ def streaming_test():
     print(main_audio.shape)
     print("generated text:")
     print("".join(main_text))
-    torchaudio.save("gen_main.wav", main_audio.cpu(), SAMPLE_RATE)
+    sphn.write_wav(
+        "gen_main.wav", main_audio[0].cpu().numpy().astype(np.float32), SAMPLE_RATE
+    )
 
 
 print("streaming test")
