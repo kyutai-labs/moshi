@@ -63,14 +63,15 @@ class ServerState:
         print("loading moshi")
         lm = msh.models.moshi.get_lm(args.moshi_weights, DEVICE)
         self.lm_gen = msh.models.LMGen(lm)
+        self.frame_size = int(self.ec.sample_rate / self.ec.frame_rate)
 
         self.ec.streaming_forever(1)
         self.lm_gen.streaming_forever(1)
         print("lm loaded")
 
     def warmup(self):
-        while True:
-            chunk = torch.zeros(1, 1, 1920, dtype=torch.float32, device=DEVICE)
+        for chunk in range(4):
+            chunk = torch.zeros(1, 1, self.frame_size, dtype=torch.float32, device=DEVICE)
             codes = self.ec.encode(chunk)
             main_pcm = None
             for c in range(codes.shape[-1]):
@@ -78,13 +79,11 @@ class ServerState:
                 if tokens is None:
                     continue
                 main_pcm = self.ec.decode(tokens[:, 1:])
-            if main_pcm is not None:
-                break
         torch.cuda.synchronize()
 
     async def handle_conn(self, websocket, path):
-        opus_writer = sphn.OpusStreamWriter(24000)
-        opus_reader = sphn.OpusStreamReader(24000)
+        opus_writer = sphn.OpusStreamWriter(self.ec.sample_rate)
+        opus_reader = sphn.OpusStreamReader(self.ec.sample_rate)
 
         self.ec.reset_streaming()
         self.lm_gen.reset_streaming()
@@ -116,9 +115,9 @@ class ServerState:
                     all_pcm_data = pcm
                 else:
                     all_pcm_data = np.concatenate((all_pcm_data, pcm))
-                while all_pcm_data.shape[-1] >= 1920:
-                    chunk = all_pcm_data[:1920]
-                    all_pcm_data = all_pcm_data[1920:]
+                while all_pcm_data.shape[-1] >= self.frame_size:
+                    chunk = all_pcm_data[:self.frame_size]
+                    all_pcm_data = all_pcm_data[self.frame_size:]
                     chunk = torch.from_numpy(chunk).to(device=DEVICE)[None, None]
                     print("pcm to process", chunk.shape)
                     codes = self.ec.encode(chunk)
@@ -128,7 +127,7 @@ class ServerState:
                         tokens = self.lm_gen.step(codes[:, :, c: c + 1])
                         if tokens is None:
                             continue
-                        main_pcm = self.ec.decode(tokens[1:])
+                        main_pcm = self.ec.decode(tokens[:, 1:])
                         main_pcm = main_pcm.cpu().numpy()
                         text_token = tokens[0, 0, 0].item()
                         if text_token not in (0, 3):

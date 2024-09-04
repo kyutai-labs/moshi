@@ -236,7 +236,7 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
         if state is None:
             if self.causal:
                 # Left padding for causal
-                x = pad1d(x, (self.padding_total, extra_padding), mode=self.pad_mode)
+                x = pad1d(x, (padding_total, extra_padding), mode=self.pad_mode)
             else:
                 # Asymmetric padding required for odd strides
                 padding_right = padding_total // 2

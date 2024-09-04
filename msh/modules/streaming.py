@@ -98,7 +98,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
         ...
 
     def streaming_forever(self, batch_size: int):
-        self.streaming(batch_size).__enter__()
+        self._start_streaming(batch_size)
 
     @contextmanager
     def streaming(self, batch_size: int):

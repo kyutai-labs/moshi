@@ -210,6 +210,8 @@ class CUDAGraphed:
                 if isinstance(target, torch.Tensor):
                     if not isinstance(source, torch.Tensor):
                         raise ValueError(f"Argument #{idx} was a tensor, and is no longer (now {source}).")
+                    if source.shape != target.shape:
+                        raise ValueError(f"Argument #{idx} had shape {target.shape}, but got shae {source.shape}")
                     target.copy_(source)
                 else:
                     if isinstance(source, torch.Tensor):
