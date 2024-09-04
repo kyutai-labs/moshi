@@ -140,6 +140,9 @@ class EncodecModel(CompressionModel):
         self._channels = channels
         self.encoder_frame_rate = encoder_frame_rate
         self.torch_compile_encoder_decoder = torch_compile_encoder_decoder
+        from ..utils.compile import CUDAGraphed
+        self._graphed_enc_tr = CUDAGraphed(self.encoder_transformer)
+        self._graphed_dec_tr = CUDAGraphed(self.decoder_transformer)
 
         if freeze_encoder:
             for p in self.encoder.parameters():
@@ -327,7 +330,7 @@ class EncodecModel(CompressionModel):
         with self._context_for_encoder_decoder:
             emb = self.encoder(x)
         if self.encoder_transformer is not None:
-            emb = self.encoder_transformer(emb)[0]
+            emb = self._graphed_enc_tr.func(emb)[0]
         emb = self._to_framerate(emb)
         return emb
 
@@ -372,7 +375,7 @@ class EncodecModel(CompressionModel):
         emb = self.decode_latent(codes)
         emb = self._to_encoder_framerate(emb)
         if self.decoder_transformer is not None:
-            emb = self.decoder_transformer(emb)[0]
+            emb = self._graphed_dec_tr.func(emb)[0]
         with self._context_for_encoder_decoder:
             out = self.decoder(emb)
         # out contains extra padding added by the encoder and decoder

@@ -25,7 +25,7 @@ import torch
 State = tp.TypeVar('State')
 
 
-class StreamingModule(abc.ABC, tp.Generic[State], nn.Module):
+class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
     """Common API for streaming components.
 
     Each streaming component has a streaming state, which is just a dict[str, Tensor].

@@ -229,6 +229,7 @@ class RingKVCache:
             device=device,
             dtype=dtype)
         self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
+        self.positions = torch.arange(self.capacity, device=device, dtype=torch.long)
 
     def complete(self, k: torch.Tensor, v: torch.Tensor) -> KVCacheResult:
         assert k.shape[:-1] == v.shape[:-1], (k.shape, v.shape)

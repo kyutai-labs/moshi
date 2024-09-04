@@ -141,7 +141,6 @@ def get_lm(filename: tp.Union[str, Path], device):
         **lm_kwargs,
     ).to(device=device, dtype=dtype)
     model.eval()
-    return model
     if _is_safetensors(filename):
         load_model(model, filename)
     else:
