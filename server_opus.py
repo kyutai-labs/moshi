@@ -109,9 +109,12 @@ class ServerState:
 
         async def opus_loop():
             all_pcm_data = None
+            all_pcm_out = []
 
             while True:
                 if close:
+                    pcm_out = torch.cat(all_pcm_out, dim=1)
+                    sphn.write_wav("./plop.wav", pcm_out[0].numpy(), 24000)
                     return
                 await asyncio.sleep(0.001)
                 pcm = opus_reader.read_pcm()
@@ -132,8 +135,9 @@ class ServerState:
                         if tokens is None:
                             continue
                         main_pcm = self.ec.decode(tokens[:, 1:])
-                        main_pcm = main_pcm.cpu().numpy()
-                        opus_writer.append_pcm(main_pcm[0, 0])
+                        main_pcm = main_pcm.cpu()
+                        all_pcm_out.append(main_pcm[0])
+                        opus_writer.append_pcm(main_pcm[0, 0].numpy())
                         text_token = tokens[0, 0, 0].item()
                         if text_token not in (0, 3):
                             _text = self.text_tokenizer.id_to_piece(text_token)
