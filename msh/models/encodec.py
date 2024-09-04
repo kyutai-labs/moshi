@@ -24,14 +24,14 @@ from torch.nn import functional as F
 
 from .. import quantization as qt
 from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
-from ..modules.streaming import StreamingContainer, StreamingModule
-from ..utils.compile import no_compile
+from ..modules.streaming import StreamingModule, State, _NullState
+from ..utils.compile import no_compile, CUDAGraphed
 
 
 logger = logging.getLogger()
 
 
-class CompressionModel(StreamingContainer):
+class CompressionModel(StreamingModule[State]):
     """Base API for all compression model that aim at being used as audio tokenizers
     with a language model.
     """
@@ -84,7 +84,13 @@ class CompressionModel(StreamingContainer):
         ...
 
 
-class EncodecModel(CompressionModel):
+@dataclass
+class _EncodecState:
+    graphed_tr_enc: CUDAGraphed | None
+    graphed_tr_dec: CUDAGraphed | None
+
+
+class EncodecModel(CompressionModel[_EncodecState]):
     """Encodec model operating on the raw waveform.
 
     Args:
@@ -140,9 +146,6 @@ class EncodecModel(CompressionModel):
         self._channels = channels
         self.encoder_frame_rate = encoder_frame_rate
         self.torch_compile_encoder_decoder = torch_compile_encoder_decoder
-        from ..utils.compile import CUDAGraphed
-        self._graphed_enc_tr = CUDAGraphed(self.encoder_transformer)
-        self._graphed_dec_tr = CUDAGraphed(self.decoder_transformer)
 
         if freeze_encoder:
             for p in self.encoder.parameters():
@@ -205,6 +208,15 @@ class EncodecModel(CompressionModel):
                     causal=causal,
                     channel_wise=upsample_channel_wise_bug,
                 )
+
+    def _init_streaming_state(self, batch_size: int) -> _EncodecState:
+        graphed_tr_dec = None
+        graphed_tr_enc = None
+        if self.encoder_transformer is not None:
+            graphed_tr_enc = CUDAGraphed(self.encoder_transformer)
+        if self.decoder_transformer is not None:
+            graphed_tr_dec = CUDAGraphed(self.decoder_transformer)
+        return _EncodecState(graphed_tr_enc, graphed_tr_dec)
 
     @property
     def channels(self) -> int:
@@ -327,10 +339,15 @@ class EncodecModel(CompressionModel):
         assert (
             x.dim() == 3
         ), f"CompressionModel._encode_to_unquantized_latent expects audio of shape [B, C, T] but got {x.shape}"
+        state = self._streaming_state
         with self._context_for_encoder_decoder:
             emb = self.encoder(x)
         if self.encoder_transformer is not None:
-            emb = self._graphed_enc_tr.func(emb)[0]
+            if state is None:
+                emb, = self.encoder_transformer(emb)
+            else:
+                assert state.graphed_tr_enc is not None
+                emb, = state.graphed_tr_enc(emb)
         emb = self._to_framerate(emb)
         return emb
 
@@ -372,10 +389,15 @@ class EncodecModel(CompressionModel):
         Returns:
             out (torch.Tensor): Float tensor of shape [B, C, T], the reconstructed audio.
         """
+        state = self._streaming_state
         emb = self.decode_latent(codes)
         emb = self._to_encoder_framerate(emb)
         if self.decoder_transformer is not None:
-            emb = self._graphed_dec_tr.func(emb)[0]
+            if state is None:
+                emb, = self.decoder_transformer(emb)
+            else:
+                assert state.graphed_tr_dec is not None
+                emb, = state.graphed_tr_dec(emb)
         with self._context_for_encoder_decoder:
             out = self.decoder(emb)
         # out contains extra padding added by the encoder and decoder
@@ -386,7 +408,7 @@ class EncodecModel(CompressionModel):
         return self.quantizer.decode(codes)
 
 
-class WrapperCompressionModel(CompressionModel):
+class WrapperCompressionModel(CompressionModel[State]):
     """Base API for CompressionModel wrappers that do not depend on external frameworks."""
 
     def __init__(self, model: CompressionModel):
