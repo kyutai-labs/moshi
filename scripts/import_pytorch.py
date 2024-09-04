@@ -12,7 +12,7 @@ XP_FOLDER = "/lustre/scwpod02/client/kyutai/{user}/mimi_exp/xps"
 DEPFORMER_LAYERS = 6
 
 
-def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:
+def import_model(in_path: Path, out_path: Path) -> None:
     pkg = torch.load(in_path, map_location=torch.device("cpu"))
     model = pkg["fsdp_best_state"]["model"]
     # For mimi inference, we trim the depformer layer that are unused.
@@ -38,35 +38,18 @@ def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="mimi_import", description="Imports mimi checkpoints"
+        prog="moshi_import", description="Imports moshi checkpoints"
     )
-    parser.add_argument("sig", help="Signature of the xp.")
-    parser.add_argument("-e", "--epoch", type=int, help="Epoch to load.")
-    parser.add_argument(
-        "-u",
-        "--user",
-        default=USER,
-        help="User in which to go look for the checkpoint.",
-    )
-    parser.add_argument(
-        "-s", "--silent", action="store_true", help="Only prints the checkpoint name"
-    )
+    parser.add_argument("checkpoint", help="The checkpoint to be imported.")
+    parser.add_argument("out", help="The safetensors out file.")
     args = parser.parse_args()
 
-    xp_folder = Path(XP_FOLDER.format(user=args.user))
-    if args.epoch is None:
-        ckpt_name = "checkpoint.th"
-        out_name = f"mimi_{args.sig}.safetensors"
-    else:
-        ckpt_name = f"checkpoint_{args.epoch}.th"
-        out_name = f"mimi_{args.sig}@{args.epoch}.safetensors"
-    ckpt_path = xp_folder / args.sig / ckpt_name
-    OUT_FOLDER.mkdir(parents=True, exist_ok=True)
-    out_path = OUT_FOLDER / out_name
+    out_path = Path(args.out)
+
     if out_path.exists():
         print("file already exists")
     else:
-        import_model(ckpt_path, out_path, silent=args.silent)
+        import_model(args.checkpoint, out_path)
     print(out_path)
 
 
