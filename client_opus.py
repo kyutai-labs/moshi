@@ -172,6 +172,7 @@ class Printer:
                     if entry.msg.startswith(' '):
                         erase_count = idx + 1
                         cumulated = entry.msg + cumulated
+                        break
                 if erase_count is not None:
                     if erase_count > 0:
                         self.line.erase(erase_count)
@@ -184,6 +185,7 @@ class Printer:
                     self.line.add(token)
                 else:
                     self.line.add(token[:remaining])
+                    self.line.add(' |')
                     self.line.newline()
                     self.line.add('| ')
                     self.line.add(token[remaining:])
@@ -347,13 +349,6 @@ def main():
         printer = Printer()
     else:
         printer = RawPrinter()
-    line = printer.line
-    for k in range(10):
-        printer.print_pending()
-        import time
-        time.sleep(0.05)
-    printer.print_token("Hello")
-    printer.print_token(" world")
     try:
         asyncio.run(run(printer, args))
     except KeyboardInterrupt:
