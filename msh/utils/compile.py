@@ -221,7 +221,6 @@ class CUDAGraphed:
             # Prevent any one under us to try and CUDA Graph things.
             if self._graph is None:
                 if self.warmup_steps <= 0:
-                    print("graphing")
                     self._graph = cuda.CUDAGraph()
                     # Making a copy just to ensure those are not used else where.
                     self._args = _clone_tensors(args)
