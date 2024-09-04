@@ -11,12 +11,12 @@
 Also defines the main interface that a model must follow to be usable as an audio tokenizer.
 """
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from contextlib import nullcontext
+from dataclasses import dataclass
 import logging
 import typing as tp
 
-import einops
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -24,7 +24,7 @@ from torch.nn import functional as F
 
 from .. import quantization as qt
 from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
-from ..modules.streaming import StreamingContainer
+from ..modules.streaming import StreamingContainer, StreamingModule
 from ..utils.compile import no_compile
 
 

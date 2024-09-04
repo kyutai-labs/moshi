@@ -222,13 +222,13 @@ class CUDAGraphed:
             if self._graph is None:
                 if self.warmup_steps <= 0:
                     print("graphing")
-                    self.graph = cuda.CUDAGraph()
+                    self._graph = cuda.CUDAGraph()
                     # Making a copy just to ensure those are not used else where.
                     self._args = _clone_tensors(args)
-                    with cuda.graph(self.graph):
+                    with cuda.graph(self._graph):
                         self._output = self.func(*self._args)
                     # At this point nothing really happened, so we have to make it run for real.
-                    self.graph.replay()
+                    self._graph.replay()
                     return self._output
                 else:
                     self.warmup_steps -= 1
@@ -237,7 +237,7 @@ class CUDAGraphed:
                 assert self._args is not None
                 assert self._output is not None
                 _match_values_copy_tensors(args, self._args)
-                self.graph.replay()
+                self._graph.replay()
                 return self._output
 
 

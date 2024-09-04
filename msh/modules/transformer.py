@@ -235,8 +235,6 @@ class RingKVCache:
         B, H, T, D = k.shape
         indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype) + self.end_offset
         indexes = indexes % self.capacity
-        if T == 2:
-            print("ADDING", k.shape, self.end_offset)
         self.cache[0].index_copy_(2, indexes, k)
         self.cache[1].index_copy_(2, indexes, v)
         self.end_offset.add_(T)
@@ -373,8 +371,6 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             attn_bias = (pos_k >= 0) & (delta >= 0)
             if self.context is not None:
                 attn_bias = attn_bias & (delta < self.context)
-            if T == 2:
-                print(offset, attn_bias[:, :8])
         else:
             attn_bias = None
         x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)

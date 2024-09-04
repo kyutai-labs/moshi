@@ -411,7 +411,7 @@ class LMGen(StreamingModule[_LMGenState]):
         assert text_token.shape[2] == 1
         assert text_token.shape[1] == 1, "Only one text stream supported."
         text_token = text_token[:, 0, 0]  # shape is [B]
-        audio_tokens = self.depformer_step(text_token, transformer_out)
+        audio_tokens = state.graphed_depth(text_token, transformer_out)
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
         state.offset += 1

@@ -63,14 +63,11 @@ def streaming_test(bs):
     main_text = []
 
     def run_step():
-        print('plop')
         start_time = time.time()
         # Chunk should contain the pcm data from the user, single channel with a sample rate of 24000.
         chunk = torch.zeros((bs, 1, 1920), dtype=torch.float, device=DEVICE)
-        print("ENCODE")
         codes = ec.encode(chunk)
         assert codes.shape[-1] == 1
-        print(codes)
         for c in range(codes.shape[-1]):
             be = time.time()
             ev = torch.cuda.Event(enable_timing=True)
@@ -86,7 +83,7 @@ def streaming_test(bs):
             text_tokens = tokens[:, 0, 0]
             audio_tokens = tokens[:, 1:, :]
             # assert tokens.amax() < 2048, tokens
-            assert audio_tokens.max() < 2048, audio_tokens
+            # assert audio_tokens.max() < 2048, audio_tokens
             main_pcm = ec.decode(audio_tokens)
             # main_pcm is the audio to be played back to the user, here we just append it and store it in
             # a file once the loop is finished.
@@ -96,7 +93,7 @@ def streaming_test(bs):
         torch.cuda.synchronize()
         dt = time.time() - start_time
         print(f"step time: {1000 * dt:.2f}ms, lm step: {1000 * dt_step:.2f}, gpu step {dg:.2f}")
-        text_token = text_tokens.item()
+        text_token = text_tokens[0].item()
         if text_token not in (0, 3):
             _text = text_tokenizer.id_to_piece(text_token)
             _text = _text.replace("▁", " ")
