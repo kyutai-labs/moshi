@@ -376,7 +376,7 @@ class EncodecModel(CompressionModel[_EncodecState]):
         Returns:
             Embeddings, either quantized or not.
         """
-        emb, _ = self._encode_to_unquantized_latent(x)
+        emb = self._encode_to_unquantized_latent(x)
         if not quantize:
             return emb
         else:
