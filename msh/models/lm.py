@@ -274,24 +274,7 @@ class LMModel(StreamingContainer):
             input_ = audio_emb if input_ is None else input_ + audio_emb
         text_emb = self.text_emb(input_sequence[:, 0])
         input_ = text_emb if input_ is None else input_ + text_emb
-
-        if self._transformer_graph is None:
-            if self.transformer.get_streaming_state():
-                self._transformer_graph = torch.cuda.CUDAGraph()
-                input_ = input_.clone()
-                with torch.cuda.graph(self._transformer_graph):
-                    transformer_out = self.transformer(input_)
-                self._transformer_output = transformer_out
-                self._transformer_input = input_
-                self._transformer_graph.replay()
-            else:
-                transformer_out = self.transformer(input_)
-        else:
-            assert self._transformer_input is not None
-            assert self._transformer_output is not None
-            self._transformer_input.copy_(input_)
-            self._transformer_graph.replay()
-            transformer_out = self._transformer_output
+        transformer_out = self.transformer(input_)
 
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
@@ -390,13 +373,13 @@ class LMGen(StreamingModule[_LMGenState]):
         assert input_tokens.dim() == 3, "Shape should be [B, K, T]."
         assert input_tokens.shape[2] == 1, "Only support being given steps one by one."
 
-        CT = self.cache.shape[2]
+        CT = state.cache.shape[2]
 
-        for q_other, token in enumerate(input_tokens):
+        for q_other in range(input_tokens.shape[1]):
             k = lm_model.dep_q + 1 + q_other
             delay = lm_model.delays[k]
             write_position = (state.offset + delay + 1) % CT
-            state.cache[:, k, write_position] = token
+            state.cache[:, k, write_position: write_position + 1] = input_tokens[:, q_other]
 
 
         position = state.offset % CT
@@ -415,15 +398,15 @@ class LMGen(StreamingModule[_LMGenState]):
 
         transformer_out, text_logits = state.graphed_main(input_)
         # Shape of text_logits should be [B, K_text=1, T=1, Card_text]
-        text_token = lm_model._sample_next_token(
-            text_logits[:, :, 0].float(),
+        text_token = sample_token(
+            text_logits.float(),
             self.use_sampling,
             self.temp,
             self.top_k,
             self.top_p,
         )
-        assert text_token.dim() == 3
-        assert text_token.shape[:, :, 0] == 1
+        assert text_token.dim() == 3, text_token.shape
+        assert text_token.shape[2] == 1
         assert text_token.shape[1] == 1, "Only one text stream supported."
         text_token = text_token[:, 0, 0]  # shape is [B]
         audio_tokens = self.depformer_step(text_token, transformer_out)
@@ -431,8 +414,8 @@ class LMGen(StreamingModule[_LMGenState]):
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
         state.offset += 1
         position = state.offset % CT
-        state.cache[:, 0, self.offset] = text_token
-        state.cache[:, 1: lm_model.dep_q + 1, self.offset] = audio_tokens
+        state.cache[:, 0, state.offset] = text_token
+        state.cache[:, 1: lm_model.dep_q + 1, state.offset] = audio_tokens
 
         if state.offset <= self.max_delay:
             return None

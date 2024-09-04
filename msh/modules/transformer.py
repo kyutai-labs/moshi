@@ -193,14 +193,14 @@ def set_attention_context(model: nn.Module, context: tp.Optional[int] = None) ->
 class KVCacheResult(tp.NamedTuple):
     keys: torch.Tensor
     values: torch.Tensor
-    distance_to_last: torch.Tensor
+    positions: torch.Tensor
 
     @staticmethod
     def from_kv(keys: torch.Tensor, values: torch.Tensor) -> 'KVCacheResult':
         B, H, T, D = keys.shape
         assert tuple(values.shape[:-1]) == (B, H, T)
-        distance_to_last = torch.arange(T - 1, -1, -1, device=keys.device, dtype=torch.long)
-        return KVCacheResult(keys, values, distance_to_last)
+        positions = torch.arange(T, device=keys.device, dtype=torch.long)
+        return KVCacheResult(keys, values, positions)
 
 
 class RingKVCache:
@@ -243,15 +243,20 @@ class RingKVCache:
         keys = self.cache[0]
         values = self.cache[1]
 
-        steps = torch.arange(self.capacity, device=self.end_offset.device, dtype=torch.long)
-        invalid = steps >= self.end_offset
+        indexes = torch.arange(self.capacity, device=self.end_offset.device, dtype=torch.long)
+        invalid = indexes >= self.end_offset
 
-        last = self.end_offset % self.capacity
+        last_index = self.end_offset % self.capacity
+        delta = indexes - last_index
 
-        distance_to_last = torch.where(steps <= last, last - steps, last - steps + self.capacity)
-        distance_to_last = torch.where(invalid, torch.full_like(distance_to_last, -1), distance_to_last)
+        positions = torch.where(
+            indexes < last_index,
+            self.end_offset + delta,  # here delta < 0
+            self.end_offset + delta - self.capacity,  # here delta > 0
+        )
+        positions = torch.where(invalid, torch.full_like(positions, -1), positions)
 
-        return KVCacheResult(keys, values, distance_to_last)
+        return KVCacheResult(keys, values, positions)
 
 
 @dataclass
@@ -338,6 +343,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
         state = self._streaming_state
+        T = query.shape[1]
 
         if state is None:
             offset = torch.zeros(1, device=query.device, dtype=torch.long)
@@ -358,13 +364,15 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         if self.rope:
             q, k = self.rope(q, k, offset, time_before_heads=False)
 
-        k, v, distance_to_last = self._complete_kv(k, v)
+        k, v, pos_k = self._complete_kv(k, v)
         if self.causal:
-            attn_bias = (distance_to_last >= 0)
+            pos_k = pos_k.view(1, -1)
+            pos_q = torch.arange(T, device=q.device, dtype=torch.long).long().view(-1, 1)
+            delta = pos_q - pos_k
+            attn_bias = (pos_k >= 0) & (delta >= 0)
             if self.context is not None:
-                # TODO: extend for q
-                # TODO: print shit to debug
-                attn_bias = attn_bias & (distance_to_last < self.context)
+                attn_bias = attn_bias & (delta < self.context)
+            print(attn_bias[:, :8])
         else:
             attn_bias = None
         x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)
@@ -376,7 +384,6 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             )
         else:
             x = self.out_proj(x)
-        T = x.shape[1]
         if state is not None:
             state.offset.add_(T)
             state.offset_cpu += T

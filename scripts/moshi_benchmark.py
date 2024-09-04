@@ -69,12 +69,12 @@ def streaming_test(bs):
         chunk = torch.zeros((bs, 1, 1920), dtype=torch.float, device=DEVICE)
         codes = ec.encode(chunk)
         assert codes.shape[-1] == 1
+        print(codes)
         for c in range(codes.shape[-1]):
             be = time.time()
             ev = torch.cuda.Event(enable_timing=True)
             ev.record()
-            # TODO: MAKE THINGS CONSISTENT IN TERMS OF SHAPE INPUT / OUTPUT
-            tokens = lm_gen.step(codes[0, :, c])
+            tokens = lm_gen.step(codes[:, :, c: c + 1])
             if tokens is None:
                 print("Skipping")
                 return
@@ -82,10 +82,11 @@ def streaming_test(bs):
             evb.record()
             dt_step = time.time() - be
             # if all([t < 2048 for t in tokens[1:]]):
-            text_tokens = tokens[0]
-            tokens = tokens[1:].view(1, 8, 1)
+            text_tokens = tokens[:, 0, 0]
+            audio_tokens = tokens[:, 1:, :]
             # assert tokens.amax() < 2048, tokens
-            main_pcm = ec.decode(tokens)
+            assert audio_tokens.max() < 2048, audio_tokens
+            main_pcm = ec.decode(audio_tokens)
             # main_pcm is the audio to be played back to the user, here we just append it and store it in
             # a file once the loop is finished.
             main_audio.append(main_pcm[0])
