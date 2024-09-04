@@ -70,6 +70,8 @@ def streaming_test():
         codes, _scale = ec.encode(chunk)
         for c in range(codes.shape[-1]):
             tokens = lm_gen.step(codes[0, :, c].tolist())
+            if tokens is None:
+                continue
             text_token = tokens[0]
             if text_token not in (0, 3):
                 _text = text_tokenizer.id_to_piece(text_token)
