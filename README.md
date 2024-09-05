@@ -117,11 +117,6 @@ the argument `--host 192.168.0.42` to the client where `192.168.0.42` is
 the ip of the server. The default port is `9998` and can be overriden with
 `--port`.
 
-The `client_opus.py` and `server_opus.py` use some newly released ogg/opus
-streaming capacities. If you run into any issue you can try using `client.py`
-and `server.py` instead, this will result in streaming the full pcm data rather
-than an opus stream (so this will require a lot more bandwidth).
-
 ### Testing
 In order to test the audio tokenizer, you can run the following command.
 
