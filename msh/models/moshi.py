@@ -71,7 +71,7 @@ lm_kwargs = {
     "context": 3000,
     "max_period": 10000,
     "gating": "silu",
-    "norm": "real_rms_norm_f32",
+    "norm": "rms_norm_f32",
     "positional_embedding": "rope",
     "depformer_dim": 1024,
     "depformer_dim_feedforward": int(4.125 * 1024),
