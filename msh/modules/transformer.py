@@ -259,6 +259,7 @@ class RingKVCache:
         # position should be (S - self.capacity + 1).
         # The following code gives us:
         # position(index + 1) = S + 1 + 0 - self.capacity.
+
         positions = torch.where(
             delta <= 0,
             self.end_offset + delta,
@@ -383,7 +384,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         k, v, pos_k = self._complete_kv(k, v)
         if self.causal:
             pos_k = pos_k.view(1, -1)
-            pos_q = offset + torch.arange(T, device=q.device, dtype=torch.long).long().view(-1, 1)
+            pos_q = offset + torch.arange(T, device=q.device, dtype=torch.long).view(-1, 1)
             delta = pos_q - pos_k
             attn_bias = (pos_k >= 0) & (delta >= 0)
             if self.context is not None:
