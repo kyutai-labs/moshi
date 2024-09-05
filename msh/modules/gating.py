@@ -2,7 +2,6 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-import math
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -10,6 +9,7 @@ from torch.nn import functional as F
 from ..utils.compile import torch_compile_lazy
 
 
+@torch_compile_lazy
 def gating_forward_kernel(
     weight_in: torch.Tensor, weight_out: torch.Tensor, activation, x: torch.Tensor
 ):
