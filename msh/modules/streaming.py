@@ -320,13 +320,14 @@ def test():
             print(f"ksize {kernel} strides {stride} len {length}")
             if length < kernel:
                 continue
-            x = torch.randn(3, chin, length).to(device)
+            batch_size = 3
+            x = torch.randn(batch_size, chin, length).to(device)
             y = conv(x)
             z = convtr(y)
             for chunk_size in [1, 3, 5, 8]:
                 ys = []
                 zs = []
-                with conv.streaming(3), convtr.streaming(3):
+                with conv.streaming(batch_size), convtr.streaming(batch_size):
                     for offset in range(0, length, chunk_size):
                         chunk = x[..., offset : offset + chunk_size]
                         ys.append(conv(chunk))
