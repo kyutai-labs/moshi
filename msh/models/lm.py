@@ -383,7 +383,7 @@ class LMGen(StreamingModule[_LMGenState]):
         for q_other in range(input_tokens.shape[1]):
             k = lm_model.dep_q + 1 + q_other
             delay = lm_model.delays[k]
-            write_position = (state.offset + delay + 1) % CT
+            write_position = (state.offset + delay) % CT
             state.cache[:, k, write_position: write_position + 1] = input_tokens[:, q_other]
 
 
