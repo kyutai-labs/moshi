@@ -11,6 +11,7 @@ import numpy as np
 from pathlib import Path
 import sentencepiece
 import typing as tp
+import os
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -188,6 +189,7 @@ def main():
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--model", type=str)
     parser.add_argument("--mimi", type=str)
+    parser.add_argument("--trace-file", type=str)
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--quantized", action="store_true")
     parser.add_argument("--steps", default=100, type=int)
@@ -222,6 +224,14 @@ def main():
     model.load_weights(model_file, strict=True)
     print("weights loaded")
 
+    if args.trace_file is not None:
+        if "MTL_CAPTURE_ENABLED" not in os.environ:
+            raise ValueError("Set MTL_CAPTURE_ENABLED to record a trace")
+        trace_file = Path(args.trace_file)
+        if trace_file.exists():
+            trace_file.unlink()
+        mx.metal.start_capture(args.trace_file)
+
     if args.mode == "text":
         run_text_gen(model, text_tokenizer, args.steps)
     elif args.mode == "audio":
@@ -230,6 +240,9 @@ def main():
         asyncio.run(run_audio_gen_stream(model, args.mimi, text_tokenizer, args.steps))
     else:
         raise ValueError(f"unknown mode {args.mode}, try 'text' or 'audio'")
+
+    if args.trace_file is not None:
+        mx.metal.stop_capture()
 
 if __name__ == "__main__":
     main()
