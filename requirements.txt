@@ -5,5 +5,5 @@ soundfile==0.12.1
 sphn==0.1.2
 torch==2.2.0
 websocket-client==1.7.0
-websockets==11.0.3
+websockets>=11.0.3, <13.1
 xformers==0.0.24
