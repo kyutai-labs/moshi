@@ -2,7 +2,12 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""torch compile utilities."""
+"""
+Provides some extra utilities around torch compile, in particular with a way
+to fully deactivate it easily with a context manager.
+Provides a simple activation checkpointing that is compatible with FSDP and torch compile.
+Finally, provides some utilities for CUDA graphing functions.
+"""
 from contextlib import contextmanager
 from functools import wraps
 import inspect
@@ -141,6 +146,7 @@ _disable_cuda_graph = False
 
 
 def in_cuda_graph() -> bool:
+    """Indicate whether we are in a function that is CUDA Graphed (or will be soon)."""
     return _in_cuda_graph
 
 
@@ -166,6 +172,7 @@ def _is_cuda_graph_enabled() -> bool:
 
 @contextmanager
 def no_cuda_graph():
+    """Deactivate CUDA Graphing for all the calls in this context manager."""
     global _disable_cuda_graph
     old_value = _disable_cuda_graph
     _disable_cuda_graph = True
@@ -176,6 +183,14 @@ def no_cuda_graph():
 
 
 class CUDAGraphed:
+    """Allow simple CUDA Graphing of a function.
+
+    Args:
+        func: callable, taking any number of arguments. Its tensors arguments should
+            be top level args, not nested in structures (tuples, dicts, etc). Keyword
+            arguments are NOT supported for simplicity.
+        warmup_steps: how many call to make normally before CUDA Graphing. In particular, this
+            allows torch.compiled functions to get properly compiled."""
     def __init__(self, func: tp.Callable, warmup_steps: int = 1):
         self.func = func
         self.warmup_steps = warmup_steps
@@ -184,6 +199,8 @@ class CUDAGraphed:
         self._args: tuple | None = None
 
     def reset(self, warmup_steps: int = 0) -> None:
+        """Reset the state, meaning the next call we get CUDA Graphed again. Useful if some
+        shapes have changed, or external state (e.g. KVCache) has changed."""
         self.warmup_steps = warmup_steps
         self._graph = None
         self._output = None
@@ -243,6 +260,7 @@ class CUDAGraphed:
 
 
 def cuda_graph(func: tp.Callable, warmup_steps: int = 1):
+    """Just calls `CUDAGraphed` on the given function."""
     if not _is_cuda_graph_enabled():
         return func
     return CUDAGraphed(func, warmup_steps)
