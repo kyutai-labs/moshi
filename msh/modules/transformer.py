@@ -113,9 +113,9 @@ def create_norm_fn(norm_type: str, dim: int, **kwargs) -> nn.Module:
     elif norm_type == "layer_norm_f32":
         kwargs.pop("dtype", None)
         return LayerNormF32(dim, eps=1e-8, **kwargs)
-    elif norm_type in {"rms_norm", "real_rms_norm"}:
+    elif norm_type in {"rms_norm"}:
         return RMSNorm(dim, eps=1e-5, **kwargs)
-    elif norm_type in {"rms_norm_f32", "real_rms_norm_f32"}:
+    elif norm_type in {"rms_norm_f32"}:
         kwargs.pop("dtype", None)
         return RMSNorm(dim, eps=1e-8, dtype=torch.float, **kwargs)
     else:
