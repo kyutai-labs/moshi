@@ -251,10 +251,18 @@ class RingKVCache:
         end_index = self.end_offset % self.capacity
         delta = indexes - end_index
 
+        # If last key is for step S, and capacity is C, last key was written at index S % C.
+        # then end_offset = S + 1, and end_index = (S + 1) % C.
+        # Then for index = (S % C), delta = -1, and the next code gives us:
+        # position(index) = (S + 1) - 1 = S, all good.
+        # Now the time step at end_offset is actually the oldest in the KVCache, e.g., its
+        # position should be (S - self.capacity + 1).
+        # The following code gives us:
+        # position(index + 1) = S + 1 + 0 - self.capacity.
         positions = torch.where(
-            indexes < end_index,
-            self.end_offset + delta,  # here delta < 0
-            self.end_offset + delta - self.capacity,  # here delta > 0
+            delta <= 0,
+            self.end_offset + delta,
+            self.end_offset + delta - self.capacity,
         )
         positions = torch.where(invalid, torch.full_like(positions, -1), positions)
 
