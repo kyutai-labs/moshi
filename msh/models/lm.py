@@ -350,7 +350,6 @@ class LMGen(StreamingModule[_LMGenState]):
         self.check = check
         self.max_delay = max(lm_model.delays)  # with delays, we need to generate a few more time steps.
         self.delays_cuda = torch.tensor(lm_model.delays, device=lm_model.device, dtype=torch.long)
-        self._warmed_up = False
 
     def _init_streaming_state(self, batch_size: int) -> _LMGenState:
         lm_model = self.lm_model
@@ -359,9 +358,8 @@ class LMGen(StreamingModule[_LMGenState]):
             (batch_size, self.lm_model.num_codebooks, self.max_delay + 2), lm_model.ungenerated_token_id,
             device=lm_model.device, dtype=torch.long)
 
-        warmup_steps = 0 if self._warmed_up else 1
-        graphed_main = CUDAGraphed(lm_model.forward_text, warmup_steps=warmup_steps)
-        graphed_depth = CUDAGraphed(self.depformer_step, warmup_steps=warmup_steps)
+        graphed_main = CUDAGraphed(lm_model.forward_text)
+        graphed_depth = CUDAGraphed(self.depformer_step)
 
         return _LMGenState(cache, initial, graphed_main, graphed_depth)
 
@@ -427,7 +425,6 @@ class LMGen(StreamingModule[_LMGenState]):
         gen_delays_cuda = self.delays_cuda[:lm_model.dep_q + 1]
         index = ((state.offset - self.max_delay + gen_delays_cuda) % CT).view(1, -1, 1).expand(B, -1, 1)
         out = state.cache.gather(dim=2, index=index)
-        self._warmed_up = True
         return out
 
     def depformer_step(
