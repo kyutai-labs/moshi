@@ -426,7 +426,7 @@ class LMGen(StreamingModule[_LMGenState]):
         B = state.cache.shape[0]
         gen_delays_cuda = self.delays_cuda[:lm_model.dep_q + 1]
         index = ((state.offset - self.max_delay + gen_delays_cuda) % CT).view(1, -1, 1).expand(B, -1, 1)
-        out = state.cache[:, ].gather(dim=2, index=index)
+        out = state.cache.gather(dim=2, index=index)
         self._warmed_up = True
         return out
 
