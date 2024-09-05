@@ -413,7 +413,7 @@ class LMGen(StreamingModule[_LMGenState]):
         assert text_token.shape[2] == 1
         assert text_token.shape[1] == 1, "Only one text stream supported."
         text_token = text_token[:, 0, 0]  # shape is [B]
-        audio_tokens, audio_logits = state.graphed_depth(text_token, transformer_out)
+        audio_tokens = state.graphed_depth(text_token, transformer_out)
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
         state.offset += 1
@@ -428,20 +428,17 @@ class LMGen(StreamingModule[_LMGenState]):
         index = ((state.offset - self.max_delay + gen_delays_cuda) % CT).view(1, -1, 1).expand(B, -1, 1)
         out = state.cache[:, ].gather(dim=2, index=index)
         self._warmed_up = True
-        self.tl = text_logits
-        self.al = audio_logits
         return out
 
     def depformer_step(
         self,
         text_token: torch.Tensor,
         transformer_out: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         B, = text_token.shape
         prev_token = text_token
         lm_model = self.lm_model
         depformer_tokens: list[torch.Tensor] = []
-        all_logits: list[torch.Tensor] = []
         assert not lm_model.depformer.is_streaming
         with lm_model.depformer.streaming(B):
             for cb_index in range(lm_model.dep_q):
@@ -457,9 +454,8 @@ class LMGen(StreamingModule[_LMGenState]):
                 next_token = next_token[:, 0, 0]  # shape is B
                 depformer_tokens.append(next_token)
                 prev_token = next_token
-                all_logits.append(logits)
 
         assert len(depformer_tokens) == lm_model.dep_q, (len(depformer_tokens), lm_model.dep_q)
         out = torch.stack(depformer_tokens, dim=1)
         assert out.shape == (B, lm_model.dep_q), out.shape
-        return out, torch.cat(all_logits, dim=3)
+        return out

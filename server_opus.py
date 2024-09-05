@@ -112,21 +112,9 @@ class ServerState:
 
         async def opus_loop():
             all_pcm_data = None
-            all_pcm_out = []
-            all_codes = []
-            all_other = []
-            all_tl = []
-            all_al = []
 
             while True:
                 if close:
-                    pcm_out = torch.cat(all_pcm_out, dim=1)
-                    sphn.write_wav("./plop.wav", pcm_out[0].numpy(), 24000)
-                    codes = torch.cat(all_codes, dim=-1)
-                    other = torch.cat(all_other, dim=-1)
-                    tl = torch.cat(all_tl, dim=-2)
-                    al = torch.cat(all_al, dim=-2)
-                    torch.save((other, codes, tl, al), "./codes.th")
                     return
                 await asyncio.sleep(0.001)
                 pcm = opus_reader.read_pcm()
@@ -141,22 +129,16 @@ class ServerState:
                     chunk = all_pcm_data[:self.frame_size]
                     all_pcm_data = all_pcm_data[self.frame_size:]
                     chunk = torch.from_numpy(chunk)
-                    print(chunk.std())
                     chunk = chunk.to(device=DEVICE)[None, None]
                     codes = self.ec.encode(chunk)
-                    all_other.append(codes)
                     for c in range(codes.shape[-1]):
                         tokens = self.lm_gen.step(codes[:, :, c: c + 1])
-                        all_tl.append(self.lm_gen.tl.clone())
-                        all_al.append(self.lm_gen.al.clone())
                         if tokens is None:
                             continue
                         assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
                         main_pcm = self.ec.decode(tokens[:, 1:])
                         main_pcm = main_pcm.cpu()
-                        all_pcm_out.append(main_pcm[0])
                         opus_writer.append_pcm(main_pcm[0, 0].numpy())
-                        all_codes.append(tokens)
                         text_token = tokens[0, 0, 0].item()
                         if text_token not in (0, 3):
                             _text = self.text_tokenizer.id_to_piece(text_token)
