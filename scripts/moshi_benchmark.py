@@ -6,7 +6,7 @@ import argparse
 import msh
 import sentencepiece
 import torch
-import torchaudio
+import sphn
 import numpy as np
 import random
 import time
@@ -79,11 +79,8 @@ def streaming_test(bs):
             evb = torch.cuda.Event(enable_timing=True)
             evb.record()
             dt_step = time.time() - be
-            # if all([t < 2048 for t in tokens[1:]]):
             text_tokens = tokens[:, 0, 0]
             audio_tokens = tokens[:, 1:, :]
-            # assert tokens.amax() < 2048, tokens
-            # assert audio_tokens.max() < 2048, audio_tokens
             main_pcm = ec.decode(audio_tokens)
             # main_pcm is the audio to be played back to the user, here we just append it and store it in
             # a file once the loop is finished.
@@ -114,7 +111,9 @@ def streaming_test(bs):
     print(main_audio.shape)
     print("generated text:")
     print("".join(main_text))
-    torchaudio.save("gen_main.wav", main_audio.cpu(), SAMPLE_RATE)
+    sphn.write_wav(
+        "gen_main.wav", main_audio[0].cpu().numpy().astype(np.float32), SAMPLE_RATE
+    )
 
 
 print("streaming test")

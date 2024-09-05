@@ -326,18 +326,33 @@ impl StreamingMultiheadCrossAttention {
 
 #[derive(Debug, Clone)]
 pub enum Mlp {
-    NoGating { linear1: Linear, linear2: Linear },
-    Gating { linear_in: Linear, linear_out: Linear, activation: candle_nn::Activation },
+    NoGating {
+        span1: tracing::Span,
+        linear1: Linear,
+        span2: tracing::Span,
+        linear2: Linear,
+        span: tracing::Span,
+    },
+    Gating {
+        linear_in: Linear,
+        linear_out: Linear,
+        activation: candle_nn::Activation,
+        span: tracing::Span,
+    },
 }
 
 impl Mlp {
     pub fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
         let d_model = cfg.d_model;
+        let span = tracing::span!(tracing::Level::TRACE, "mlp");
+
         match cfg.gating {
             None => {
+                let span1 = tracing::span!(tracing::Level::TRACE, "lin1");
+                let span2 = tracing::span!(tracing::Level::TRACE, "lin2");
                 let linear1 = linear(d_model, cfg.dim_feedforward, cfg.bias_ff, vb.pp("linear1"))?;
                 let linear2 = linear(cfg.dim_feedforward, d_model, cfg.bias_ff, vb.pp("linear2"))?;
-                Ok(Self::NoGating { linear1, linear2 })
+                Ok(Self::NoGating { linear1, linear2, span, span1, span2 })
             }
             Some(activation) => {
                 let vb = vb.pp("gating");
@@ -349,7 +364,7 @@ impl Mlp {
                 // TODO: Maybe use bias_ff here?
                 let linear_in = linear(d_model, 2 * hidden, false, vb.pp("linear_in"))?;
                 let linear_out = linear(hidden, d_model, false, vb.pp("linear_out"))?;
-                Ok(Self::Gating { linear_in, linear_out, activation })
+                Ok(Self::Gating { linear_in, linear_out, activation, span })
             }
         }
     }
@@ -358,8 +373,20 @@ impl Mlp {
 impl Module for Mlp {
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
         match self {
-            Self::NoGating { linear1, linear2 } => xs.apply(linear1)?.gelu_erf()?.apply(linear2),
-            Self::Gating { linear_in, linear_out, activation } => {
+            Self::NoGating { linear1, linear2, span, span1, span2 } => {
+                let _enter = span.enter();
+                let xs = {
+                    let _enter = span1.enter();
+                    xs.apply(linear1)?
+                };
+                let xs = xs.gelu_erf()?;
+                {
+                    let _enter = span2.enter();
+                    xs.apply(linear2)
+                }
+            }
+            Self::Gating { linear_in, linear_out, activation, span } => {
+                let _enter = span.enter();
                 let xs = xs.apply(linear_in)?;
                 let (b, t, _) = xs.dims3()?;
                 let xs = xs.reshape((b, t, 2, ()))?;

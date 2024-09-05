@@ -4,102 +4,356 @@
 
 import argparse
 import asyncio
-import numpy as np
+from dataclasses import dataclass
 import queue
+import sys
+
+import numpy as np
 import sphn
 import sounddevice as sd
 import websockets
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--host", default="localhost", type=str)
-parser.add_argument("--port", default=8998, type=int)
-args = parser.parse_args()
 
-SAMPLE_RATE = 24000
-CHANNELS = 1
+def colorize(text, color):
+    code = f"\033[{color}m"
+    restore = "\033[0m"
+    return "".join([code, text, restore])
 
 
-async def main():
-    uri = f"ws://{args.host}:{args.port}"
-    print(f"connecting to {uri}")
+def make_log(level: str, msg: str) -> str:
+    if level == "warning":
+        prefix = colorize("Warning:", "1;31")
+    elif level == "info":
+        prefix = colorize("Info:", "1;34")
+    elif level == "error":
+        prefix = colorize("Error:", "1;31")
+    else:
+        raise ValueError(f"Unknown level {level}")
+    return prefix + ' ' + msg
 
-    opus_writer = sphn.OpusStreamWriter(24000)
-    opus_reader = sphn.OpusStreamReader(24000)
-    output_queue = queue.Queue()
 
-    async with websockets.connect(uri) as websocket:
+class RawPrinter:
+    def __init__(self, stream=sys.stdout, err_stream=sys.stderr):
+        self.stream = stream
+        self.err_stream = err_stream
 
-        async def queue_loop():
-            print("start queue loop")
-            while True:
-                await asyncio.sleep(0.001)
-                msg = opus_writer.read_bytes()
-                if len(msg) > 0:
-                    await websocket.send(b"\x01" + msg)
+    def print_header(self):
+        pass
 
-        async def decoder_loop():
-            all_pcm_data = None
-            print("start decoder loop")
-            while True:
-                await asyncio.sleep(0.001)
-                pcm = opus_reader.read_pcm()
-                if all_pcm_data is None:
-                    all_pcm_data = pcm
+    def print_token(self, token: str):
+        self.stream.write(token)
+        self.stream.flush()
+
+    def log(self, level: str, msg: str):
+        print(f"{level.capitalize()}: {msg}", file=self.err_stream)
+
+    def print_lag(self):
+        self.err_stream.write(colorize(' [LAG]', '31'))
+        self.err_stream.flush()
+
+    def print_pending(self):
+        pass
+
+
+@dataclass
+class LineEntry:
+    msg: str
+    color: str | None = None
+
+    def render(self):
+        if self.color is None:
+            return self.msg
+        else:
+            return colorize(self.msg, self.color)
+
+    def __len__(self):
+        return len(self.msg)
+
+
+class Line:
+    def __init__(self, stream):
+        self.stream = stream
+        self._line: list[LineEntry] = []
+        self._has_padding: bool = False
+        self._max_line_length = 0
+
+    def __bool__(self):
+        return bool(self._line)
+
+    def __len__(self):
+        return sum(len(entry) for entry in self._line)
+
+    def add(self, msg: str, color: str | None = None) -> int:
+        entry = LineEntry(msg, color)
+        return self._add(entry)
+
+    def _add(self, entry: LineEntry) -> int:
+        if self._has_padding:
+            self.erase(count=0)
+        self._line.append(entry)
+        self.stream.write(entry.render())
+        self._max_line_length = max(self._max_line_length, len(self))
+        return len(entry)
+
+    def erase(self, count: int = 1):
+        if count:
+            entries = list(self._line[:-count])
+        else:
+            entries = list(self._line)
+        self._line.clear()
+        self.stream.write('\r')
+        for entry in entries:
+            self._line.append(entry)
+            self.stream.write(entry.render())
+
+        self._has_padding = False
+
+    def newline(self):
+        missing = self._max_line_length - len(self)
+        if missing > 0:
+            self.stream.write(' ' * missing)
+        self.stream.write('\n')
+        self._line.clear()
+        self._max_line_length = 0
+        self._has_padding = False
+
+    def flush(self):
+        missing = self._max_line_length - len(self)
+        if missing > 0:
+            self.stream.write(' ' * missing)
+            self._has_padding = True
+        self.stream.flush()
+
+
+class Printer:
+    def __init__(self, max_cols: int = 80, stream=sys.stdout, err_stream=sys.stderr):
+        self.max_cols = max_cols
+        self.line = Line(stream)
+        self.stream = stream
+        self.err_stream = err_stream
+        self._pending_count = 0
+        self._pending_printed = False
+
+    def print_header(self):
+        self.line.add(' ' + '-' * (self.max_cols) + ' ')
+        self.line.newline()
+        self.line.flush()
+        self.line.add('| ')
+
+    def _remove_pending(self) -> bool:
+        if self._pending_printed:
+            self._pending_printed = False
+            self.line.erase(1)
+            return True
+        return False
+
+    def print_token(self, token: str, color: str | None = None):
+        self._remove_pending()
+        remaining = self.max_cols - len(self.line)
+        if len(token) <= remaining:
+            self.line.add(token, color)
+        else:
+            end = ' ' * remaining + ' |'
+            if token.startswith(' '):
+                token = token.lstrip()
+                self.line.add(end)
+                self.line.newline()
+                self.line.add('| ')
+                self.line.add(token, color)
+            else:
+                assert color is None
+                erase_count = None
+                cumulated = ''
+                for idx, entry in enumerate(self.line._line[::-1]):
+                    if entry.color:
+                        # probably a LAG message
+                        erase_count = idx
+                        break
+                    if entry.msg.startswith(' '):
+                        erase_count = idx + 1
+                        cumulated = entry.msg + cumulated
+                        break
+                if erase_count is not None:
+                    if erase_count > 0:
+                        self.line.erase(erase_count)
+                    remaining = self.max_cols - len(self.line)
+                    end = ' ' * remaining + ' |'
+                    self.line.add(end)
+                    self.line.newline()
+                    self.line.add('| ')
+                    token = cumulated.lstrip() + token
+                    self.line.add(token)
                 else:
-                    all_pcm_data = np.concatenate((all_pcm_data, pcm))
-                if all_pcm_data.shape[-1] >= 1920:
-                    output_queue.put_nowait(all_pcm_data[:1920])
-                    all_pcm_data = np.array(all_pcm_data[1920:])
+                    self.line.add(token[:remaining])
+                    self.line.add(' |')
+                    self.line.newline()
+                    self.line.add('| ')
+                    self.line.add(token[remaining:])
+        self.line.flush()
 
-        async def recv_loop():
-            print("start recv loop")
-            cnt = 0
-            while True:
-                message = await websocket.recv()
-                if not isinstance(message, bytes):
-                    print(f"unsupported message type {type(message)}")
-                    continue
-                if len(message) == 0:
-                    print("empty message")
-                    continue
-                kind = message[0]
-                if kind == 1:  # audio
-                    payload = message[1:]
-                    opus_reader.append_bytes(payload)
-                    cnt += 1
-                elif kind == 2:  # text
-                    payload = message[1:]
-                    print("text", payload)
-                else:
-                    print(f"unknown message kind {kind}")
+    def log(self, level: str, msg: str):
+        msg = make_log(level, msg)
+        self._remove_pending()
+        if self.line:
+            self.line.newline()
+        self.line.flush()
+        print(msg, file=self.err_stream)
+        self.err_stream.flush()
 
-        def on_input(in_data, frames, time, status):
-            opus_writer.append_pcm(in_data[:, 0])
+    def print_lag(self):
+        self.print_token(' [LAG]', '31')
 
-        in_stream = sd.InputStream(
-            samplerate=SAMPLE_RATE, channels=CHANNELS, blocksize=1920, callback=on_input
-        )
+    def print_pending(self):
+        chars = ['|', '/', '-', '\\']
+        count = int(self._pending_count / 5)
+        char = chars[count % len(chars)]
+        colors = ['32', '33', '31']
+        self._remove_pending()
+        self.line.add(char, colors[count % len(colors)])
+        self._pending_printed = True
+        self._pending_count += 1
 
-        def on_output(out_data, frames, time, status):
-            # print(frames, type(out_data))
-            assert out_data.shape == (1920, 1), out_data.shape
+
+AnyPrinter = Printer | RawPrinter
+
+
+class Connection:
+    def __init__(self, printer: AnyPrinter,
+                 websocket: websockets.WebSocketClientProtocol,
+                 sample_rate: float = 24000, channels: int = 1, frame_size: int = 1920) -> None:
+        self.printer = printer
+        self.websocket = websocket
+        self.sample_rate = sample_rate
+        self.frame_size = frame_size
+        self.channels = channels
+
+        self._done = False
+        self._in_stream = sd.InputStream(
+            samplerate=sample_rate, channels=channels,
+            blocksize=self.frame_size, callback=self._on_audio_input)
+
+        self._out_stream = sd.OutputStream(
+            samplerate=sample_rate,
+            channels=channels,
+            blocksize=frame_size,
+            callback=self._on_audio_output)
+        self._opus_writer = sphn.OpusStreamWriter(sample_rate)
+        self._opus_reader = sphn.OpusStreamReader(sample_rate)
+        self._output_queue = queue.Queue()
+
+    async def _queue_loop(self) -> None:
+        while True:
+            if self._done:
+                return
+            await asyncio.sleep(0.001)
+            msg = self._opus_writer.read_bytes()
+            if len(msg) > 0:
+                try:
+                    await self.websocket.send(b"\x01" + msg)
+                except websockets.WebSocketException:
+                    self._lost_connection()
+                    return
+
+    async def _decoder_loop(self) -> None:
+        all_pcm_data = None
+        while True:
+            if self._done:
+                return
+            await asyncio.sleep(0.001)
+            pcm = self._opus_reader.read_pcm()
+            if all_pcm_data is None:
+                all_pcm_data = pcm
+            else:
+                all_pcm_data = np.concatenate((all_pcm_data, pcm))
+            while all_pcm_data.shape[-1] >= self.frame_size:
+                self._output_queue.put(all_pcm_data[:self.frame_size])
+                all_pcm_data = np.array(all_pcm_data[self.frame_size:])
+
+    async def _recv_loop(self) -> None:
+        while True:
             try:
-                pcm_data = output_queue.get(block=False)
-                # TODO: handle other shapes by using some form of fifo/ring buffer.
-                assert pcm_data.shape == (1920,), pcm_data.shape
-                out_data[:, 0] = pcm_data
-            except queue.Empty:
-                out_data.fill(0)
+                message = await self.websocket.recv()
+            except websockets.exceptions.WebSocketException:
+                self._lost_connection()
+                return
+            if not isinstance(message, bytes):
+                self.printer.log("warning", f"unsupported message type {type(message)}")
+                continue
+            if len(message) == 0:
+                self.printer.log("warning", "empty message")
+                continue
+            kind = message[0]
+            if kind == 1:  # audio
+                payload = message[1:]
+                self._opus_reader.append_bytes(payload)
+                self.printer.print_pending()
+            elif kind == 2:  # text
+                payload = message[1:]
+                self.printer.print_token(payload.decode())
+            else:
+                self.printer.log("warning", f"unknown message kind {kind}")
 
-        out_stream = sd.OutputStream(
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            blocksize=1920,
-            callback=on_output,
-        )
+    def _lost_connection(self) -> None:
+        if not self._done:
+            self.printer.log("error", "Lost connection with the server!")
+            self._done = True
 
-        with in_stream, out_stream:
-            await asyncio.gather(recv_loop(), queue_loop(), decoder_loop())
+    def _on_audio_input(self, in_data, frames, time_, status) -> None:
+        assert in_data.shape == (self.frame_size, self.channels), in_data.shape
+        self._opus_writer.append_pcm(in_data[:, 0])
+
+    def _on_audio_output(self, out_data, frames, time_, status) -> None:
+        assert out_data.shape == (self.frame_size, self.channels), out_data.shape
+        try:
+            pcm_data = self._output_queue.get(block=False)
+            # TODO: handle other shapes by using some form of fifo/ring buffer.
+            assert pcm_data.shape == (self.frame_size,), pcm_data.shape
+            out_data[:, 0] = pcm_data
+        except queue.Empty:
+            out_data.fill(0)
+            self.printer.print_lag()
+
+    async def run(self) -> None:
+        with self._in_stream, self._out_stream:
+            await asyncio.gather(self._recv_loop(), self._decoder_loop(), self._queue_loop())
 
 
-asyncio.run(main())
+async def do_connection(printer: AnyPrinter, uri: str, action):
+    try:
+        async with websockets.connect(uri) as websocket:
+            printer.log("info", "connected!")
+            printer.print_header()
+            await action(websocket)
+    except websockets.WebSocketException:
+        printer.log("error", "Failed to connect!")
+        sys.exit(1)
+
+
+async def run(printer: AnyPrinter, args):
+    async def action(websocket: websockets.WebSocketClientProtocol):
+        connection = Connection(printer, websocket)
+        await connection.run()
+
+    uri = f"ws://{args.host}:{args.port}"
+    await do_connection(printer, uri, action)
+
+
+def main():
+    parser = argparse.ArgumentParser('client_opus')
+    parser.add_argument("--host", default="localhost", type=str)
+    parser.add_argument("--port", default=8998, type=int)
+    args = parser.parse_args()
+    printer: AnyPrinter
+
+    if sys.stdout.isatty():
+        printer = Printer()
+    else:
+        printer = RawPrinter()
+    try:
+        asyncio.run(run(printer, args))
+    except KeyboardInterrupt:
+        printer.log("warning", "Interrupting, exiting connection.")
+    printer.log("info", "All done!")
+
+if __name__ == '__main__':
+    main()

@@ -620,7 +620,9 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         assert positional_embedding in {"sin", "rope", "sin_rope", "none"}
         self.rope: tp.Optional[RotaryEmbedding] = None
         if self.positional_embedding in {"rope", "sin_rope"}:
-            self.rope = RotaryEmbedding(max_period=max_period)
+            self.rope = RotaryEmbedding(
+                d_model // num_heads, max_len=8192, device=device, max_period=max_period
+            )
 
         self.layers = nn.ModuleList()
         for _ in range(num_layers):

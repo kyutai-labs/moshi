@@ -6,8 +6,7 @@ import argparse
 import msh
 import time
 import torch
-import torchaudio
-import torchaudio.functional as F
+import sphn
 from torch.profiler import profile, ProfilerActivity
 import numpy as np
 import random
@@ -42,9 +41,12 @@ print("mimi loaded")
 
 def encodec_streaming_test(ec, pcm_chunk_size=1920, max_duration_sec=10.0):
     # wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
-    sample_pcm, sample_sr = torchaudio.load("bria.mp3")
+    sample_pcm, sample_sr = sphn.read("bria.mp3")
     print("loaded pcm", sample_pcm.shape, sample_sr)
-    sample_pcm = F.resample(sample_pcm, orig_freq=sample_sr, new_freq=SAMPLE_RATE)
+    sample_pcm = sphn.resample(
+        sample_pcm, src_sample_rate=sample_sr, dst_sample_rate=SAMPLE_RATE
+    )
+    sample_pcm = torch.tensor(sample_pcm, device=DEVICE)
     max_duration_len = int(SAMPLE_RATE * max_duration_sec)
     if sample_pcm.shape[-1] > max_duration_len:
         sample_pcm = sample_pcm[..., :max_duration_len]
@@ -81,11 +83,12 @@ def encodec_streaming_test(ec, pcm_chunk_size=1920, max_duration_sec=10.0):
             print(i, pcm.shape, end="\r")
             all_pcms.append(pcm)
     all_pcms = torch.cat(all_pcms, dim=-1)
-    print("pcm", all_pcms.shape)
-    torchaudio.save("streaming_out.wav", all_pcms[0].cpu(), SAMPLE_RATE)
+    print("pcm", all_pcms.shape, all_pcms.dtype)
+    sphn.write_wav("streaming_out.wav", all_pcms[0, 0].cpu().numpy(), SAMPLE_RATE)
     pcm = ec.decode(all_codes, scale=None)
-    print("pcm", pcm.shape)
-    torchaudio.save("roundtrip_out.wav", pcm[0].cpu(), SAMPLE_RATE)
+    print("pcm", pcm.shape, pcm.dtype)
+    sphn.write_wav.write_wav("roundtrip_out.wav", pcm[0, 0].cpu().numpy(), SAMPLE_RATE)
 
 
-encodec_streaming_test(ec)
+with torch.no_grad():
+    encodec_streaming_test(ec)

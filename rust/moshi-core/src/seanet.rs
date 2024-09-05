@@ -126,6 +126,7 @@ impl StreamingModule for SeaNetResnetBlock {
     }
 
     fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
+        let _enter = self.span.enter();
         let mut ys = xs.clone();
         for block in self.block.iter_mut() {
             ys = block.step(&ys.apply(&self.activation)?)?;
@@ -265,6 +266,7 @@ impl StreamingModule for SeaNetEncoder {
     }
 
     fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
+        let _enter = self.span.enter();
         let mut xs = self.init_conv1d.step(xs)?;
         for layer in self.layers.iter_mut() {
             for residual in layer.residuals.iter_mut() {
@@ -412,6 +414,7 @@ impl StreamingModule for SeaNetDecoder {
     }
 
     fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
+        let _enter = self.span.enter();
         let mut xs = self.init_conv1d.step(xs)?;
         for layer in self.layers.iter_mut() {
             xs = layer.upsample.step(&xs.apply(&self.activation)?)?;

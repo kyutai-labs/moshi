@@ -124,13 +124,17 @@ impl Tokenizer {
         Ok(Self { encodec, device, dtype })
     }
 
-    fn encode(&mut self, pcm_data: &numpy::PyArray3<f32>) -> PyResult<PyObject> {
+    fn encode(&mut self, pcm_data: numpy::PyReadonlyArray3<f32>) -> PyResult<PyObject> {
         let py = pcm_data.py();
+        let pcm_data = pcm_data.as_array();
         let pcm_shape = pcm_data.shape().to_vec();
-        let pcm_data = pcm_data.to_vec()?;
+        let pcm_data = match pcm_data.to_slice() {
+            None => py_bail!("input data is not contiguous"),
+            Some(data) => data,
+        };
         let codes = py
             .allow_threads(|| {
-                let pcm_data = candle::Tensor::from_vec(pcm_data, pcm_shape, &self.device)?
+                let pcm_data = candle::Tensor::from_slice(pcm_data, pcm_shape, &self.device)?
                     .to_dtype(self.dtype)?;
                 let codes = self.encodec.encode(&pcm_data)?;
                 codes.to_vec3::<u32>()
@@ -140,13 +144,17 @@ impl Tokenizer {
         Ok(codes.into_py(py))
     }
 
-    fn encode_step(&mut self, pcm_data: &numpy::PyArray3<f32>) -> PyResult<PyObject> {
+    fn encode_step(&mut self, pcm_data: numpy::PyReadonlyArray3<f32>) -> PyResult<PyObject> {
         let py = pcm_data.py();
+        let pcm_data = pcm_data.as_array();
         let pcm_shape = pcm_data.shape().to_vec();
-        let pcm_data = pcm_data.to_vec()?;
+        let pcm_data = match pcm_data.to_slice() {
+            None => py_bail!("input data is not contiguous"),
+            Some(data) => data,
+        };
         let codes = py
             .allow_threads(|| {
-                let pcm_data = candle::Tensor::from_vec(pcm_data, pcm_shape, &self.device)?
+                let pcm_data = candle::Tensor::from_slice(pcm_data, pcm_shape, &self.device)?
                     .to_dtype(self.dtype)?;
                 let codes = self.encodec.encode_step(&pcm_data.into())?;
                 match codes.as_option() {
@@ -164,12 +172,16 @@ impl Tokenizer {
         }
     }
 
-    fn decode(&mut self, codes: &numpy::PyArray3<u32>, py: Python) -> PyResult<PyObject> {
+    fn decode(&mut self, codes: numpy::PyReadonlyArray3<u32>, py: Python) -> PyResult<PyObject> {
+        let codes = codes.as_array();
         let codes_shape = codes.shape().to_vec();
-        let codes = codes.to_vec()?;
+        let codes = match codes.to_slice() {
+            None => py_bail!("input data is not contiguous"),
+            Some(data) => data,
+        };
         let pcm = py
             .allow_threads(|| {
-                let codes = candle::Tensor::from_vec(codes, codes_shape, &self.device)?;
+                let codes = candle::Tensor::from_slice(codes, codes_shape, &self.device)?;
                 let pcm = self.encodec.decode(&codes)?.to_dtype(candle::DType::F32)?;
                 pcm.to_vec3::<f32>()
             })
@@ -178,12 +190,20 @@ impl Tokenizer {
         Ok(pcm.into_py(py))
     }
 
-    fn decode_step(&mut self, codes: &numpy::PyArray3<u32>, py: Python) -> PyResult<PyObject> {
+    fn decode_step(
+        &mut self,
+        codes: numpy::PyReadonlyArray3<u32>,
+        py: Python,
+    ) -> PyResult<PyObject> {
+        let codes = codes.as_array();
         let codes_shape = codes.shape().to_vec();
-        let codes = codes.to_vec()?;
+        let codes = match codes.to_slice() {
+            None => py_bail!("input data is not contiguous"),
+            Some(data) => data,
+        };
         let pcm = py
             .allow_threads(|| {
-                let codes = candle::Tensor::from_vec(codes, codes_shape, &self.device)?;
+                let codes = candle::Tensor::from_slice(codes, codes_shape, &self.device)?;
                 let pcm = self.encodec.decode_step(&codes.into())?;
                 match pcm.as_option() {
                     Some(pcm) => {
@@ -276,15 +296,18 @@ impl StreamTokenizer {
         Ok(Self { dtype, encoder_rx, encoder_tx, decoder_rx, decoder_tx })
     }
 
-    fn encode(&mut self, pcm_data: &numpy::PyArray1<f32>) -> PyResult<()> {
-        let pcm_data = pcm_data.to_vec()?;
-        self.encoder_tx.send(pcm_data).w()?;
+    fn encode(&mut self, pcm_data: numpy::PyReadonlyArray1<f32>) -> PyResult<()> {
+        self.encoder_tx.send(pcm_data.as_array().to_vec()).w()?;
         Ok(())
     }
 
-    fn decode(&mut self, codes: &numpy::PyArray2<u32>) -> PyResult<()> {
+    fn decode(&mut self, codes: numpy::PyReadonlyArray2<u32>) -> PyResult<()> {
+        let codes = codes.as_array();
         let dims = codes.shape();
-        let codes = codes.to_vec().w()?;
+        let codes = match codes.to_slice() {
+            None => py_bail!("input data is not contiguous"),
+            Some(data) => data.to_vec(),
+        };
         let codes = codes.chunks_exact(dims[1]).map(|v| v.to_vec()).collect::<Vec<_>>();
         self.decoder_tx.send(codes).w()?;
         Ok(())
@@ -325,12 +348,12 @@ impl StreamTokenizer {
 #[pyo3(signature = (filename, data, sample_rate))]
 fn write_wav(
     filename: std::path::PathBuf,
-    data: &numpy::PyArray1<f32>,
+    data: numpy::PyReadonlyArray1<f32>,
     sample_rate: u32,
 ) -> PyResult<()> {
     let w = std::fs::File::create(&filename).w_f(&filename)?;
     let mut w = std::io::BufWriter::new(w);
-    let data = data.to_vec()?;
+    let data = data.as_array().to_vec();
     mm::wav::write_pcm_as_wav(&mut w, &data, sample_rate).w_f(&filename)?;
     Ok(())
 }
