@@ -248,11 +248,11 @@ class RingKVCache:
         indexes = torch.arange(self.capacity, device=self.end_offset.device, dtype=torch.long)
         invalid = indexes >= self.end_offset
 
-        last_index = self.end_offset % self.capacity
-        delta = indexes - last_index
+        end_index = self.end_offset % self.capacity
+        delta = indexes - end_index
 
         positions = torch.where(
-            indexes < last_index,
+            indexes < end_index,
             self.end_offset + delta,  # here delta < 0
             self.end_offset + delta - self.capacity,  # here delta > 0
         )
