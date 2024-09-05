@@ -7,7 +7,6 @@ import asyncio
 from dataclasses import dataclass
 import random
 import time
-import traceback
 
 import numpy as np
 import sentencepiece
@@ -22,10 +21,27 @@ SAMPLE_RATE = msh.models.moshi.SAMPLE_RATE
 DEVICE = "cuda:0"
 ENABLE_PROFILING = False
 
+def colorize(text, color):
+    code = f"\033[{color}m"
+    restore = "\033[0m"
+    return "".join([code, text, restore])
+
+
+def log(level: str, msg: str):
+    if level == "warning":
+        prefix = colorize("[Warn]", "1;31")
+    elif level == "info":
+        prefix = colorize("[Info]", "1;34")
+    elif level == "error":
+        prefix = colorize("[Err ]", "1;31")
+    else:
+        raise ValueError(f"Unknown level {level}")
+    print(prefix + ' ' + msg)
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--host", default="localhost", type=str)
 parser.add_argument("--port", default=8998, type=int)
-parser.add_argument("--max-gen-len", default=2048, type=int)
 parser.add_argument("--tokenizer", type=str)
 parser.add_argument("--moshi-weights", type=str)
 parser.add_argument("--mimi-weights", type=str)
@@ -61,11 +77,11 @@ class ServerState:
     lock: asyncio.Lock
 
     def __init__(self):
-        print("loading mimi")
+        log("info", "loading mimi")
         self.ec = msh.models.moshi.get_encodec(args.mimi_weights, DEVICE)
-        print("mimi loaded")
+        log("info", "mimi loaded")
         self.text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)
-        print("loading moshi")
+        log("info", "loading moshi")
         lm = msh.models.moshi.get_lm(args.moshi_weights, DEVICE)
         self.lm_gen = msh.models.LMGen(lm)
 
@@ -74,7 +90,7 @@ class ServerState:
 
         self.ec.streaming_forever(1)
         self.lm_gen.streaming_forever(1)
-        print("lm loaded")
+        log("info", "lm loaded")
 
     def warmup(self):
         for chunk in range(4):
@@ -93,22 +109,22 @@ class ServerState:
             try:
                 async for message in websocket:
                     if not isinstance(message, bytes):
-                        print("unsupported message type {type(message)}")
+                        log("error", "unsupported message type {type(message)}")
                         continue
                     if len(message) == 0:
-                        print("empty message")
+                        log("warning", "empty message")
                         continue
                     kind = message[0]
                     if kind == 1:  # audio
                         payload = message[1:]
                         opus_reader.append_bytes(payload)
                     else:
-                        print("unknown message kind {kind}")
+                        log("warning", "unknown message kind {kind}")
             except websockets.exceptions.WebSocketException:
-                print("Lost connection.")
+                log("error", "dropped connection.")
             finally:
                 close = True
-                print("CLOSED")
+                log("info", "connection closed")
 
         async def opus_loop():
             all_pcm_data = None
@@ -144,9 +160,9 @@ class ServerState:
                             _text = self.text_tokenizer.id_to_piece(text_token)
                             _text = _text.replace("▁", " ")
                             msg = b"\x02" + bytes(_text, encoding="utf8")
-                            print("text token", msg)
+                            log("info", f"text token '{_text}'")
                             await websocket.send(msg)
-                    print(f"Frame handled in {1000 * (time.time() - be):.1f}")
+                    log("info", f"frame handled in {1000 * (time.time() - be):.1f}ms")
 
         async def send_loop():
             while True:
@@ -158,7 +174,7 @@ class ServerState:
                     await websocket.send(b"\x01" + msg)
 
 
-        print("OPEN")
+        log("info", "accepted connection")
         close = False
         async with self.lock:
             opus_writer = sphn.OpusStreamWriter(self.ec.sample_rate)
@@ -166,21 +182,17 @@ class ServerState:
             self.ec.reset_streaming()
             self.lm_gen.reset_streaming()
             await asyncio.gather(opus_loop(), recv_loop(), send_loop())
-        print("DONE")
+        log("info", "done with connection")
 
 
 async def main():
     state = ServerState()
-    print("warming up the model")
+    log("info", "warming up the model")
     state.warmup()
-    print(f"listening to ws://{args.host}:{args.port}")
+    log("info", f"listening to ws://{args.host}:{args.port}")
     async with serve(state.handle_conn, args.host, args.port):
         await asyncio.Future()  # run forever
 
 
 with torch.no_grad():
     asyncio.run(main())
-
-
-def cb(step, total):
-    print(f"{step:06d} / {total:06d}", end="\r")
