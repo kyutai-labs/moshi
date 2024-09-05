@@ -8,6 +8,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from dataclasses import dataclass
 import math
 import typing as tp
 import warnings
@@ -17,7 +18,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils import weight_norm
 
-from .streaming import StreamingConv1d, StreamingConvTranspose1d, StreamingModule
+from .streaming import RawStreamingConv1d, RawStreamingConvTranspose1d, StreamingModule
 
 
 CONV_NORMALIZATIONS = frozenset(["none", "weight_norm"])
@@ -107,7 +108,7 @@ def unpad1d(x: torch.Tensor, paddings: tp.Tuple[int, int]):
     return x[..., padding_left:end]
 
 
-class NormConv1d(StreamingModule):
+class NormConv1d(nn.Module):
     """Wrapper around Conv1d and normalization applied to this conv
     to provide a uniform interface across normalization approaches.
     """
@@ -121,7 +122,7 @@ class NormConv1d(StreamingModule):
         **kwargs,
     ):
         super().__init__()
-        self.conv = apply_parametrization_norm(StreamingConv1d(*args, **kwargs), norm)
+        self.conv = apply_parametrization_norm(RawStreamingConv1d(*args, **kwargs), norm)
         self.norm_type = norm
 
     def forward(self, x):
@@ -129,7 +130,7 @@ class NormConv1d(StreamingModule):
         return x
 
 
-class NormConvTranspose1d(StreamingModule):
+class NormConvTranspose1d(nn.Module):
     """Wrapper around ConvTranspose1d and normalization applied to this conv
     to provide a uniform interface across normalization approaches.
     """
@@ -144,7 +145,7 @@ class NormConvTranspose1d(StreamingModule):
     ):
         super().__init__()
         self.convtr = apply_parametrization_norm(
-            StreamingConvTranspose1d(*args, **kwargs), norm
+            RawStreamingConvTranspose1d(*args, **kwargs), norm
         )
         self.norm_type = norm
 
@@ -153,7 +154,16 @@ class NormConvTranspose1d(StreamingModule):
         return x
 
 
-class StreamableConv1d(StreamingModule):
+@dataclass
+class _StreamingConv1dState:
+    padding_to_add: int
+    original_padding_to_add: int
+
+    def reset(self):
+        self.padding_to_add = self.original_padding_to_add
+
+
+class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
     """Conv1d with some builtin handling of asymmetric or causal padding
     and normalization.
     """
@@ -176,7 +186,7 @@ class StreamableConv1d(StreamingModule):
         # warn user on unusual setup between dilation and stride
         if stride > 1 and dilation > 1:
             warnings.warn(
-                "StreamableConv1d has been initialized with stride > 1 and dilation > 1"
+                "StreamingConv1d has been initialized with stride > 1 and dilation > 1"
                 f" (kernel_size={kernel_size} stride={stride}, dilation={dilation})."
             )
         self.conv = NormConv1d(
@@ -194,28 +204,36 @@ class StreamableConv1d(StreamingModule):
         self.causal = causal
         self.pad_mode = pad_mode
 
+    @property
+    def _stride(self) -> int:
+        return self.conv.conv.stride[0]
+
+    @property
+    def _kernel_size(self) -> int:
+        return self.conv.conv.kernel_size[0]
+
+    @property
+    def _effective_kernel_size(self) -> int:
+        dilation = self.conv.conv.dilation[0]
+        return (self._kernel_size - 1) * dilation + 1  # effective kernel size with dilations
+
+    @property
+    def _padding_total(self) -> int:
+        return self._effective_kernel_size - self._stride
+
+    def _init_streaming_state(self, batch_size: int) -> _StreamingConv1dState:
+        assert self.causal, "streaming is only supported for causal convs"
+        return _StreamingConv1dState(self._padding_total, self._padding_total)
+
+
     def forward(self, x):
         B, C, T = x.shape
-        kernel_size = self.conv.conv.kernel_size[0]
-        stride = self.conv.conv.stride[0]
-        dilation = self.conv.conv.dilation[0]
-        kernel_size = (
-            kernel_size - 1
-        ) * dilation + 1  # effective kernel size with dilations
-        padding_total = kernel_size - stride
+        padding_total = self._padding_total
         extra_padding = get_extra_padding_for_conv1d(
-            x, kernel_size, stride, padding_total
+            x, self._effective_kernel_size, self._stride, padding_total
         )
-        if self._is_streaming:
-            assert self.causal, "streaming is only supported for causal convs"
-            padding_to_add = self._streaming_state.get("padding_to_add")
-            if padding_to_add is None:
-                self._streaming_state["padding_to_add"] = padding_total
-                padding_to_add = padding_total
-            if padding_to_add > 0 and x.shape[-1] > 0:
-                x = pad1d(x, (padding_to_add, 0), mode=self.pad_mode)
-                self._streaming_state["padding_to_add"] = 0
-        else:
+        state = self._streaming_state
+        if state is None:
             if self.causal:
                 # Left padding for causal
                 x = pad1d(x, (padding_total, extra_padding), mode=self.pad_mode)
@@ -226,10 +244,22 @@ class StreamableConv1d(StreamingModule):
                 x = pad1d(
                     x, (padding_left, padding_right + extra_padding), mode=self.pad_mode
                 )
+        else:
+            if state.padding_to_add > 0 and x.shape[-1] > 0:
+                x = pad1d(x, (state.padding_to_add, 0), mode=self.pad_mode)
+                state.padding_to_add = 0
         return self.conv(x)
 
 
-class StreamableConvTranspose1d(StreamingModule):
+@dataclass
+class _StreamingConvTr1dState:
+    pass
+
+    def reset(self):
+        pass
+
+
+class StreamingConvTranspose1d(StreamingModule[_StreamingConvTr1dState]):
     """ConvTranspose1d with some builtin handling of asymmetric or causal padding
     and normalization.
     """
@@ -266,6 +296,11 @@ class StreamableConvTranspose1d(StreamingModule):
         ), "`trim_right_ratio` != 1.0 only makes sense for causal convolutions"
         assert self.trim_right_ratio >= 0.0 and self.trim_right_ratio <= 1.0
 
+    def _init_streaming_state(self, batch_size: int) -> _StreamingConvTr1dState:
+        assert self.causal, "streaming is only supported for causal convtrs"
+        return _StreamingConvTr1dState()
+
+
     def forward(self, x):
         kernel_size = self.convtr.convtr.kernel_size[0]
         stride = self.convtr.convtr.stride[0]
@@ -273,7 +308,7 @@ class StreamableConvTranspose1d(StreamingModule):
 
         y = self.convtr(x)
 
-        if not self._is_streaming:
+        if not self.is_streaming:
             # We will only trim fixed padding. Extra padding from `pad_for_conv1d` would be
             # removed at the very end, when keeping only the right length for the output,
             # as removing it here would require also passing the length at the matching layer

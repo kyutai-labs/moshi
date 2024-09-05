@@ -50,15 +50,14 @@ lm = msh.models.moshi.get_lm(args.moshi_weights, DEVICE)
 lm.to(torch.bfloat16)
 print("lm loaded")
 
+lm_gen = msh.models.LMGen(lm)
+
 
 def cb(step, total):
     print(f"{step:06d} / {total:06d}", end="\r")
 
 
-def streaming_test():
-    lm.reset_streaming()
-    max_gen_len = 256
-    lm_gen = msh.models.LMGen(lm, check=True, max_gen_len=max_gen_len)
+def streaming_test(bs):
 
     main_audio = []
     main_text = []
@@ -66,25 +65,36 @@ def streaming_test():
     def run_step():
         start_time = time.time()
         # Chunk should contain the pcm data from the user, single channel with a sample rate of 24000.
-        chunk = torch.zeros((1, 1, 1920), dtype=torch.float, device=DEVICE)
-        codes, _scale = ec.encode(chunk)
+        chunk = torch.zeros((bs, 1, 1920), dtype=torch.float, device=DEVICE)
+        codes = ec.encode(chunk)
+        assert codes.shape[-1] == 1
         for c in range(codes.shape[-1]):
-            tokens = lm_gen.step(codes[0, :, c].tolist())
+            be = time.time()
+            ev = torch.cuda.Event(enable_timing=True)
+            ev.record()
+            tokens = lm_gen.step(codes[:, :, c: c + 1])
             if tokens is None:
-                continue
-            text_token = tokens[0]
-            if text_token not in (0, 3):
-                _text = text_tokenizer.id_to_piece(text_token)
-                _text = _text.replace("▁", " ")
-                main_text.append(_text)
-            if all([t < 2048 for t in tokens[1:]]):
-                tokens = torch.tensor(tokens[1:], device=DEVICE).reshape((1, 8, 1))
-                main_pcm = ec.decode(tokens, scale=None)
-                # main_pcm is the audio to be played back to the user, here we just append it and store it in
-                # a file once the loop is finished.
-                main_audio.append(main_pcm[0])
+                print("Skipping")
+                return
+            evb = torch.cuda.Event(enable_timing=True)
+            evb.record()
+            dt_step = time.time() - be
+            text_tokens = tokens[:, 0, 0]
+            audio_tokens = tokens[:, 1:, :]
+            main_pcm = ec.decode(audio_tokens)
+            # main_pcm is the audio to be played back to the user, here we just append it and store it in
+            # a file once the loop is finished.
+            main_audio.append(main_pcm[0])
+        evb.synchronize()
+        dg = ev.elapsed_time(evb)
+        torch.cuda.synchronize()
         dt = time.time() - start_time
-        print(f"step time: {1000 * dt:.2f}ms")
+        print(f"step time: {1000 * dt:.2f}ms, lm step: {1000 * dt_step:.2f}, gpu step {dg:.2f}")
+        text_token = text_tokens[0].item()
+        if text_token not in (0, 3):
+            _text = text_tokenizer.id_to_piece(text_token)
+            _text = _text.replace("▁", " ")
+            main_text.append(_text)
 
     for step in range(args.steps):
         run_step()
@@ -107,6 +117,7 @@ def streaming_test():
 
 
 print("streaming test")
+bs = 1
 with torch.no_grad():
-    with ec.streaming():
-        streaming_test()
+    with ec.streaming(bs), lm_gen.streaming(bs):
+        streaming_test(bs)

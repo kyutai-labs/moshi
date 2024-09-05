@@ -12,7 +12,9 @@
 Streaming module API that should be implemented by all Streaming components,
 """
 
+import abc
 from contextlib import contextmanager
+from dataclasses import dataclass
 import itertools
 import math
 import typing as tp
@@ -20,10 +22,14 @@ from torch import nn
 import torch
 
 
-State = tp.Dict[str, torch.Tensor]
+class Resetable(tp.Protocol):
+    def reset(self) -> None:
+        pass
+
+State = tp.TypeVar('State', bound=Resetable)
 
 
-class StreamingModule(nn.Module):
+class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
     """Common API for streaming components.
 
     Each streaming component has a streaming state, which is just a dict[str, Tensor].
@@ -49,115 +55,146 @@ class StreamingModule(nn.Module):
 
     def __init__(self) -> None:
         super().__init__()
-        self._streaming_state: State = {}
-        self._is_streaming = False
+        self._streaming_state: State | None = None
+        self._streaming_propagate: bool = True
+
+    @property
+    def is_streaming(self):
+        return self._streaming_state is not None
+
+    def set_streaming_propagate(self, streaming_propagate: bool):
+        self._streaming_propagate = streaming_propagate
 
     def _apply_named_streaming(self, fn: tp.Any):
-        for name, module in self.named_modules():
+        def _handle_module(prefix: str, module: nn.Module):
+            propagate = True
             if isinstance(module, StreamingModule):
-                fn(name, module)
+                if module._streaming_propagate:
+                    fn(prefix, module)
+                else:
+                    propagate = False
+            if propagate:
+                for name, child in module.named_children():
+                    _handle_module(prefix + "." + name, child)
 
-    def _set_streaming(self, streaming: bool):
-        def _set_streaming(name, module):
-            module._is_streaming = streaming
+        _handle_module('', self)
+        for name, child in self.named_children():
+            _handle_module(name, child)
 
-        self._apply_named_streaming(_set_streaming)
+    def _start_streaming(self, batch_size: int):
+        def _start_streaming(name: str, module: StreamingModule):
+            module._streaming_state = module._init_streaming_state(batch_size)
+
+        self._apply_named_streaming(_start_streaming)
+
+    def _stop_streaming(self):
+        def _stop_streaming(name: str, module: StreamingModule):
+            module._streaming_state = None
+
+        self._apply_named_streaming(_stop_streaming)
+
+    @abc.abstractmethod
+    def _init_streaming_state(self, batch_size: int) -> State:
+        ...
+
+    def streaming_forever(self, batch_size: int):
+        self._start_streaming(batch_size)
 
     @contextmanager
-    def streaming(self):
+    def streaming(self, batch_size: int):
         """Context manager to enter streaming mode. Reset streaming state on exit."""
-        self._set_streaming(True)
+
+        self._start_streaming(batch_size)
         try:
             yield
         finally:
-            self._set_streaming(False)
-            self.reset_streaming()
+            self._stop_streaming()
 
     def reset_streaming(self):
         """Reset the streaming state."""
-
         def _reset(name: str, module: StreamingModule):
-            module._streaming_state.clear()
-
+            state = module._streaming_state
+            if state is None:
+                raise ValueError(f"Trying to reset streaming, but {name} wasn't streaming.")
+            state.reset()
         self._apply_named_streaming(_reset)
 
-    def get_streaming_state(self) -> State:
-        """Return the streaming state, including that of sub-modules."""
-        state: State = {}
+    def get_streaming_state(self) -> dict[str, tp.Any]:
+        """Return the complete streaming state, including that of sub-modules."""
+        state: dict[str, tp.Any] = {}
 
         def _add(name: str, module: StreamingModule):
-            if name:
-                name += "."
-            for key, value in module._streaming_state.items():
-                state[name + key] = value
+            state[name] = module._streaming_state
 
         self._apply_named_streaming(_add)
         return state
 
-    def set_streaming_state(self, state: State):
+    def set_streaming_state(self, state: dict[str, tp.Any]):
         """Set the streaming state, including that of sub-modules."""
         state = dict(state)
-
         def _set(name: str, module: StreamingModule):
-            if name:
-                name += "."
-            module._streaming_state.clear()
-            for key, value in list(state.items()):
-                # complexity is not ideal here, but probably fine.
-                if key.startswith(name):
-                    local_key = key[len(name) :]
-                    if "." not in local_key:
-                        module._streaming_state[local_key] = value
-                        del state[key]
+            if name in state:
+                module._streaming_state = state[name]
+                state.pop(name)
+            else:
+                raise RuntimeError(f"Expected to find a streaming state for {name}.")
 
         self._apply_named_streaming(_set)
-        assert len(state) == 0, list(state.keys())
-
-    def flush(self, x: tp.Optional[torch.Tensor] = None):
-        """Flush any remaining outputs that were waiting for completion.
-        Typically, for convolutions, this will add the final padding
-        and process the last buffer.
-
-        This should take an optional argument `x`, which will be provided
-        if a module before this one in the streaming pipeline has already
-        spitted out a flushed out buffer.
-        """
-        if x is None:
-            return None
-        else:
-            return self(x)
+        if state:
+            raise RuntimeError(f"Some states were not consumed: {list(state.keys())}")
 
 
-class StreamingAdd(StreamingModule):
+@dataclass
+class _NullState:
+    pass
+
+    def reset(self) -> None:
+        pass
+
+
+class StreamingContainer(StreamingModule[_NullState]):
+    def _init_streaming_state(self, batch_size: int) -> _NullState:
+        return _NullState()
+
+@dataclass
+class _StreamingAddState:
+    previous_x: torch.Tensor | None = None
+    previous_y: torch.Tensor | None = None
+
+    def reset(self):
+        self.previous_x = None
+        self.previous_y = None
+
+
+class StreamingAdd(StreamingModule[_StreamingAddState]):
+    def _init_streaming_state(self, batch_size: int) -> _StreamingAddState:
+        return _StreamingAddState()
+
     def forward(self, x: torch.Tensor, y: torch.Tensor):
-        if self._is_streaming:
-            prev_x = self._streaming_state.get("previous_x")
-            prev_y = self._streaming_state.get("previous_y")
+        if self._streaming_state is None:
+            return x + y
+        else:
+            prev_x = self._streaming_state.previous_x
+            prev_y = self._streaming_state.previous_y
             if prev_x is not None:
                 x = torch.cat([prev_x, x], dim=-1)
             if prev_y is not None:
                 y = torch.cat([prev_y, y], dim=-1)
             m_l = min(x.shape[-1], y.shape[-1])
-            self._streaming_state["previous_x"] = x[..., m_l:]
-            self._streaming_state["previous_y"] = y[..., m_l:]
+            self._streaming_state.previous_x = x[..., m_l:]
+            self._streaming_state.previous_y = y[..., m_l:]
             return x[..., :m_l] + y[..., :m_l]
-        else:
-            return x + y
 
 
-class StreamingSequential(nn.Sequential, StreamingModule):
-    """A streaming compatible alternative of `nn.Sequential`."""
+@dataclass
+class _StreamingConvState:
+    previous: torch.Tensor | None = None
 
-    def flush(self, x: tp.Optional[torch.Tensor] = None):
-        for module in self:
-            if isinstance(module, StreamingModule):
-                x = module.flush(x)
-            elif x is not None:
-                x = module(x)
-        return x
+    def reset(self):
+        self.previous = None
 
 
-class StreamingConv1d(nn.Conv1d, StreamingModule):
+class RawStreamingConv1d(nn.Conv1d, StreamingModule[_StreamingConvState]):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         assert self.padding[0] == 0, "Padding should be handled outside."
@@ -165,17 +202,21 @@ class StreamingConv1d(nn.Conv1d, StreamingModule):
             self.stride[0] <= self.kernel_size[0]
         ), "stride must be less than kernel_size."
 
-    def forward(self, x: torch.Tensor):
+    def _init_streaming_state(self, batch_size: int) -> _StreamingConvState:
+        return _StreamingConvState()
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         stride = self.stride[0]
         # Effective kernel size accounting for dilation.
         kernel = (self.kernel_size[0] - 1) * self.dilation[0] + 1
-        if self._is_streaming:
-            # Due to the potential overlap, we potentially have some cache
-            # of the previous time steps.
-            previous = self._streaming_state.get("previous")
+        if self._streaming_state is None:
+            return super().forward(input)
+        else:
+            # Due to the potential overlap, we might have some cache of the previous time steps.
+            previous = self._streaming_state.previous
             if previous is not None:
-                x = torch.cat([previous, x], dim=-1)
-            B, C, T = x.shape
+                input = torch.cat([previous, input], dim=-1)
+            B, C, T = input.shape
             # We now compute the number of full convolution frames, i.e. the frames
             # that are ready to be computed.
             num_frames = max(0, int(math.floor((T - kernel) / stride) + 1))
@@ -183,42 +224,27 @@ class StreamingConv1d(nn.Conv1d, StreamingModule):
             # We will compute `num_frames` outputs, and we are advancing by `stride`
             # for each of the frame, so we know the data before `stride * num_frames`
             # will never be used again.
-            self._streaming_state["previous"] = x[..., offset:]
+            self._streaming_state.previous = input[..., offset:]
             if num_frames > 0:
                 input_length = (num_frames - 1) * stride + kernel
-                out = super().forward(x[..., :input_length])
+                out = super().forward(input[..., :input_length])
             else:
                 # Not enough data as this point to output some new frames.
                 out = torch.empty(
-                    B, self.out_channels, 0, device=x.device, dtype=x.dtype
+                    B, self.out_channels, 0, device=input.device, dtype=input.dtype
                 )
             return out
-        else:
-            return super().forward(x)
-
-    def flush(self, x: tp.Optional[torch.Tensor] = None):
-        assert self._is_streaming
-        previous = self._streaming_state.pop("previous")
-        if x is None:
-            if previous is None:
-                return None
-            else:
-                x = previous
-        else:
-            if previous is not None:
-                x = torch.cat([previous, x], dim=-1)
-
-        B, C, T = x.shape
-        stride = self.stride[0]
-        kernel = self.kernel_size[0]
-        # Using ceil instead of floor here, as we will pad to the required length.
-        num_frames = int(math.ceil((T - kernel) / stride) + 1)
-        full_length = (num_frames - 1) * stride + kernel
-        x = torch.nn.functional.pad(x, (0, full_length - T))
-        return super().__call__(x)
 
 
-class StreamingConvTranspose1d(nn.ConvTranspose1d, StreamingModule):
+@dataclass
+class _StreamingConvTrState:
+    partial: torch.Tensor | None = None
+
+    def reset(self):
+        self.partial = None
+
+
+class RawStreamingConvTranspose1d(nn.ConvTranspose1d, StreamingModule[_StreamingConvTrState]):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         assert self.padding[0] == 0, "Padding should be handled outside."
@@ -228,18 +254,21 @@ class StreamingConvTranspose1d(nn.ConvTranspose1d, StreamingModule):
         ), "stride must be less than kernel_size."
         assert self.output_padding[0] == 0, "Output padding not supported."
 
-    def forward(self, x: torch.Tensor):
+    def _init_streaming_state(self, batch_size: int) -> _StreamingConvTrState:
+        return _StreamingConvTrState()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore
         B, C, T = x.shape
         stride = self.stride[0]
         kernel = self.kernel_size[0]
-        if self._is_streaming:
+        if self._streaming_state is None:
+            return super().forward(x)
+        else:
             if T == 0:
-                return torch.empty(
-                    B, self.out_channels, 0, device=x.device, dtype=x.dtype
-                )
+                return torch.empty(B, self.out_channels, 0, device=x.device, dtype=x.dtype)
             out = super().forward(x)
             OT = out.shape[-1]
-            partial = self._streaming_state.get("partial")
+            partial = self._streaming_state.partial
             if partial is not None:
                 # Due to the potential overlap, the rightmost output of the conv transpose is not
                 # ready to be output, as it will receive contributions from the next input frames.
@@ -258,23 +287,9 @@ class StreamingConvTranspose1d(nn.ConvTranspose1d, StreamingModule):
             invalid_steps = kernel - stride
             partial = out[..., OT - invalid_steps :]
             out = out[..., : OT - invalid_steps]
-            self._streaming_state["partial"] = partial
+            self._streaming_state.partial = partial
             return out
-        else:
-            return super().forward(x)
 
-    def flush(self, x: tp.Optional[torch.Tensor] = None):
-        assert self._is_streaming
-        partial = self._streaming_state.pop("partial")
-        if x is None or x.shape[-1] == 0:
-            if partial is None:
-                return None
-            return partial
-        else:
-            out = super().__call__(x)
-            if partial is not None:
-                out[..., : partial.shape[-1]] += partial
-            return out
 
 
 def test():
@@ -298,33 +313,34 @@ def test():
     for kernel, stride in itertools.product(kernel_sizes, strides):
         if stride > kernel:
             continue
-        conv = StreamingConv1d(chin, chout, kernel, stride).to(device)
-        convtr = StreamingConvTranspose1d(chout, chin, kernel, stride).to(device)
+        conv = RawStreamingConv1d(chin, chout, kernel, stride).to(device)
+        convtr = RawStreamingConvTranspose1d(chout, chin, kernel, stride).to(device)
 
         for length in [4, 8, 32, 54, 65, 128, 1043]:
             print(f"ksize {kernel} strides {stride} len {length}")
             if length < kernel:
                 continue
-            x = torch.randn(3, chin, length).to(device)
+            batch_size = 3
+            x = torch.randn(batch_size, chin, length).to(device)
             y = conv(x)
             z = convtr(y)
             for chunk_size in [1, 3, 5, 8]:
                 ys = []
                 zs = []
-                with conv.streaming(), convtr.streaming():
+                with conv.streaming(batch_size), convtr.streaming(batch_size):
                     for offset in range(0, length, chunk_size):
                         chunk = x[..., offset : offset + chunk_size]
                         ys.append(conv(chunk))
                         zs.append(convtr(ys[-1]))
-                    zs.append(convtr.flush())
-                    y_flushed = conv.flush()
                 y_stream = torch.cat(ys, dim=-1)
                 z_stream = torch.cat(zs, dim=-1)
+                y = y[..., :y_stream.shape[-1]]
+                z = z[..., :z_stream.shape[-1]]
                 assert y.shape == y_stream.shape, (y.shape, y_stream.shape)
                 delta = (y_stream - y).norm() / y.norm()
-                assert delta <= 1e-12, delta
-                num_frames = int(math.ceil((length - kernel) / stride) + 1)
-                assert num_frames == y_stream.shape[-1] + y_flushed.shape[-1]
+                assert delta <= 1e-6, delta
+                num_frames = int((length - kernel) / stride) + 1
+                assert num_frames == y_stream.shape[-1]
 
                 assert z.shape == z_stream.shape, (z.shape, z_stream.shape)
                 delta = (z_stream - z).norm() / z.norm()

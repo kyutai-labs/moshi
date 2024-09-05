@@ -8,7 +8,7 @@ from einops import rearrange
 import torch
 from torch import nn
 
-from .conv import StreamableConv1d, StreamableConvTranspose1d
+from .conv import StreamingConv1d, StreamingConvTranspose1d
 
 
 class ConvDownsample1d(nn.Module):
@@ -40,7 +40,7 @@ class ConvDownsample1d(nn.Module):
             in_channels = 1
             out_channels = 1
 
-        self.conv = StreamableConv1d(
+        self.conv = StreamingConv1d(
             in_channels,
             out_channels,
             kernel_size=2 * stride,
@@ -92,7 +92,7 @@ class ConvTrUpsample1d(nn.Module):
             in_channels = 1
             out_channels = 1
 
-        self.convtr = StreamableConvTranspose1d(
+        self.convtr = StreamingConvTranspose1d(
             in_channels,
             out_channels,
             kernel_size=2 * stride,

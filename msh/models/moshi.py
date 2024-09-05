@@ -25,7 +25,6 @@ seanet_kwargs = {
     "kernel_size": 7,
     "residual_kernel_size": 3,
     "last_kernel_size": 3,
-    "lstm": 0,
     # We train using weight_norm but then the weights are pre-processed for inference so
     # that we can use a normal convolution.
     "norm": "none",
@@ -115,7 +114,6 @@ def get_encodec(filename: tp.Union[str, Path], device):
         sample_rate=SAMPLE_RATE,
         frame_rate=FRAME_RATE,
         encoder_frame_rate=SAMPLE_RATE / encoder.hop_length,
-        renormalize=False,
         causal=True,
         resample_method="conv",
         encoder_transformer=encoder_transformer,
@@ -135,12 +133,13 @@ def get_encodec(filename: tp.Union[str, Path], device):
 
 
 def get_lm(filename: tp.Union[str, Path], device):
+    dtype = torch.bfloat16
     model = msh.models.LMModel(
         device=device,
+        dtype=dtype,
         **lm_kwargs,
-    ).to(device=device)
+    ).to(device=device, dtype=dtype)
     model.eval()
-    model.to(torch.bfloat16)
     if _is_safetensors(filename):
         load_model(model, filename)
     else:
@@ -149,7 +148,4 @@ def get_lm(filename: tp.Union[str, Path], device):
             "cpu",
         )
         model.load_state_dict(pkg["fsdp_best_state"]["model"])
-    model.autocast = msh.utils.autocast.TorchAutocast(
-        enabled=True, dtype=torch.bfloat16, device_type=model.device.type
-    )
     return model
