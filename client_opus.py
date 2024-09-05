@@ -12,7 +12,7 @@ import sphn
 import sounddevice as sd
 import websockets
 
-from client_utils import AnyPrinter, Printer
+from client_utils import AnyPrinter, Printer, RawPrinter
 
 
 class Connection:

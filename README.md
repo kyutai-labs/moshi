@@ -147,7 +147,7 @@ maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 
 Then the model can be run with:
 ```bash
-PYTHONPATH=. python scripts/local_mlx.py  \
+PYTHONPATH=. python local_mlx.py  \
     --model ~/tmp/mimi_mlx_0abbed5f@100.q8.safetensors \
     --mimi ~/tmp/tokenizer-de0e421d-checkpoint40.safetensors \
     --quantized

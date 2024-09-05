@@ -5,21 +5,33 @@
 import argparse
 import asyncio
 import queue
+import sys
 import time
 import numpy as np
 import multiprocessing
 from pathlib import Path
 import sentencepiece
 import sounddevice as sd
+from enum import Enum
 
 import mlx.core as mx
 import mlx.nn as nn
 
+from client_utils import AnyPrinter, Printer, RawPrinter
 import mimi
 import msh_mlx
 
 SAMPLE_RATE = 24000
 CHANNELS = 1
+
+class PrinterType(Enum):
+    TOKEN = 1
+    PENDING = 2
+    INFO = 3
+    WARNING = 4
+    ERROR = 5
+    LAG = 6
+    HEADER = 7
 
 def full_warmup(audio_tokenizer, client_to_server, server_to_client):
     for i in range(4):
@@ -41,7 +53,7 @@ def full_warmup(audio_tokenizer, client_to_server, server_to_client):
             if data is not None:
                 break
 
-def server(client_to_server, server_to_client, args):
+def server(printer_q, client_to_server, server_to_client, args):
     model_file = args.model
     tokenizer_file = args.tokenizer
     if model_file is None:
@@ -49,7 +61,9 @@ def server(client_to_server, server_to_client, args):
     if tokenizer_file is None:
         tokenizer_file = str(Path.home() / "tmp" / "tokenizer_spm_32k_3.model")
     steps = args.steps
-    print(f"[SERVER] loading text tokenizer {tokenizer_file}")
+    def log(s):
+        printer_q.put_nowait((PrinterType.INFO, s))
+    log(f"[SERVER] loading text tokenizer {tokenizer_file}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
     mx.random.seed(299792458)
     lm_config = msh_mlx.models.config_v0_1()
@@ -58,12 +72,12 @@ def server(client_to_server, server_to_client, args):
     if args.quantized:
         nn.quantize(model, bits=8)
 
-    print(f"[SERVER] loading weights {model_file}")
+    log(f"[SERVER] loading weights {model_file}")
     model.load_weights(model_file, strict=True)
-    print("[SERVER] weights loaded")
+    log("[SERVER] weights loaded")
 
     model.warmup()
-    print("[SERVER] model warmed up")
+    log("[SERVER] model warmed up")
     gen = msh_mlx.models.LmGen(
         model=model,
         max_steps=steps + 5,
@@ -73,8 +87,13 @@ def server(client_to_server, server_to_client, args):
     )
 
     server_to_client.put("start")
+    log("[SERVER] connected!")
+    printed_header = False
     while True:
         data = client_to_server.get()
+        if not printed_header:
+            printed_header = True
+            printer_q.put_nowait((PrinterType.HEADER, ""))
         data = mx.array(data).transpose(1, 0)[:, :8]
         text_token = gen.step(data)
         text_token = text_token[0].item()
@@ -82,13 +101,15 @@ def server(client_to_server, server_to_client, args):
         if text_token not in (0, 3):
             _text = text_tokenizer.id_to_piece(text_token)
             _text = _text.replace("▁", " ")
-            print(_text, end='', flush=True)
+            printer_q.put_nowait((PrinterType.TOKEN, _text))
+        else:
+            printer_q.put_nowait((PrinterType.PENDING, ""))
         if audio_tokens is not None:
             audio_tokens = np.array(audio_tokens).astype(np.uint32)
             server_to_client.put_nowait(audio_tokens)
 
 
-def client(client_to_server, server_to_client, args):
+def client(printer_q, client_to_server, server_to_client, args):
     mimi_file = args.mimi
     if mimi_file is None:
         mimi_file = str(Path.home() / "tmp" / "tokenizer-de0e421d-checkpoint40.safetensors")
@@ -96,7 +117,7 @@ def client(client_to_server, server_to_client, args):
     output_queue = queue.Queue()
     audio_tokenizer = mimi.StreamTokenizer(mimi_file)
     start = server_to_client.get()
-    print(f"[CLIENT] received '{start}' from server, starting...")
+    printer_q.put_nowait((PrinterType.INFO, f"[CLIENT] received '{start}' from server, starting..."))
 
     full_warmup(audio_tokenizer, client_to_server, server_to_client)
 
@@ -161,13 +182,12 @@ def client(client_to_server, server_to_client, args):
         callback=on_output,
     )
 
-    print("starting the inference loop")
     async def go():
         with in_stream, out_stream:
             await asyncio.gather(recv_loop(), send_loop(), recv_loop2(), send_loop2())
     asyncio.run(go())
 
-def main():
+def main(printer: AnyPrinter):
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--model", type=str)
@@ -178,14 +198,37 @@ def main():
 
     client_to_server = multiprocessing.Queue()
     server_to_client = multiprocessing.Queue()
+    printer_q = multiprocessing.Queue()
 
     # Create two processes
-    p1 = multiprocessing.Process(target=client, args=(client_to_server, server_to_client, args))
-    p2 = multiprocessing.Process(target=server, args=(client_to_server, server_to_client, args))
+    subprocess_args= printer_q, client_to_server, server_to_client, args
+    p1 = multiprocessing.Process(target=client, args=subprocess_args)
+    p2 = multiprocessing.Process(target=server, args=subprocess_args)
 
     # Start the processes
     p1.start()
     p2.start()
+
+    while p1.is_alive() and p2.is_alive():
+        time.sleep(0.01)
+        try:
+            ty, value = printer_q.get_nowait()
+            if ty == PrinterType.TOKEN:
+                printer.print_token(value)
+            elif ty == PrinterType.PENDING:
+                printer.print_pending()
+            elif ty == PrinterType.INFO:
+                printer.log("info", value)
+            elif ty == PrinterType.WARNING:
+                printer.log("warning", value)
+            elif ty == PrinterType.ERROR:
+                printer.log("error", value)
+            elif ty == PrinterType.LAG:
+                printer.print_lag()
+            elif ty == PrinterType.HEADER:
+                printer.print_header()
+        except queue.Empty:
+            continue
 
     # Wait for both processes to finish
     p1.join()
@@ -193,5 +236,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    printer: AnyPrinter
+    if sys.stdout.isatty():
+        printer = Printer()
+    else:
+        printer = RawPrinter()
+    try:
+        main(printer)
+    except KeyboardInterrupt:
+        printer.log("warning", "Interrupting, exiting connection.")
+    printer.log("info", "All done!")
 
