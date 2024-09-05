@@ -12,6 +12,7 @@ from pathlib import Path
 import sentencepiece
 import typing as tp
 import os
+import shutil
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -229,7 +230,7 @@ def main():
             raise ValueError("Set MTL_CAPTURE_ENABLED to record a trace")
         trace_file = Path(args.trace_file)
         if trace_file.exists():
-            trace_file.unlink()
+            shutil.rmtree(trace_file)
         mx.metal.start_capture(args.trace_file)
 
     if args.mode == "text":
