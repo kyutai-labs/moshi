@@ -89,24 +89,27 @@ def server(printer_q, client_to_server, server_to_client, args):
     server_to_client.put("start")
     log("[SERVER] connected!")
     printed_header = False
-    while True:
-        data = client_to_server.get()
-        if not printed_header:
-            printed_header = True
-            printer_q.put_nowait((PrinterType.HEADER, ""))
-        data = mx.array(data).transpose(1, 0)[:, :8]
-        text_token = gen.step(data)
-        text_token = text_token[0].item()
-        audio_tokens = gen.last_audio_tokens()
-        if text_token not in (0, 3):
-            _text = text_tokenizer.id_to_piece(text_token)
-            _text = _text.replace("▁", " ")
-            printer_q.put_nowait((PrinterType.TOKEN, _text))
-        else:
-            printer_q.put_nowait((PrinterType.PENDING, ""))
-        if audio_tokens is not None:
-            audio_tokens = np.array(audio_tokens).astype(np.uint32)
-            server_to_client.put_nowait(audio_tokens)
+    try:
+        while True:
+            data = client_to_server.get()
+            if not printed_header:
+                printed_header = True
+                printer_q.put_nowait((PrinterType.HEADER, ""))
+            data = mx.array(data).transpose(1, 0)[:, :8]
+            text_token = gen.step(data)
+            text_token = text_token[0].item()
+            audio_tokens = gen.last_audio_tokens()
+            if text_token not in (0, 3):
+                _text = text_tokenizer.id_to_piece(text_token)
+                _text = _text.replace("▁", " ")
+                printer_q.put_nowait((PrinterType.TOKEN, _text))
+            else:
+                printer_q.put_nowait((PrinterType.PENDING, ""))
+            if audio_tokens is not None:
+                audio_tokens = np.array(audio_tokens).astype(np.uint32)
+                server_to_client.put_nowait(audio_tokens)
+    except KeyboardInterrupt:
+        pass
 
 
 def client(printer_q, client_to_server, server_to_client, args):
@@ -185,7 +188,10 @@ def client(printer_q, client_to_server, server_to_client, args):
     async def go():
         with in_stream, out_stream:
             await asyncio.gather(recv_loop(), send_loop(), recv_loop2(), send_loop2())
-    asyncio.run(go())
+    try:
+        asyncio.run(go())
+    except KeyboardInterrupt:
+        pass
 
 def main(printer: AnyPrinter):
     parser = argparse.ArgumentParser()
@@ -209,30 +215,36 @@ def main(printer: AnyPrinter):
     p1.start()
     p2.start()
 
-    while p1.is_alive() and p2.is_alive():
-        time.sleep(0.01)
-        try:
-            ty, value = printer_q.get_nowait()
-            if ty == PrinterType.TOKEN:
-                printer.print_token(value)
-            elif ty == PrinterType.PENDING:
-                printer.print_pending()
-            elif ty == PrinterType.INFO:
-                printer.log("info", value)
-            elif ty == PrinterType.WARNING:
-                printer.log("warning", value)
-            elif ty == PrinterType.ERROR:
-                printer.log("error", value)
-            elif ty == PrinterType.LAG:
-                printer.print_lag()
-            elif ty == PrinterType.HEADER:
-                printer.print_header()
-        except queue.Empty:
-            continue
+    try:
+        while p1.is_alive() and p2.is_alive():
+            time.sleep(0.01)
+            try:
+                ty, value = printer_q.get_nowait()
+                if ty == PrinterType.TOKEN:
+                    printer.print_token(value)
+                elif ty == PrinterType.PENDING:
+                    printer.print_pending()
+                elif ty == PrinterType.INFO:
+                    printer.log("info", value)
+                elif ty == PrinterType.WARNING:
+                    printer.log("warning", value)
+                elif ty == PrinterType.ERROR:
+                    printer.log("error", value)
+                elif ty == PrinterType.LAG:
+                    printer.print_lag()
+                elif ty == PrinterType.HEADER:
+                    printer.print_header()
+            except queue.Empty:
+                continue
+    except KeyboardInterrupt:
+        printer.log("warning", "Interrupting, exiting connection.")
+        p1.terminate()
+        p2.terminate()
 
     # Wait for both processes to finish
     p1.join()
     p2.join()
+    printer.log("info", "All done!")
 
 
 if __name__ == "__main__":
@@ -241,9 +253,5 @@ if __name__ == "__main__":
         printer = Printer()
     else:
         printer = RawPrinter()
-    try:
-        main(printer)
-    except KeyboardInterrupt:
-        printer.log("warning", "Interrupting, exiting connection.")
-    printer.log("info", "All done!")
+    main(printer)
 
