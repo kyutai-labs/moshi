@@ -146,13 +146,19 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
         mimi.write_wav("out.wav", all_out_pcm, sample_rate=24000)
 
     await asyncio.gather(recv_loop(), send_loop(), model_loop())
+    # Discard the first times for sending and processing the first slice as this does not
+    # result in an output.
     stats = {
-        "send_times": stats.send_times,
+        "send_times": stats.send_times[1:],
         "recv_times": stats.recv_times,
-        "model_times": stats.model_times,
+        "model_times": stats.model_times[1:],
     }
     with open('timings.json', 'w') as json_file:
         json.dump(stats, json_file)
+    model_times = np.array(stats["model_times"])
+    model_times = model_times[:, 1] - model_times[:, 0]
+    mean, stdev, min_v, max_v = np.mean(model_times), np.std(model_times), np.min(model_times), np.max(model_times)
+    print(f"model times, mean: {1000 * mean:.2f}ms, std: {1000 * stdev:.2f}ms, min: {1000 * min_v:.2f}ms, max: {1000 * max_v:.2f}ms")
 
 
 
