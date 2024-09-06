@@ -192,7 +192,7 @@ def main():
     parser.add_argument("--mimi", type=str)
     parser.add_argument("--trace-file", type=str)
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--quantized", action="store_true")
+    parser.add_argument("--quantized", type=int)
     parser.add_argument("--steps", default=100, type=int)
     parser.add_argument("mode", default="text", type=str)
     args = parser.parse_args()
@@ -215,8 +215,8 @@ def main():
 
     model = msh_mlx.models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
-    if args.quantized:
-        nn.quantize(model, bits=8)
+    if args.quantized is not None:
+        nn.quantize(model, bits=args.quantized)
 
     if args.verbose:
         tree_map_with_path(lambda p, t: print(p, t.shape), model.parameters())
