@@ -69,8 +69,8 @@ def server(printer_q, client_to_server, server_to_client, args):
     lm_config = msh_mlx.models.config_v0_1()
     model = msh_mlx.models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
-    if args.quantized:
-        nn.quantize(model, bits=8)
+    if args.quantized is not None:
+        nn.quantize(model, bits=args.quantized)
 
     log(f"[SERVER] loading weights {model_file}")
     model.load_weights(model_file, strict=True)
@@ -192,7 +192,7 @@ def main(printer: AnyPrinter):
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--model", type=str)
     parser.add_argument("--mimi", type=str)
-    parser.add_argument("--quantized", action="store_true")
+    parser.add_argument("--quantized", type=int)
     parser.add_argument("--steps", default=2500, type=int)
     args = parser.parse_args()
 

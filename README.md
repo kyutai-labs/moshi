@@ -145,5 +145,5 @@ Then the model can be run with:
 PYTHONPATH=. python local_mlx.py  \
     --model ~/tmp/mimi_mlx_0abbed5f@100.q8.safetensors \
     --mimi ~/tmp/tokenizer-de0e421d-checkpoint40.safetensors \
-    --quantized
+    --quantized 8
 ```
