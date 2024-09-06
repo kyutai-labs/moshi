@@ -116,8 +116,8 @@ def server(printer_q, client_to_server, server_to_client, args):
                 printer_q.put_nowait((PrinterType.PENDING, ""))
             if audio_tokens is not None:
                 audio_tokens = np.array(audio_tokens).astype(np.uint32)
-                printer_q.put_nowait((PrinterType.EVENT, "s_put"))
                 server_to_client.put_nowait(audio_tokens)
+            printer_q.put_nowait((PrinterType.EVENT, "s_put"))
     except KeyboardInterrupt:
         pass
 
@@ -259,8 +259,33 @@ def main(printer: AnyPrinter):
         p2.terminate()
 
     printer.log("info", "saving trace")
+    chrome_events = []
+    for e in events:
+        name, ph = "unk", "X"
+        event = e["event"]
+        if event == "s_get":
+            name, ph = "model", "B"
+        elif event == "s_put":
+            name, ph = "model", "E"
+        elif event == "encode":
+            name, ph = "encode", "B"
+        elif event == "encoded":
+            name, ph = "encode", "E"
+        elif event == "decode":
+            name, ph = "decode", "B"
+        elif event == "decoded":
+            name, ph = "decode", "E"
+        chrome_events.append({
+            "name": name,
+            "cat": "",
+            "ph": ph,
+            "ts": e["time"] * 1e6,
+            "pid": 1,
+            "tid": 1,
+            "args": {}
+        })
     with open("mlx-trace.json", "w") as fobj:
-        json.dump(events, fobj)
+        json.dump(chrome_events, fobj)
 
     # Wait for both processes to finish
     p1.join()
