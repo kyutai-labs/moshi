@@ -261,27 +261,33 @@ def main(printer: AnyPrinter):
     printer.log("info", "saving trace")
     chrome_events = []
     for e in events:
-        name, ph = "unk", "X"
+        name, ph, tid = "unk", "X", 1
         event = e["event"]
         if event == "s_get":
             name, ph = "model", "B"
+            tid = 3
         elif event == "s_put":
             name, ph = "model", "E"
+            tid = 3
         elif event == "encode":
             name, ph = "encode", "B"
+            tid = 1
         elif event == "encoded":
             name, ph = "encode", "E"
+            tid = 1
         elif event == "decode":
             name, ph = "decode", "B"
+            tid = 2
         elif event == "decoded":
             name, ph = "decode", "E"
+            tid = 2
         chrome_events.append({
             "name": name,
             "cat": "",
             "ph": ph,
             "ts": e["time"] * 1e6,
             "pid": 1,
-            "tid": 1,
+            "tid": tid,
             "args": {}
         })
     with open("mlx-trace.json", "w") as fobj:
