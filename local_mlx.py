@@ -4,6 +4,7 @@
 
 import argparse
 import asyncio
+import json
 import queue
 import sys
 import time
@@ -13,6 +14,7 @@ from pathlib import Path
 import sentencepiece
 import sounddevice as sd
 from enum import Enum
+import typing as tp
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -24,6 +26,11 @@ import msh_mlx
 SAMPLE_RATE = 24000
 CHANNELS = 1
 
+class Stats:
+    send_times: tp.List[float] = []
+    model_times: tp.List[tp.Tuple[float, float]] = []
+    recv_times: tp.List[float] = []
+
 class PrinterType(Enum):
     TOKEN = 1
     PENDING = 2
@@ -32,6 +39,7 @@ class PrinterType(Enum):
     ERROR = 5
     LAG = 6
     HEADER = 7
+    EVENT = 8
 
 def full_warmup(audio_tokenizer, client_to_server, server_to_client):
     for i in range(4):
@@ -92,6 +100,7 @@ def server(printer_q, client_to_server, server_to_client, args):
     try:
         while True:
             data = client_to_server.get()
+            printer_q.put_nowait((PrinterType.EVENT, "s_get"))
             if not printed_header:
                 printed_header = True
                 printer_q.put_nowait((PrinterType.HEADER, ""))
@@ -107,6 +116,7 @@ def server(printer_q, client_to_server, server_to_client, args):
                 printer_q.put_nowait((PrinterType.PENDING, ""))
             if audio_tokens is not None:
                 audio_tokens = np.array(audio_tokens).astype(np.uint32)
+                printer_q.put_nowait((PrinterType.EVENT, "s_put"))
                 server_to_client.put_nowait(audio_tokens)
     except KeyboardInterrupt:
         pass
@@ -130,6 +140,7 @@ def client(printer_q, client_to_server, server_to_client, args):
             await asyncio.sleep(0.001)
             try:
                 pcm_data = input_queue.get(block=False)
+                printer_q.put_nowait((PrinterType.EVENT, "encode"))
                 audio_tokenizer.encode(pcm_data)
             except queue.Empty:
                 continue
@@ -140,6 +151,7 @@ def client(printer_q, client_to_server, server_to_client, args):
             if data is None:
                 await asyncio.sleep(0.001)
                 continue
+            printer_q.put_nowait((PrinterType.EVENT, "decoded"))
             output_queue.put_nowait(data)
 
     async def send_loop2():
@@ -148,6 +160,7 @@ def client(printer_q, client_to_server, server_to_client, args):
             if data is None:
                 await asyncio.sleep(0.001)
                 continue
+            printer_q.put_nowait((PrinterType.EVENT, "encoded"))
             client_to_server.put_nowait(data)
 
     async def recv_loop2():
@@ -157,6 +170,7 @@ def client(printer_q, client_to_server, server_to_client, args):
             except queue.Empty:
                 await asyncio.sleep(0.001)
                 continue
+            printer_q.put_nowait((PrinterType.EVENT, "decode"))
             audio_tokenizer.decode(audio_tokens)
 
     def on_input(in_data, frames, time, status):
@@ -214,10 +228,11 @@ def main(printer: AnyPrinter):
     # Start the processes
     p1.start()
     p2.start()
+    events = []
 
     try:
         while p1.is_alive() and p2.is_alive():
-            time.sleep(0.01)
+            time.sleep(0.001)
             try:
                 ty, value = printer_q.get_nowait()
                 if ty == PrinterType.TOKEN:
@@ -234,12 +249,18 @@ def main(printer: AnyPrinter):
                     printer.print_lag()
                 elif ty == PrinterType.HEADER:
                     printer.print_header()
+                elif ty == PrinterType.EVENT:
+                    events.append({"event": value, "time": time.time() })
             except queue.Empty:
                 continue
     except KeyboardInterrupt:
         printer.log("warning", "Interrupting, exiting connection.")
         p1.terminate()
         p2.terminate()
+
+    printer.log("info", "saving trace")
+    with open("mlx-trace.json", "w") as fobj:
+        json.dump(events, fobj)
 
     # Wait for both processes to finish
     p1.join()

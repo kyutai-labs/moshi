@@ -178,3 +178,4 @@ log.*
 laurent/cuda-test/check
 client/node_modules
 timings.json
+mlx-trace.json
