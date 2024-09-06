@@ -69,7 +69,6 @@ pub async fn run(args: &crate::BenchmarkArgs, config: &Config) -> Result<()> {
         text_topk: None,
         audio_temperature: None,
         audio_topk: None,
-        worker_auth_id: None,
         max_steps: Some(args.steps),
         audio_seed: Some(299792458),
         text_seed: Some(299792458),

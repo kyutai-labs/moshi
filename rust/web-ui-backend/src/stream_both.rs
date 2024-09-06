@@ -86,7 +86,6 @@ pub struct SessionConfigReq {
     pub text_topk: Option<usize>,
     pub audio_temperature: Option<f64>,
     pub audio_topk: Option<usize>,
-    pub worker_auth_id: Option<u64>,
     pub max_steps: Option<usize>,
     pub audio_seed: Option<u64>,
     pub text_seed: Option<u64>,
