@@ -5,17 +5,12 @@ from safetensors.torch import save_file
 
 import torch
 
-USER = os.environ["USER"]
-OUT_FOLDER = Path(f"/lustre/scwpod02/client/kyutai/{USER}/tmp/mimi")
-XP_FOLDER = "/lustre/scwpod02/client/kyutai/{user}/mimi_exp/xps"
-
 DEPFORMER_LAYERS = 6
 
 
 def import_model(in_path: Path, out_path: Path) -> None:
     pkg = torch.load(in_path, map_location=torch.device("cpu"))
     model = pkg["fsdp_best_state"]["model"]
-    # For mimi inference, we trim the depformer layer that are unused.
     for idx in range(DEPFORMER_LAYERS):
         in_proj_key = f"depformer.layers.{idx}.self_attn.in_proj_weight"
         in_proj = model[in_proj_key]
@@ -24,6 +19,7 @@ def import_model(in_path: Path, out_path: Path) -> None:
         out_proj = model[out_proj_key]
         model[out_proj_key] = out_proj[: out_proj.shape[0] // 2]
 
+    # For mimi inference, we trim the depformer layer that are unused.
     for dep_idx in range(7, 15):
         del model[f"depformer_emb.{dep_idx}.weight"]
     for dep_idx in range(8, 16):
