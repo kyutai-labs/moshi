@@ -181,15 +181,19 @@ def client(printer_q, client_to_server, server_to_client, args):
         samplerate=SAMPLE_RATE, channels=CHANNELS, blocksize=1920, callback=on_input
     )
 
+    cnt_output = 0
     def on_output(out_data, frames, time, status):
+        nonlocal cnt_output
         assert out_data.shape == (1920, 1), out_data.shape
+        cnt_output += 1
         try:
             pcm_data = output_queue.get(block=False)
             # TODO: handle other shapes by using some form of fifo/ring buffer.
             assert pcm_data.shape == (1920,), pcm_data.shape
             out_data[:, 0] = pcm_data
         except queue.Empty:
-            printer_q.put_nowait((PrinterType.LAG, ""))
+            if cnt_output > 3:
+                printer_q.put_nowait((PrinterType.LAG, ""))
             out_data.fill(0)
 
 
@@ -248,6 +252,7 @@ def main(printer: AnyPrinter):
                     printer.log("error", value)
                 elif ty == PrinterType.LAG:
                     printer.print_lag()
+                    events.append({"event": "lag", "time": time.time() })
                 elif ty == PrinterType.HEADER:
                     printer.print_header()
                 elif ty == PrinterType.EVENT:
@@ -281,6 +286,9 @@ def main(printer: AnyPrinter):
             tid = 2
         elif event == "decoded":
             name, ph = "decode", "E"
+            tid = 2
+        elif event == "lag":
+            name, ph = "lag", "i"
             tid = 2
         chrome_events.append({
             "name": name,
