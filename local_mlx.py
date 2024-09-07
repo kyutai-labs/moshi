@@ -189,6 +189,7 @@ def client(printer_q, client_to_server, server_to_client, args):
             assert pcm_data.shape == (1920,), pcm_data.shape
             out_data[:, 0] = pcm_data
         except queue.Empty:
+            printer_q.put_nowait((PrinterType.LAG, ""))
             out_data.fill(0)
 
 
