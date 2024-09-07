@@ -40,6 +40,7 @@ class PrinterType(Enum):
     LAG = 6
     HEADER = 7
     EVENT = 8
+    QSIZE = 9
 
 def full_warmup(audio_tokenizer, client_to_server, server_to_client):
     for i in range(4):
@@ -182,10 +183,15 @@ def client(printer_q, client_to_server, server_to_client, args):
     )
 
     cnt_output = 0
+    last_qsize = 0
     def on_output(out_data, frames, time, status):
-        nonlocal cnt_output
+        nonlocal cnt_output, last_qsize
         assert out_data.shape == (1920, 1), out_data.shape
         cnt_output += 1
+        qsize = output_queue.qsize()
+        if last_qsize != qsize:
+            last_qsize = qsize
+            printer_q.put_nowait((PrinterType.QSIZE, qsize))
         try:
             pcm_data = output_queue.get(block=False)
             # TODO: handle other shapes by using some form of fifo/ring buffer.
@@ -257,6 +263,8 @@ def main(printer: AnyPrinter):
                     printer.print_header()
                 elif ty == PrinterType.EVENT:
                     events.append({"event": value, "time": time.time() })
+                elif ty == PrinterType.QSIZE:
+                    events.append({"event": "qsize", "qsize": value, "time": time.time() })
             except queue.Empty:
                 continue
     except KeyboardInterrupt:
@@ -267,7 +275,7 @@ def main(printer: AnyPrinter):
     printer.log("info", "saving trace")
     chrome_events = []
     for e in events:
-        name, ph, tid = "unk", "X", 1
+        name, ph, tid, args = "unk", "X", 1, {}
         event = e["event"]
         if event == "s_get":
             name, ph = "model", "B"
@@ -290,6 +298,12 @@ def main(printer: AnyPrinter):
         elif event == "lag":
             name, ph = "lag", "i"
             tid = 2
+        elif event == "qsize":
+            name, ph = "qsize", "C"
+            tid = 4
+            args["qsize"] = e["qsize"]
+        else:
+            printer.log("warning", f"unknown event {event}")
         chrome_events.append({
             "name": name,
             "cat": "",
@@ -297,7 +311,7 @@ def main(printer: AnyPrinter):
             "ts": e["time"] * 1e6,
             "pid": 1,
             "tid": tid,
-            "args": {}
+            "args": args,
         })
     with open("mlx-trace.json", "w") as fobj:
         json.dump(chrome_events, fobj)
