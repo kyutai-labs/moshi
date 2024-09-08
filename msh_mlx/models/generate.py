@@ -2,11 +2,9 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import mlx.core as mx
-import mlx.nn as nn
 
 from ..models import Lm
 from ..utils import sampling
@@ -32,7 +30,6 @@ class LmGen:
             dtype=mx.int32,
         )
         self.step_idx = 0
-        self.cache = None
         self.audio_padding_token = self.model.cfg.audio_padding_token
         self.audio_delays = self.model.cfg.audio_delays
         self.max_delay = max(self.audio_delays)
@@ -77,13 +74,12 @@ class LmGen:
         if (text_tokens == self.ungenerated_token).any():
             raise ValueError(f"ungenerated value in text tokens {self.step_idx}")
         assert text_tokens.shape == (1, 1), "invalid text-tokens shape"
-        text_tokens, audio_tokens, cache = self.model.sample(
+        text_tokens, audio_tokens = self.model.sample(
             text_tokens,
             audio_tokens,
             self.step_idx,
             self.text_sampler,
             self.audio_sampler,
-            self.cache,
         )
         assert text_tokens.shape == (1, ), "invalid output text-token shape"
         assert audio_tokens.shape == (8, ), "invalid output audio-token shape"
@@ -93,7 +89,6 @@ class LmGen:
             gen_idx = self.step_idx - delay
             if gen_idx >= 0:
                 self.gen_sequence[:, cb_idx + 1, gen_idx] = audio_tokens[cb_idx]
-        self.cache = cache
         self.step_idx += 1
         return text_tokens
 

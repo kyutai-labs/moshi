@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple
 import mlx.core as mx
 import mlx.nn as nn
 
+from ..modules.kv_cache import KVCache, RotatingKVCache
 from ..modules.transformer import Transformer, TransformerConfig
 from ..utils import sampling
 
@@ -74,14 +75,17 @@ class DepFormer(nn.Module):
         step_idx: int,
         sampler: sampling.Sampler,
         text_token: mx.array,
+        cache: list[KVCache] | list[RotatingKVCache],
     ) -> mx.array:
         tokens = []
         last_token = text_token
-        cache = None
+        # The cache is shared between the depformer slices but not persisted between sample calls.
+        for c in cache:
+            c.reset()
         for slice_idx, slice in enumerate(self.slices):
             last_token = last_token if step_idx > 0 or slice_idx in (0, 1, 9) else mx.array(2048)
             xs = slice.linear_in(main_transformer_out) + slice.emb(last_token)
-            xs, cache = slice.transformer(xs, cache=cache)
+            xs = slice.transformer(xs, cache=cache)
             logits = slice.linear_out(xs)
             last_token, _ = sampler(logits[0])
             tokens.append(last_token)
@@ -94,8 +98,8 @@ class Lm(nn.Module):
         super().__init__()
 
         dim = cfg.transformer.d_model
-        self.transformer = Transformer(cfg.transformer)
-        self.depformer = DepFormer(cfg)
+        self.transformer: Transformer = Transformer(cfg.transformer)
+        self.depformer: DepFormer = DepFormer(cfg)
         self.text_emb = nn.Embedding(cfg.text_in_vocab_size, dim)
         self.cfg: LmConfig = cfg
 
@@ -108,19 +112,20 @@ class Lm(nn.Module):
 
         self.text_linear = nn.Linear(dim, cfg.text_out_vocab_size, bias=False)
         self.audio_embs = [nn.Embedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)]
+        self.transformer_cache: list[RotatingKVCache] = self.transformer.make_rot_cache()
+        self.depformer_cache: list[KVCache] = self.depformer.slices[0].transformer.make_cache()
 
 
     def __call__(
         self,
         token_ids: mx.array,
-        cache: Optional[List[Tuple[mx.array, mx.array]]] = None,
-    ) -> Tuple[mx.array, List[Tuple[mx.array, mx.array]]]:
+    ) -> mx.array:
         # Note that this does not apply the depformer.
         xs = self.text_emb(token_ids)
-        transformer_out, upd_cache = self.transformer(xs, cache=cache)
+        transformer_out = self.transformer(xs, cache=self.transformer_cache)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
-        return text_logits, upd_cache
+        return text_logits
 
     def sample(
         self,
@@ -129,12 +134,11 @@ class Lm(nn.Module):
         step_idx: int,
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
-        cache: Optional[List[Tuple[mx.array, mx.array]]] = None,
-    ) -> Tuple[mx.array, mx.array, List[Tuple[mx.array, mx.array]]]:
+    ) -> Tuple[mx.array, mx.array]:
         xs = self.text_emb(text_token_ids)
         for (token_ids, emb) in zip(audio_token_ids, self.audio_embs):
             xs = xs + emb(token_ids)
-        transformer_out, upd_cache = self.transformer(xs, cache=cache)
+        transformer_out = self.transformer(xs, cache=self.transformer_cache)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
         text_token, _ = text_sampler(text_logits[:, 0])
@@ -143,17 +147,17 @@ class Lm(nn.Module):
             step_idx,
             audio_sampler,
             text_token,
+            self.depformer_cache,
         )
-        return text_token, audio_tokens, upd_cache
+        return text_token, audio_tokens
 
     def warmup(self):
-        text, audio, _ = self.sample(
+        text, audio = self.sample(
             mx.array([[32000]]),
             [mx.array([[0]])] * 8,
             0,
             text_sampler=sampling.Sampler(),
             audio_sampler=sampling.Sampler(),
-            cache=None,
         )
         if text.sum().item() == 42:
             raise ValueError(42)
