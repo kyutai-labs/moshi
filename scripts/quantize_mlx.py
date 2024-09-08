@@ -15,6 +15,7 @@ def main():
     parser.add_argument("original_weights", type=str)
     parser.add_argument("--out", type=str)
     parser.add_argument("--bits", type=int, default=8)
+    parser.add_argument("--group-size", type=int, default=64)
     args = parser.parse_args()
 
     model_file = args.original_weights
@@ -28,7 +29,7 @@ def main():
     model.load_weights(model_file, strict=True)
     print("weights loaded")
 
-    nn.quantize(model, bits=args.bits)
+    nn.quantize(model, bits=args.bits, group_size=args.group_size)
     print(f"saving the quantized q{args.bits} weights in {args.out}")
     model.save_weights(args.out)
 
