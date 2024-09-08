@@ -163,6 +163,8 @@ class Lm(nn.Module):
             raise ValueError(42)
         if audio.sum().item() == 42:
             raise ValueError(42)
+        for c in self.transformer_cache:
+            c.reset()
 
 
 
