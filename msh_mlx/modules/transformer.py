@@ -96,8 +96,8 @@ class Attention(nn.Module):
         k_len = k.shape[2]
         k_target_len = t + min(self.cfg.context, k_len - t)
         if k_target_len < k_len:
-            k = k[:, :, k_len - k_target_len]
-            v = v[:, :, k_len - k_target_len]
+            k = k[:, :, k_len - k_target_len:]
+            v = v[:, :, k_len - k_target_len:]
 
         cache = k, v
         xs = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale, mask=mask)
