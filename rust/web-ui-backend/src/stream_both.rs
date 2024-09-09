@@ -43,7 +43,7 @@ impl Config {
     pub fn requires_model_download(&self) -> bool {
         [&self.lm_model_file, &self.encodec_model_file, &self.text_tokenizer_file]
             .iter()
-            .all(|file| !std::path::Path::new(file).exists())
+            .any(|file| !std::path::Path::new(file).exists())
     }
 }
 
