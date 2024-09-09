@@ -1,5 +1,6 @@
 {
   "instance_name": "foo",
+  "hf_repo": "kmhf/msh-v0.1",
   "lm_model_file": "$HOME/tmp/mimi_rs_0abbed5f@100.q8.gguf",
   "text_tokenizer_file": "$HOME/tmp/tokenizer_spm_32k_3.model",
   "log_dir": "$HOME/tmp/moshi-logs",

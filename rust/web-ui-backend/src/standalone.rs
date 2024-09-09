@@ -4,8 +4,8 @@
 
 use anyhow::Result;
 use axum::extract::ws;
-use std::str::FromStr;
 use std::sync::Arc;
+use std::{path::Path, str::FromStr};
 
 use crate::{stream_both, StandaloneArgs};
 
@@ -38,9 +38,11 @@ impl Config {
     pub fn cert_file(&self, name: &str) -> Result<std::path::PathBuf> {
         let cert_dir = std::path::PathBuf::from(&self.cert_dir);
         let cert_file = cert_dir.join(name);
+
         if !cert_file.is_file() {
             anyhow::bail!("missing file {cert_file:?}");
         }
+
         Ok(cert_file)
     }
 }
@@ -113,7 +115,35 @@ pub async fn stream_handler(
     ws.on_upgrade(move |v| handle_socket(v, sm))
 }
 
+pub async fn download_from_hub(config: &stream_both::Config) -> Result<()> {
+    use hf_hub::api::tokio::ApiBuilder;
+
+    let base_path = Path::new(&config.lm_model_file);
+    let cache_path =
+        base_path.parent().ok_or_else(|| anyhow::anyhow!("lm_model_file has no parent"))?;
+
+    let api = ApiBuilder::new().with_cache_dir(cache_path.to_path_buf()).build()?;
+
+    let repo = api.model(config.hf_repo.clone());
+    for file in [&config.lm_model_file, &config.text_tokenizer_file, &config.encodec_model_file] {
+        let file_name = Path::new(file)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .ok_or_else(|| anyhow::anyhow!("{} has no file name", file))?;
+        repo.get(file_name).await?;
+    }
+
+    Ok(())
+}
+
 pub async fn run(args: &StandaloneArgs, config: &Config) -> Result<()> {
+    if config.cert_file("cert.pem").is_err() || config.cert_file("key.pem").is_err() {
+        let rcgen::CertifiedKey { cert, key_pair } =
+            rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
+        std::fs::write("cert.pem", cert.pem())?;
+        std::fs::write("key.pem", key_pair.serialize_pem())?;
+    }
+
     let cert_pem = config.cert_file("cert.pem")?;
     let key_pem = config.cert_file("key.pem")?;
     let tls_config =

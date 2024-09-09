@@ -119,6 +119,10 @@ async fn main() -> Result<()> {
                 args.silent,
             )?;
             tracing::info!("starting process with pid {}", std::process::id());
+
+            if config.stream.requires_model_download() {
+                standalone::download_from_hub(&config.stream).await?;
+            }
             standalone::run(&standalone_args, &config).await?;
         }
         Command::Benchmark(standalone_args) => {
