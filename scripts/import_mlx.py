@@ -42,7 +42,9 @@ def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:
             model[k] = v
 
     # Only export the first 8 slices of the depformer (main).
-    for idx in range(min(8, n_q)):
+    n_q_main = 8
+    print("only exporting the first {n_q_main}/{n_q} depformer layers") 
+    for idx in range(n_q_main):
         base = f"depformer.slices.{idx}."
         model[base + "linear_in.weight"] = tch_model[f"depformer_in.{idx}.weight"]
         model[base + "linear_out.weight"] = tch_model[f"linears.{idx}.weight"]
