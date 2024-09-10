@@ -83,7 +83,7 @@ The format for the rest of the message, aka the payload, depends on `MT`.
 - Ping MT=6. No payload, this message type is currently unused.
 ```
 Messages with an unknow message types should be discarded.
- 
+
 ## Python (PyTorch)
 
 The python api can be found in the `msh` directory. It provides streaming
@@ -101,9 +101,9 @@ rust version.
 Start the server with:
 ```bash
 python server_opus.py \
-    --mimi-weights tokenizer-de0e421d-checkpoint40.safetensors \
+    --mimi-weights tokenizer-e351c8d8-checkpoint125.safetensors \
     --tokenizer tokenizer_spm_32k_3.model \
-    --moshi-weights mimi_0abbed5f@100.safetensors 
+    --moshi-weights moshiko_pt_301e30bf@120.safetensors
 ```
 
 And then starts the client with:
@@ -122,15 +122,15 @@ In order to test the audio tokenizer, you can run the following command.
 
 ```bash
 wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
-PYTHONPATH=. python scripts/mimi_test.py --weights .../tokenizer-de0e421d-checkpoint40.safetensors
+PYTHONPATH=. python scripts/mimi_test.py --weights tokenizer-e351c8d8-checkpoint125.safetensors
 ```
 
 In order to test moshi, run the following.
 ```bash
 PYTHONPATH=. python scripts/moshi_test.py \
-    --mimi-weights tokenizer-de0e421d-checkpoint40.safetensors \
+    --mimi-weights tokenizer-e351c8d8-checkpoint125.safetensors \
     --tokenizer tokenizer_spm_32k_3.model \
-    --moshi-weights mimi_0abbed5f@100.safetensors 
+    --moshi-weights moshiko_pt_301e30bf@120.safetensors
 ```
 
 ## Python (MLX) for local inference on macOS
@@ -143,7 +143,7 @@ maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 Then the model can be run with:
 ```bash
 PYTHONPATH=. python local_mlx.py  \
-    --model ~/tmp/mimi_mlx_0abbed5f@100.q8.safetensors \
-    --mimi ~/tmp/tokenizer-de0e421d-checkpoint40.safetensors \
+    --model ~/tmp/moshiko_mlx_301e30bf@120.q8.safetensors \
+    --mimi ~/tmp/tokenizer-e351c8d8-checkpoint125.safetensors \
     --quantized 8
 ```

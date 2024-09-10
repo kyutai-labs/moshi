@@ -66,7 +66,7 @@ def server(printer_q, client_to_server, server_to_client, args):
     model_file = args.model
     tokenizer_file = args.tokenizer
     if model_file is None:
-        model_file = str(Path.home() / "tmp/" / "mimi_0abbed5f@100.safetensors")
+        model_file = str(Path.home() / "tmp/" / "moshiko_mlx_301e30bf@120.safetensors")
     if tokenizer_file is None:
         tokenizer_file = str(Path.home() / "tmp" / "tokenizer_spm_32k_3.model")
     steps = args.steps
@@ -126,7 +126,7 @@ def server(printer_q, client_to_server, server_to_client, args):
 def client(printer_q, client_to_server, server_to_client, args):
     mimi_file = args.mimi
     if mimi_file is None:
-        mimi_file = str(Path.home() / "tmp" / "tokenizer-de0e421d-checkpoint40.safetensors")
+        mimi_file = str(Path.home() / "tmp" / "tokenizer-e351c8d8-checkpoint125.safetensors")
     input_queue = queue.Queue()
     output_queue = queue.Queue()
     audio_tokenizer = mimi.StreamTokenizer(mimi_file)
