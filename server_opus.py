@@ -15,6 +15,8 @@ import torch
 import websockets
 from websockets.server import serve
 
+from huggingface_hub import hf_hub_download
+
 import msh
 
 SAMPLE_RATE = msh.models.moshi.SAMPLE_RATE
@@ -45,14 +47,16 @@ parser.add_argument("--port", default=8998, type=int)
 parser.add_argument("--tokenizer", type=str)
 parser.add_argument("--moshi-weights", type=str)
 parser.add_argument("--mimi-weights", type=str)
+parser.add_argument("--hf-repo", type=str, default="kmhf/msh-v0.1")
+
 args = parser.parse_args()
 
 if args.tokenizer is None:
-    raise ValueError("--tokenizer must be set")
+    args.tokenizer = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
 if args.moshi_weights is None:
-    raise ValueError("--moshi-weights must be set")
+    args.moshi_weights = hf_hub_download(args.hf_repo, "moshiko_pt_301e30bf@120.safetensors")
 if args.mimi_weights is None:
-    raise ValueError("--mimi-weights must be set")
+    args.mimi_weights = hf_hub_download(args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors")
 
 
 def seed_all(seed):
