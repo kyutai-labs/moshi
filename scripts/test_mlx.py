@@ -204,7 +204,7 @@ def main():
     model_file = args.model
     tokenizer_file = args.tokenizer
     if model_file is None:
-        model_file = str(Path.home() / "tmp/" / "mimi_0abbed5f@100.safetensors")
+        model_file = str(Path.home() / "tmp/" / "moshiko_mlx_301e30bf@120.safetensors")
     if tokenizer_file is None:
         tokenizer_file = str(Path.home() / "tmp" / "tokenizer_spm_32k_3.model")
 
