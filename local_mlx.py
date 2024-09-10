@@ -23,6 +23,8 @@ from client_utils import AnyPrinter, Printer, RawPrinter
 import mimi
 import msh_mlx
 
+from huggingface_hub import hf_hub_download
+
 SAMPLE_RATE = 24000
 CHANNELS = 1
 
@@ -66,9 +68,16 @@ def server(printer_q, client_to_server, server_to_client, args):
     model_file = args.model
     tokenizer_file = args.tokenizer
     if model_file is None:
-        model_file = str(Path.home() / "tmp/" / "moshiko_mlx_301e30bf@120.safetensors")
+        if args.quantized == 8:
+            model_file = hf_hub_download(args.hf_repo, "moshiko_mlx_301e30bf@120.q8.safetensors")
+        elif args.quantized == 4:
+            model_file = hf_hub_download(args.hf_repo, "moshiko_mlx_301e30bf@120.q4.safetensors")
+        elif args.quantized is not None:
+            raise ValueError(f"Invalid quantized value: {args.quantized}")
+        else:
+            model_file = hf_hub_download(args.hf_repo, "moshiko_mlx_301e30bf@120.safetensors")
     if tokenizer_file is None:
-        tokenizer_file = str(Path.home() / "tmp" / "tokenizer_spm_32k_3.model")
+        tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
     steps = args.steps
     def log(s):
         printer_q.put_nowait((PrinterType.INFO, s))
@@ -127,7 +136,7 @@ def server(printer_q, client_to_server, server_to_client, args):
 def client(printer_q, client_to_server, server_to_client, args):
     mimi_file = args.mimi
     if mimi_file is None:
-        mimi_file = str(Path.home() / "tmp" / "tokenizer-e351c8d8-checkpoint125.safetensors")
+        mimi_file = hf_hub_download(args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors")
     input_queue = queue.Queue()
     output_queue = queue.Queue()
     audio_tokenizer = mimi.StreamTokenizer(mimi_file)
@@ -226,6 +235,8 @@ def main(printer: AnyPrinter):
     parser.add_argument("--mimi", type=str)
     parser.add_argument("--quantized", type=int)
     parser.add_argument("--steps", default=2500, type=int)
+    parser.add_argument("--hf-repo", type=str, default="")
+
     args = parser.parse_args()
 
     client_to_server = multiprocessing.Queue()
