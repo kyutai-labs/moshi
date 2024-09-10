@@ -79,7 +79,8 @@ def server(printer_q, client_to_server, server_to_client, args):
     model = msh_mlx.models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if args.quantized is not None:
-        nn.quantize(model, bits=args.quantized)
+        group_size = 32 if args.quantized == 4 else 64
+        nn.quantize(model, bits=args.quantized, group_size=group_size)
 
     log(f"[SERVER] loading weights {model_file}")
     model.load_weights(model_file, strict=True)
