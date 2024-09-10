@@ -13,3 +13,4 @@ sentencepiece==0.2.0
 six==1.16.0
 sounddevice==0.5.0
 wcwidth==0.2.13
+huggingface-hub==0.24.6
