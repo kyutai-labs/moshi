@@ -1,6 +1,6 @@
 {
   "instance_name": "foo",
-  "lm_model_file": "$HOME/tmp/moshiko_rs_301e30bf@120.safetensors",
+  "lm_model_file": "$HOME/tmp/moshiko_rs_301e30bf@120.q8.gguf",
   "text_tokenizer_file": "$HOME/tmp/tokenizer_spm_32k_3.model",
   "log_dir": "$HOME/tmp/moshi-logs",
   "encodec_model_file": "$HOME/tmp/tokenizer-e351c8d8-checkpoint125.safetensors",
