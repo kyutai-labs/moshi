@@ -334,7 +334,7 @@ async def run(printer: AnyPrinter, args):
         connection = Connection(printer, websocket)
         await connection.run()
 
-    uri = f"ws://{args.host}:{args.port}"
+    uri = f"wss://{args.host}:{args.port}"
     await do_connection(printer, uri, action)
 
 
