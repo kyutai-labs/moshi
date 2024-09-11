@@ -7,11 +7,9 @@ dependencies = [
     "einops == 0.7",
     "sentencepiece == 0.2",
     "sounddevice == 0.5",
-    "sphn >= 0.1.2",
+    "sphn >= 0.1.3",
     "torch >= 2.2.0, < 2.5",
-    "websocket-client == 1.7",
     "websockets >= 11.0.3, < 11.1",
-    "xformers >= 0.0.24, < 0.0.28; sys_platform != 'darwin'"
 ]
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]

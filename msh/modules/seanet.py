@@ -13,12 +13,12 @@ import typing as tp
 import numpy as np
 import torch.nn as nn
 
-from .conv import StreamableConv1d, StreamableConvTranspose1d
-from .lstm import StreamableLSTM
-from .streaming import StreamingModule, StreamingSequential, StreamingAdd
+from .conv import StreamingConv1d, StreamingConvTranspose1d
+from .streaming import StreamingContainer, StreamingAdd
+from ..utils.compile import torch_compile_lazy
 
 
-class SEANetResnetBlock(StreamingModule):
+class SEANetResnetBlock(StreamingContainer):
     """Residual block from SEANet model.
 
     Args:
@@ -62,7 +62,7 @@ class SEANetResnetBlock(StreamingModule):
             out_chs = dim if i == len(kernel_sizes) - 1 else hidden
             block += [
                 act(**activation_params),
-                StreamableConv1d(
+                StreamingConv1d(
                     in_chs,
                     out_chs,
                     kernel_size=kernel_size,
@@ -73,13 +73,13 @@ class SEANetResnetBlock(StreamingModule):
                     pad_mode=pad_mode,
                 ),
             ]
-        self.block = StreamingSequential(*block)
+        self.block = nn.Sequential(*block)
         self.add = StreamingAdd()
         self.shortcut: nn.Module
         if true_skip:
             self.shortcut = nn.Identity()
         else:
-            self.shortcut = StreamableConv1d(
+            self.shortcut = StreamingConv1d(
                 dim,
                 dim,
                 kernel_size=1,
@@ -94,7 +94,7 @@ class SEANetResnetBlock(StreamingModule):
         return self.add(u, v)
 
 
-class SEANetEncoder(StreamingModule):
+class SEANetEncoder(StreamingContainer):
     """SEANet encoder.
 
     Args:
@@ -118,7 +118,6 @@ class SEANetEncoder(StreamingModule):
         true_skip (bool): Whether to use true skip connection or a simple
             (streamable) convolution as the skip connection in the residual network blocks.
         compress (int): Reduced dimensionality in residual branches (from Demucs v3).
-        lstm (int): Number of LSTM layers at the end of the encoder.
         disable_norm_outer_blocks (int): Number of blocks for which we don't apply norm.
             For the encoder, it corresponds to the N first blocks.
         mask_fn (nn.Module): Optional mask function to apply after convolution layers.
@@ -145,7 +144,6 @@ class SEANetEncoder(StreamingModule):
         pad_mode: str = "reflect",
         true_skip: bool = True,
         compress: int = 2,
-        lstm: int = 0,
         disable_norm_outer_blocks: int = 0,
         mask_fn: tp.Optional[nn.Module] = None,
         mask_position: tp.Optional[int] = None,
@@ -171,7 +169,7 @@ class SEANetEncoder(StreamingModule):
         act = getattr(nn, activation)
         mult = 1
         model: tp.List[nn.Module] = [
-            StreamableConv1d(
+            StreamingConv1d(
                 channels,
                 mult * n_filters,
                 kernel_size,
@@ -207,7 +205,7 @@ class SEANetEncoder(StreamingModule):
             # Add downsampling layers
             model += [
                 act(**activation_params),
-                StreamableConv1d(
+                StreamingConv1d(
                     mult * n_filters,
                     mult * n_filters * 2,
                     kernel_size=ratio * 2,
@@ -222,12 +220,9 @@ class SEANetEncoder(StreamingModule):
             if mask_fn is not None and mask_position == i + 1:
                 model += [mask_fn]
 
-        if lstm:
-            model += [StreamableLSTM(mult * n_filters, num_layers=lstm)]
-
         model += [
             act(**activation_params),
-            StreamableConv1d(
+            StreamingConv1d(
                 mult * n_filters,
                 dimension,
                 last_kernel_size,
@@ -240,13 +235,14 @@ class SEANetEncoder(StreamingModule):
             ),
         ]
 
-        self.model = StreamingSequential(*model)
+        self.model = nn.Sequential(*model)
 
+    @torch_compile_lazy
     def forward(self, x):
         return self.model(x)
 
 
-class SEANetDecoder(StreamingModule):
+class SEANetDecoder(StreamingContainer):
     """SEANet decoder.
 
     Args:
@@ -270,7 +266,6 @@ class SEANetDecoder(StreamingModule):
         true_skip (bool): Whether to use true skip connection or a simple.
             (streamable) convolution as the skip connection in the residual network blocks.
         compress (int): Reduced dimensionality in residual branches (from Demucs v3).
-        lstm (int): Number of LSTM layers at the end of the encoder.
         disable_norm_outer_blocks (int): Number of blocks for which we don't apply norm.
             For the decoder, it corresponds to the N last blocks.
         trim_right_ratio (float): Ratio for trimming at the right of the transposed convolution under the causal setup.
@@ -298,7 +293,6 @@ class SEANetDecoder(StreamingModule):
         pad_mode: str = "reflect",
         true_skip: bool = True,
         compress: int = 2,
-        lstm: int = 0,
         disable_norm_outer_blocks: int = 0,
         trim_right_ratio: float = 1.0,
     ):
@@ -323,7 +317,7 @@ class SEANetDecoder(StreamingModule):
         act = getattr(nn, activation)
         mult = int(2 ** len(self.ratios))
         model: tp.List[nn.Module] = [
-            StreamableConv1d(
+            StreamingConv1d(
                 dimension,
                 mult * n_filters,
                 kernel_size,
@@ -336,9 +330,6 @@ class SEANetDecoder(StreamingModule):
             )
         ]
 
-        if lstm:
-            model += [StreamableLSTM(mult * n_filters, num_layers=lstm)]
-
         # Upsample to raw audio scale
         for i, ratio in enumerate(self.ratios):
             block_norm = (
@@ -349,7 +340,7 @@ class SEANetDecoder(StreamingModule):
             # Add upsampling layers
             model += [
                 act(**activation_params),
-                StreamableConvTranspose1d(
+                StreamingConvTranspose1d(
                     mult * n_filters,
                     mult * n_filters // 2,
                     kernel_size=ratio * 2,
@@ -383,7 +374,7 @@ class SEANetDecoder(StreamingModule):
         # Add final layers
         model += [
             act(**activation_params),
-            StreamableConv1d(
+            StreamingConv1d(
                 n_filters,
                 channels,
                 last_kernel_size,
@@ -398,8 +389,9 @@ class SEANetDecoder(StreamingModule):
             final_act = getattr(nn, final_activation)
             final_activation_params = final_activation_params or {}
             model += [final_act(**final_activation_params)]
-        self.model = StreamingSequential(*model)
+        self.model = nn.Sequential(*model)
 
+    @torch_compile_lazy
     def forward(self, z):
         y = self.model(z)
         return y

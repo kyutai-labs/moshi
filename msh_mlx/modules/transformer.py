@@ -4,6 +4,7 @@
 
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+from .kv_cache import KVCache, RotatingKVCache
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -71,9 +72,9 @@ class Attention(nn.Module):
     def __call__(
         self,
         xs: mx.array,
+        cache: KVCache | RotatingKVCache,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
-    ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
+    ) -> mx.array:
         assert self.cfg.kv_repeat == 1, "only kv_repeat==1 is supported"
 
         b, t, hd = xs.shape
@@ -82,28 +83,20 @@ class Attention(nn.Module):
         k = qkv[:, :, 1].transpose(0, 2, 1, 3)
         v = qkv[:, :, 2].transpose(0, 2, 1, 3)
         if self.rope is not None:
-            offset = 0
-            if cache is not None:
-                offset = cache[0].shape[2]
-            q = self.rope(q, offset=offset)
-            k = self.rope(k, offset=offset)
+            q = self.rope(q, offset=cache.offset)
+            k = self.rope(k, offset=cache.offset)
 
-        if cache is not None:
-            k_cache, v_cache = cache
-            k = mx.concatenate([k_cache, k], axis=2)
-            v = mx.concatenate([v_cache, v], axis=2)
-
+        k, v = cache.update_and_fetch(k, v)
         k_len = k.shape[2]
         k_target_len = t + min(self.cfg.context, k_len - t)
         if k_target_len < k_len:
-            k = k[:, :, k_len - k_target_len]
-            v = v[:, :, k_len - k_target_len]
+            k = k[:, :, k_len - k_target_len:]
+            v = v[:, :, k_len - k_target_len:]
 
-        cache = k, v
         xs = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale, mask=mask)
         xs = xs.transpose(0, 2, 1, 3).reshape(b, t, hd)
         xs = self.out_proj(xs)
-        return xs, cache
+        return xs
 
 class MlpGating(nn.Module):
     def __init__(self, cfg: TransformerConfig):
@@ -165,13 +158,13 @@ class TransformerLayer(nn.Module):
     def __call__(
         self,
         xs: mx.array,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
-    ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
+        cache: KVCache | RotatingKVCache,
+    ) -> mx.array:
         n1 = self.norm1(xs)
-        n1, cache = self.self_attn(n1, cache=cache)
+        n1 = self.self_attn(n1, cache=cache)
         xs = xs + self.layer_scale_1(n1)
         xs = xs + self.layer_scale_2(self.gating(self.norm2(xs)))
-        return xs, cache
+        return xs
 
 class Transformer(nn.Module):
     def __init__(self, cfg: TransformerConfig):
@@ -183,11 +176,22 @@ class Transformer(nn.Module):
     def __call__(
         self,
         xs: mx.array,
-        cache: Optional[List[Tuple[mx.array, mx.array]]] = None,
-    ) -> Tuple[mx.array, List[Tuple[mx.array, mx.array]]]:
-        upd_cache = []
-        for layer_idx, layer in enumerate(self.layers):
-            c = cache[layer_idx] if cache is not None else None
-            xs, c = layer(xs, c)
-            upd_cache.append(c)
-        return xs, upd_cache
+        cache: List[KVCache] | List[RotatingKVCache],
+        ) -> mx.array:
+        for layer, c in zip(self.layers, cache):
+            xs = layer(xs, cache=c)
+        return xs
+
+    def make_cache(self) -> list[KVCache]:
+        num_kv_heads = self.cfg.num_heads // self.cfg.kv_repeat
+        return [
+            KVCache(head_dim=self.cfg.head_dim, n_kv_heads=num_kv_heads)
+            for _ in self.layers
+        ]
+
+    def make_rot_cache(self) -> list[RotatingKVCache]:
+        num_kv_heads = self.cfg.num_heads // self.cfg.kv_repeat
+        return [
+            RotatingKVCache(head_dim=self.cfg.head_dim, n_kv_heads=num_kv_heads, max_size=self.cfg.max_seq_len)
+            for _ in self.layers
+        ]

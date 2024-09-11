@@ -8,14 +8,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-import logging
 
 import torch
-
-from .compile import torch_compile_lazy, no_compile  # noqa
-
-
-logger = logging.getLogger(__name__)
 
 
 def multinomial(
@@ -86,3 +80,47 @@ def sample_top_p(probs: torch.Tensor, p: float) -> torch.Tensor:
     next_token = multinomial(probs_sort, num_samples=1)
     next_token = torch.gather(probs_idx, -1, next_token)
     return next_token
+
+
+def sample_token(
+    logits: torch.Tensor,
+    use_sampling: bool = False,
+    temp: float = 1.0,
+    top_k: int = 0,
+    top_p: float = 0.0,
+) -> torch.Tensor:
+    """Given logits of shape [*, Card], returns a LongTensor of shape [*]."""
+    # Apply softmax for sampling if temp > 0. Else, do greedy sampling to avoid zero division error.
+    if use_sampling and temp > 0.0:
+        probs = torch.softmax(logits / temp, dim=-1)
+        if top_p > 0.0:
+            next_token = sample_top_p(probs, p=top_p)
+        elif top_k > 0:
+            next_token = sample_top_k(probs, k=top_k)
+        else:
+            next_token = multinomial(probs, num_samples=1)
+    else:
+        next_token = torch.argmax(logits, dim=-1, keepdim=True)
+    assert next_token.shape[-1] == 1
+    return next_token[..., 0]
+
+if __name__ == "__main__":
+    torch.manual_seed(1234)
+    device = "cpu"
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        device = "cuda:0"
+
+    ps = torch.tensor([5., 2., 12., 6., 8., 1., 0., 4.], device=device)
+    cnts = torch.zeros(ps.shape, dtype=torch.long, device=device)
+    total_samples = 1000
+    for _ in range(total_samples):
+        vs = multinomial(ps, num_samples=1, replacement=False)
+        cnts[vs] += 1
+    diff = cnts / cnts.sum() - ps / ps.sum()
+    max_diff = diff.abs().max().cpu().item()
+    print(ps / ps.sum())
+    print(cnts / cnts.sum())
+    assert max_diff < 1.5e-2
+

@@ -3,33 +3,23 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Transformer model, with streaming support, xformer attention support
-and easy causal attention with a potentially finite receptive field.
+Transformer model, with streaming support, + CUDA Graphable.
+Optimized for inference.
 
 See `StreamingTransformer` for more information.
-
-Unlike regular PyTorch Transformer, we make the hard choice that batches are first.
 """
 
-import math
+from dataclasses import dataclass
 import typing as tp
 
 from einops import rearrange
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from xformers import ops
 
 from .gating import make_gating
 from .rope import RotaryEmbedding
-from .streaming import StreamingModule
-from ..utils.compile import torch_compile_lazy
-
-from xformers.ops.fmha.attn_bias import (
-    LowerTriangularFromBottomRightMask,
-    LowerTriangularFromBottomRightLocalAttentionMask,
-    LocalAttentionFromBottomRightMask,
-)
+from .streaming import StreamingModule, StreamingContainer
 
 
 class LayerNormF32(nn.LayerNorm):
@@ -44,16 +34,12 @@ def _rms_norm(
     alpha: torch.Tensor,
     dtype: tp.Optional[torch.dtype],
     eps: float,
-    use_var: bool,
 ):
     assert x.dim() == 3, f"RMSNorm expects 3D inputs but got {x.shape}"
     x_dtype = x.dtype
     if dtype is not None:
         x = x.to(dtype)
-    if use_var:
-        var = eps + x.var(dim=2, keepdim=True)
-    else:
-        var = eps + torch.mean(x**2, dim=2, keepdim=True)
+    var = eps + torch.mean(x**2, dim=2, keepdim=True)
     y = (x * (alpha.to(var) * torch.rsqrt(var))).to(x_dtype)
     return y
 
@@ -63,20 +49,18 @@ class RMSNorm(nn.Module):
         self,
         dim: int,
         eps: float = 1e-5,
-        use_var: bool = True,
         dtype: tp.Optional[torch.dtype] = None,
         device=None,
     ):
         super().__init__()
         self.eps = eps
         self.dtype = dtype
-        self.use_var = use_var
         self.alpha = nn.Parameter(
             torch.full((1, 1, dim), 1.0, requires_grad=True, device=device, dtype=dtype)
         )
 
     def forward(self, x: torch.Tensor):
-        return _rms_norm(x, self.alpha, self.dtype, self.eps, self.use_var)
+        return _rms_norm(x, self.alpha, self.dtype, self.eps)
 
 
 class LayerScale(nn.Module):
@@ -129,16 +113,11 @@ def create_norm_fn(norm_type: str, dim: int, **kwargs) -> nn.Module:
     elif norm_type == "layer_norm_f32":
         kwargs.pop("dtype", None)
         return LayerNormF32(dim, eps=1e-8, **kwargs)
-    elif norm_type == "rms_norm":
+    elif norm_type in {"rms_norm"}:
         return RMSNorm(dim, eps=1e-5, **kwargs)
-    elif norm_type == "rms_norm_f32":
+    elif norm_type in {"rms_norm_f32"}:
         kwargs.pop("dtype", None)
         return RMSNorm(dim, eps=1e-8, dtype=torch.float, **kwargs)
-    elif norm_type == "real_rms_norm":
-        return RMSNorm(dim, eps=1e-5, use_var=False, **kwargs)
-    elif norm_type == "real_rms_norm_f32":
-        kwargs.pop("dtype", None)
-        return RMSNorm(dim, eps=1e-8, dtype=torch.float, use_var=False, **kwargs)
     else:
         raise ValueError(f"Unknown norm type: {norm_type}")
 
@@ -172,7 +151,7 @@ def create_sin_embedding(
 
 
 def multi_linear(
-    num_linear: int, weight: torch.Tensor, x: torch.Tensor, offset: int = 0
+    num_linear: int, weight: torch.Tensor, x: torch.Tensor, offset: int,
 ):
     """Utility to apply a multi linear layer to the given input. A multi linear layer
     applies a different set of weight for each time step.
@@ -186,8 +165,10 @@ def multi_linear(
     """
     B, T, C = x.shape
     ys = []
+    chout, chin = weight.shape
+    weight = weight.view(num_linear, -1, chin)
     for t in range(T):
-        y = F.linear(x[:, t], weight.chunk(num_linear)[offset + t])
+        y = F.linear(x[:, t], weight[t + offset])
         ys.append(y)
     out = torch.stack(ys, 1)
     return out
@@ -209,23 +190,28 @@ def set_attention_context(model: nn.Module, context: tp.Optional[int] = None) ->
             module.context = context
 
 
-class KVCache:
-    """Efficient streaming KVCache to avoid too many allocations.
+class KVCacheResult(tp.NamedTuple):
+    keys: torch.Tensor
+    values: torch.Tensor
+    positions: torch.Tensor
+
+    @staticmethod
+    def from_kv(keys: torch.Tensor, values: torch.Tensor) -> 'KVCacheResult':
+        B, H, T, D = keys.shape
+        assert tuple(values.shape[:-1]) == (B, H, T)
+        positions = torch.arange(T, device=keys.device, dtype=torch.long)
+        return KVCacheResult(keys, values, positions)
+
+
+class RingKVCache:
+    """Efficient streaming KVCache to be compatible with Cuda Graph.
 
     Args:
         batch_size (int): Batch size.
         num_heads (int): Number of heads in the attention.
         dim_per_head (int): Dimension per head.
-        context (int, optional): Context size for the attention, if None, will grow exponentially,
-            otherwise will use a fix allocation with a bit overhead.
-        growth (float): Growth factor for the exponential growth, fraction of overhead when context is not None.
-        initial_size (int): Initial size of the cache, used only when context is None.
         device (torch.device): Device on which to initialize the cache.
         dtype (torch.dtype): dtype to use for the cache.
-        cache (torch.Tensor, optional): Initial cache, if provided. Shouldn't be used directly,
-            use `clone()` instead.
-        current_end (int): Current end of the cache, used only when cache is provided. Shouldn't be used directly,
-            use `clone()` instead.
     """
 
     def __init__(
@@ -233,96 +219,70 @@ class KVCache:
         batch_size: int,
         num_heads: int,
         dim_per_head: int,
-        context: tp.Optional[int] = None,
-        growth: float = 1.2,
-        initial_size: int = 100,
+        capacity: int,
         device: torch.device = torch.device("cuda"),
         dtype: torch.dtype = torch.bfloat16,
-        cache: tp.Optional[torch.Tensor] = None,
-        current_end: int = 0,
     ):
-        assert growth > 1
-        self.growth = growth
-        if context is not None:
-            initial_size = 1 + int(growth * context)
-        self.capacity = initial_size
-        self.context = context
-        self.current_end = current_end
-        if cache is None:
-            self.cache = torch.full(
-                (2, batch_size, initial_size, num_heads, dim_per_head),
-                float("NaN"),
-                device=device,
-                dtype=dtype,
-            )
-        else:
-            self.cache = cache
+        self.capacity = capacity
+        self.cache = torch.zeros(
+            (2, batch_size, num_heads, capacity, dim_per_head),
+            device=device,
+            dtype=dtype)
+        self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
 
-    def clone(self) -> "KVCache":
-        return KVCache(
-            self.cache.shape[1],
-            self.cache.shape[3],
-            self.cache.shape[4],
-            self.context,
-            self.growth,
-            self.capacity,
-            self.cache.device,
-            self.cache.dtype,
-            self.cache.clone(),
-            self.current_end,
+    def reset(self):
+        self.end_offset.zero_()
+
+    def complete(self, k: torch.Tensor, v: torch.Tensor) -> KVCacheResult:
+        assert k.shape[:-1] == v.shape[:-1], (k.shape, v.shape)
+        B, H, T, D = k.shape
+        indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype) + self.end_offset
+        indexes = indexes % self.capacity
+        self.cache[0].index_copy_(2, indexes, k)
+        self.cache[1].index_copy_(2, indexes, v)
+        self.end_offset.add_(T)
+
+        keys = self.cache[0]
+        values = self.cache[1]
+
+        indexes = torch.arange(self.capacity, device=self.end_offset.device, dtype=torch.long)
+        invalid = indexes >= self.end_offset
+
+        end_index = self.end_offset % self.capacity
+        delta = indexes - end_index
+
+        # If last key is for step S, and capacity is C, last key was written at index S % C.
+        # then end_offset = S + 1, and end_index = (S + 1) % C.
+        # Then for index = (S % C), delta = -1, and the next code gives us:
+        # position(index) = (S + 1) - 1 = S, all good.
+        # Now the time step at end_offset is actually the oldest in the KVCache, e.g., its
+        # position should be (S - self.capacity + 1).
+        # The following code gives us:
+        # position(index + 1) = S + 1 + 0 - self.capacity.
+
+        positions = torch.where(
+            delta <= 0,
+            self.end_offset + delta,
+            self.end_offset + delta - self.capacity,
         )
+        positions = torch.where(invalid, torch.full_like(positions, -1), positions)
 
-    @property
-    def current_start(self) -> int:
-        if self.context is None:
-            return 0
-        else:
-            return max(self.current_end - self.context, 0)
-
-    def complete(
-        self, k: torch.Tensor, v: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        assert k.shape[1] == v.shape[1]
-        required_capacity = self.current_end + k.shape[1]
-        if required_capacity > self.capacity:
-            if self.context is None:
-                # We take an exponential growth approach.
-                new_capacity = self.capacity
-                while required_capacity > new_capacity:
-                    new_capacity = int(math.ceil(new_capacity * self.growth))
-                new_shape = list(self.cache.shape)
-                new_shape[2] = new_capacity
-                new_cache = torch.full(
-                    tuple(new_shape),
-                    float("NaN"),
-                    device=self.cache.device,
-                    dtype=self.cache.dtype,
-                )
-                new_cache[:, :, : self.current_end] = self.cache[
-                    :, :, : self.current_end
-                ]
-                self.cache = new_cache
-                self.capacity = new_capacity
-            else:
-                # With context, we just have to roll the predict to the left and
-                # use the new space on the right.
-                assert self.current_start > 0
-                self.cache[:] = self.cache.roll(-self.current_start, dims=2)
-                self.current_end -= self.current_start
-
-        assert self.current_end + k.shape[1] <= self.capacity, (
-            self.current_end,
-            k.shape[1],
-            self.capacity,
-        )
-        self.cache[0, :, self.current_end : self.current_end + k.shape[1]] = k
-        self.cache[1, :, self.current_end : self.current_end + v.shape[1]] = v
-        self.current_end += k.shape[1]
-        valid = self.cache[:, :, self.current_start : self.current_end]
-        return valid[0], valid[1]
+        return KVCacheResult(keys, values, positions)
 
 
-class StreamingMultiheadAttention(StreamingModule):
+@dataclass
+class _MHAState:
+    kv_cache: RingKVCache
+    offset: torch.Tensor
+    offset_cpu: int
+
+    def reset(self):
+        self.kv_cache.reset()
+        self.offset.zero_()
+        self.offset_cpu = 0
+
+
+class StreamingMultiheadAttention(StreamingModule[_MHAState]):
     """Similar to `nn.MultiheadAttention` but with support for streaming, causal evaluation.
 
     Args:
@@ -333,8 +293,6 @@ class StreamingMultiheadAttention(StreamingModule):
             When causal, can access `context` time steps into the past, and when non causal,
             can access `context // 2` steps in the past, and the same in the future.
         rope (`RotaryEmbedding`, optional): Rope embedding to use.
-        kv_repeat (int): If > 1, will repeat keys and queries multiple times (need to divide num_heads).
-            This will lead to faster decoding time on A100 or other GPUs with tensorcore.
         weights_per_step (int): use different weights per time step. If non zero, should correspond to the
             number of possible time steps.
         device (torch.device, optional): Device on which to initialize.
@@ -377,107 +335,86 @@ class StreamingMultiheadAttention(StreamingModule):
             embed_dim, mult * embed_dim, bias=False, **factory_kwargs
         )
 
-    def _get_mask(self):
-        if self.context:
-            if self.causal:
-                return LowerTriangularFromBottomRightLocalAttentionMask(self.context)
+    def _init_streaming_state(self, batch_size: int) -> _MHAState:
+        if self.context is None:
+            if self.weights_per_step:
+                capacity = self.weights_per_step
             else:
-                return LocalAttentionFromBottomRightMask(
-                    self.context // 2, self.context // 2
-                )
+                raise RuntimeError("Cannot create a streaming KVCache without a context to estimate capacity.")
         else:
-            if self.causal:
-                return LowerTriangularFromBottomRightMask()
-            else:
-                None
+            capacity = self.context
+        device = self.in_proj_weight.device
+        # TODO: the following estimation will not work great with FSDP.
+        dtype = self.in_proj_weight.dtype
+        dim_per_head = self.embed_dim // self.num_heads
+        kv_cache = RingKVCache(batch_size, self.num_heads, dim_per_head, capacity, device, dtype)
+        return _MHAState(kv_cache, offset=torch.zeros(1, device=device, dtype=torch.long), offset_cpu=0)
 
-    def _complete_kv(self, k, v):
-        if self._is_streaming:
-            if "kv_cache" not in self._streaming_state:
-                initial_size = self.weights_per_step or 100
-                self._streaming_state["kv_cache"] = KVCache(  # type: ignore
-                    k.shape[0],
-                    k.shape[2],
-                    k.shape[3],
-                    self.context,
-                    initial_size=initial_size,
-                    device=k.device,
-                    dtype=k.dtype,
-                )
-                self._streaming_state["offset"] = torch.zeros(1)  # type: ignore
-            kv_cache: KVCache = self._streaming_state["kv_cache"]  # type: ignore
-            self._streaming_state["offset"] += k.shape[1]
-            k, v = kv_cache.complete(k, v)
-            return k, v
+
+    def _complete_kv(self, k, v) -> KVCacheResult:
+        state = self._streaming_state
+        if state is None:
+            return KVCacheResult.from_kv(k, v)
         else:
-            return k, v
-
-    def _apply_rope(self, query: torch.Tensor, key: torch.Tensor):
-        # Apply rope embeddings to query and key tensors.
-        assert self.rope is not None
-        streaming_offset = self._streaming_offset
-        return self.rope(query, key, offset=streaming_offset)
-
-    @property
-    def _streaming_offset(self) -> int:
-        if "offset" in self._streaming_state:
-            return int(self._streaming_state["offset"].item())
-        else:
-            return 0
+            return state.kv_cache.complete(k, v)
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
-        streaming_offset = self._streaming_offset
-        if self._is_streaming:
+        state = self._streaming_state
+        T = query.shape[1]
+
+        if state is None:
+            offset = torch.zeros(1, device=query.device, dtype=torch.long)
+            offset_cpu = 0
+        else:
             assert self.causal, "Streaming only available for causal"
+            offset = state.offset
+            offset_cpu = state.offset_cpu
 
         if self.weights_per_step:
             projected = multi_linear(
-                self.weights_per_step, self.in_proj_weight, query, streaming_offset
+                self.weights_per_step, self.in_proj_weight, query, offset_cpu
             )
         else:
             projected = nn.functional.linear(query, self.in_proj_weight)
-        packed = rearrange(projected, "b t (p h d) -> b t p h d", p=3, h=self.num_heads)
-        q, k, v = ops.unbind(packed, dim=2)
+        q, k, v = rearrange(projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads)
 
         if self.rope:
-            q, k = self._apply_rope(q, k)
+            q, k = self.rope(q, k, offset, time_before_heads=False)
 
-        k, v = self._complete_kv(k, v)
-        attn_mask = self._get_mask()
-        dtype = q.dtype
-
-        if q.device.type == "cpu":
-            attn_bias = None
-            if attn_mask is not None:
-                attn_bias = attn_mask.materialize((q.shape[1], k.shape[1]))
-            q, k, v = [x.transpose(1, 2) for x in [q, k, v]]
-            x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)
-            x = x.transpose(1, 2)
+        k, v, pos_k = self._complete_kv(k, v)
+        if self.causal:
+            pos_k = pos_k.view(1, -1)
+            pos_q = offset + torch.arange(T, device=q.device, dtype=torch.long).view(-1, 1)
+            delta = pos_q - pos_k
+            attn_bias = (pos_k >= 0) & (delta >= 0)
+            if self.context is not None:
+                attn_bias = attn_bias & (delta < self.context)
         else:
-            is_non_causal = isinstance(attn_mask, LocalAttentionFromBottomRightMask)
-            if (
-                (q.requires_grad or is_non_causal)
-                and attn_mask is not None
-                and q.dtype == torch.float32
-            ):
-                q = q.bfloat16()
-                k = k.bfloat16()
-                v = v.bfloat16()
+            attn_bias = None
+        x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)
 
-            x = ops.memory_efficient_attention(q, k, v, attn_mask, p=0)
-            x = x.to(dtype)
-        x = rearrange(x, "b t h d -> b t (h d)")
+        x = rearrange(x, "b h t d -> b t (h d)")
         if self.weights_per_step:
             x = multi_linear(
-                self.weights_per_step, self.out_proj.weight, x, streaming_offset
+                self.weights_per_step, self.out_proj.weight, x, offset_cpu
             )
         else:
             x = self.out_proj(x)
-
+        if state is not None:
+            state.offset.add_(T)
+            state.offset_cpu += T
         return x
 
 
-class StreamingTransformerLayer(StreamingModule):
+@dataclass
+class _LayerState:
+    offset_cpu: int
+
+    def reset(self):
+        self.offset_cpu = 0
+
+
+class StreamingTransformerLayer(StreamingModule[_LayerState]):
     """TransformerLayer with Streaming / Causal support.
 
     Args:
@@ -590,11 +527,15 @@ class StreamingTransformerLayer(StreamingModule):
             self.layer_scale_1 = LayerScale(d_model, layer_scale, **factory_kwargs)
             self.layer_scale_2 = LayerScale(d_model, layer_scale, **factory_kwargs)
 
+    def _init_streaming_state(self, batch_size: int) -> _LayerState:
+        return _LayerState(offset_cpu=0)
+
     # feed forward block
     def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
+        state = self._streaming_state
         offset = 0
-        if self._is_streaming:
-            offset = int(self._streaming_state["offset"].item())
+        if state is not None:
+            offset = state.offset_cpu
         x_orig = x
         x = self.norm2(x)
         if self.gating is None:
@@ -623,18 +564,23 @@ class StreamingTransformerLayer(StreamingModule):
         return x_orig + self.layer_scale_1(update)
 
     def forward(self, x: torch.Tensor):
-        if self._is_streaming:
-            if "offset" not in self._streaming_state:
-                self._streaming_state["offset"] = torch.tensor(0)
-
         x = self._sa_block(x)
         x = self._ff_block(x)
-        if self._is_streaming:
-            self._streaming_state["offset"] += x.shape[1]
+        state = self._streaming_state
+        if state:
+            state.offset_cpu += x.shape[1]
         return x
 
 
-class StreamingTransformer(StreamingModule):
+@dataclass
+class _TransformerState:
+    offset: torch.Tensor
+
+    def reset(self):
+        self.offset.zero_()
+
+
+class StreamingTransformer(StreamingModule[_TransformerState]):
     """Transformer with Streaming / Causal support.
 
     Args:
@@ -683,9 +629,7 @@ class StreamingTransformer(StreamingModule):
         assert positional_embedding in {"sin", "rope", "sin_rope", "none"}
         self.rope: tp.Optional[RotaryEmbedding] = None
         if self.positional_embedding in {"rope", "sin_rope"}:
-            self.rope = RotaryEmbedding(
-                d_model // num_heads, max_len=8192, device=device, max_period=max_period
-            )
+            self.rope = RotaryEmbedding(max_period=max_period)
 
         self.layers = nn.ModuleList()
         for _ in range(num_layers):
@@ -703,17 +647,22 @@ class StreamingTransformer(StreamingModule):
                 )
             )
 
+    def _init_streaming_state(self, batch_size: int) -> _TransformerState:
+        device = next(self.parameters()).device
+        return _TransformerState(offset=torch.zeros(1, device=device, dtype=torch.long))
+
     def forward(self, x: torch.Tensor, *args, **kwargs):
         B, T, C = x.shape
 
-        if "offsets" in self._streaming_state:
-            offsets = self._streaming_state["offsets"]
+        state = self._streaming_state
+        if state is None:
+            offset = torch.zeros(1, dtype=torch.long, device=x.device)
         else:
-            offsets = torch.zeros(B, dtype=torch.long, device=x.device)
+            offset = state.offset
 
         if self.positional_embedding in {"sin", "sin_rope"}:
             positions = torch.arange(T, device=x.device).view(1, -1, 1)
-            positions = positions + offsets.view(-1, 1, 1)
+            positions = positions + offset.view(-1, 1, 1)
             pos_emb = create_sin_embedding(
                 positions, C, max_period=self.max_period, dtype=x.dtype
             )
@@ -722,13 +671,12 @@ class StreamingTransformer(StreamingModule):
         for layer in self.layers:
             x = layer(x, *args, **kwargs)
 
-        if self._is_streaming:
-            self._streaming_state["offsets"] = offsets + T
-
+        if state is not None:
+            state.offset.add_(T)
         return x
 
 
-class ProjectedTransformer(nn.Module):
+class ProjectedTransformer(StreamingContainer):
     """Transformer with optional projections of the input and output to different dimensions when needed.
     Supports multiple outputs.
 

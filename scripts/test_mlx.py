@@ -11,6 +11,8 @@ import numpy as np
 from pathlib import Path
 import sentencepiece
 import typing as tp
+import os
+import shutil
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -144,18 +146,23 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
         mimi.write_wav("out.wav", all_out_pcm, sample_rate=24000)
 
     await asyncio.gather(recv_loop(), send_loop(), model_loop())
+    # Discard the first times for sending and processing the first slice as this does not
+    # result in an output.
     stats = {
-        "send_times": stats.send_times,
+        "send_times": stats.send_times[1:],
         "recv_times": stats.recv_times,
-        "model_times": stats.model_times,
+        "model_times": stats.model_times[1:],
     }
     with open('timings.json', 'w') as json_file:
         json.dump(stats, json_file)
+    model_times = np.array(stats["model_times"])
+    model_times = model_times[:, 1] - model_times[:, 0]
+    mean, stdev, min_v, max_v = np.mean(model_times), np.std(model_times), np.min(model_times), np.max(model_times)
+    print(f"model times, mean: {1000 * mean:.2f}ms, std: {1000 * stdev:.2f}ms, min: {1000 * min_v:.2f}ms, max: {1000 * max_v:.2f}ms")
 
 
 
 def run_text_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
-    cache = None
     start_time = 0
     last_text_token = mx.array([[32000]])
     text_sampler = msh_mlx.utils.Sampler()
@@ -163,13 +170,12 @@ def run_text_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
     for i in range(steps + 1):
         if i == 1:
             start_time = time.time()
-        last_text_token, _, cache = model.sample(
+        last_text_token, _ = model.sample(
             last_text_token,
             [],
             i,
             text_sampler,
             audio_sampler,
-            cache,
         )
         text_token = last_text_token[0].item()
         if text_token not in (0, 3):
@@ -188,8 +194,9 @@ def main():
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--model", type=str)
     parser.add_argument("--mimi", type=str)
+    parser.add_argument("--trace-file", type=str)
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--quantized", action="store_true")
+    parser.add_argument("--quantized", type=int)
     parser.add_argument("--steps", default=100, type=int)
     parser.add_argument("mode", default="text", type=str)
     args = parser.parse_args()
@@ -197,7 +204,7 @@ def main():
     model_file = args.model
     tokenizer_file = args.tokenizer
     if model_file is None:
-        model_file = str(Path.home() / "tmp/" / "mimi_0abbed5f@100.safetensors")
+        model_file = str(Path.home() / "tmp/" / "moshiko_mlx_301e30bf@120.safetensors")
     if tokenizer_file is None:
         tokenizer_file = str(Path.home() / "tmp" / "tokenizer_spm_32k_3.model")
 
@@ -212,8 +219,8 @@ def main():
 
     model = msh_mlx.models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
-    if args.quantized:
-        nn.quantize(model, bits=8)
+    if args.quantized is not None:
+        nn.quantize(model, bits=args.quantized)
 
     if args.verbose:
         tree_map_with_path(lambda p, t: print(p, t.shape), model.parameters())
@@ -221,6 +228,14 @@ def main():
     print(f"loading weights {model_file}")
     model.load_weights(model_file, strict=True)
     print("weights loaded")
+
+    if args.trace_file is not None:
+        if "MTL_CAPTURE_ENABLED" not in os.environ:
+            raise ValueError("Set MTL_CAPTURE_ENABLED to record a trace")
+        trace_file = Path(args.trace_file)
+        if trace_file.exists():
+            shutil.rmtree(trace_file)
+        mx.metal.start_capture(args.trace_file)
 
     if args.mode == "text":
         run_text_gen(model, text_tokenizer, args.steps)
@@ -230,6 +245,9 @@ def main():
         asyncio.run(run_audio_gen_stream(model, args.mimi, text_tokenizer, args.steps))
     else:
         raise ValueError(f"unknown mode {args.mode}, try 'text' or 'audio'")
+
+    if args.trace_file is not None:
+        mx.metal.stop_capture()
 
 if __name__ == "__main__":
     main()

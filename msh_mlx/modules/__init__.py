@@ -3,4 +3,5 @@
 # LICENSE file in the root directory of this source tree.
 """Modules used for building the models."""
 
+from .kv_cache import KVCache, RotatingKVCache
 from .transformer import Transformer, TransformerConfig

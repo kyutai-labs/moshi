@@ -13,12 +13,11 @@
 from .conv import (
     NormConv1d,
     NormConvTranspose1d,
-    StreamableConv1d,
-    StreamableConvTranspose1d,
+    StreamingConv1d,
+    StreamingConvTranspose1d,
     pad_for_conv1d,
     pad1d,
     unpad1d,
 )
-from .lstm import StreamableLSTM
 from .seanet import SEANetEncoder, SEANetDecoder
 from .transformer import StreamingTransformer
