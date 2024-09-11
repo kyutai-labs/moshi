@@ -135,8 +135,12 @@ PYTHONPATH=. python scripts/moshi_test.py \
 
 ## Python (MLX) for local inference on macOS
 
-You first have to compile and install the mimi extension.
+You can eithr compile and install the `rustymimi` extension or install it via
+pip.
 ```bash
+# Install from pip:
+pip install rustymimi==0.1.1
+# In order to compile the thing, run:
 maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 ```
 
