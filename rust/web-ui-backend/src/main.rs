@@ -111,7 +111,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     match args.command {
         Command::Standalone(standalone_args) => {
-            let config = standalone::Config::load(&args.config)?;
+            let mut config = standalone::Config::load(&args.config)?;
             let _guard = tracing_init(
                 &config.stream.log_dir,
                 &config.stream.instance_name,
@@ -121,7 +121,7 @@ async fn main() -> Result<()> {
             tracing::info!("starting process with pid {}", std::process::id());
 
             if config.stream.requires_model_download() {
-                standalone::download_from_hub(&config.stream).await?;
+                standalone::download_from_hub(&mut config.stream).await?;
             }
             standalone::run(&standalone_args, &config).await?;
         }

@@ -2,7 +2,7 @@
 // This source code is licensed under the license found in the
 // LICENSE file in the root directory of this source tree.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::extract::ws;
 use std::sync::Arc;
 use std::{path::Path, str::FromStr};
@@ -115,22 +115,36 @@ pub async fn stream_handler(
     ws.on_upgrade(move |v| handle_socket(v, sm))
 }
 
-pub async fn download_from_hub(config: &stream_both::Config) -> Result<()> {
-    use hf_hub::api::tokio::ApiBuilder;
-
-    let base_path = Path::new(&config.lm_model_file);
-    let cache_path =
-        base_path.parent().ok_or_else(|| anyhow::anyhow!("lm_model_file has no parent"))?;
-
-    let api = ApiBuilder::new().with_cache_dir(cache_path.to_path_buf()).build()?;
+pub async fn download_from_hub(config: &mut stream_both::Config) -> Result<()> {
+    use hf_hub::api::tokio::Api;
+    let api = Api::new()?;
 
     let repo = api.model(config.hf_repo.clone());
-    for file in [&config.lm_model_file, &config.text_tokenizer_file, &config.encodec_model_file] {
-        let file_name = Path::new(file)
+
+    let extract_filename = |path: &str| -> Result<String> {
+        Path::new(path)
             .file_name()
             .and_then(|f| f.to_str())
-            .ok_or_else(|| anyhow::anyhow!("{} has no file name", file))?;
-        repo.get(file_name).await?;
+            .map(String::from)
+            .ok_or_else(|| anyhow::anyhow!("{} has no file name", path))
+    };
+
+    for file_path in
+        [&mut config.lm_model_file, &mut config.encodec_model_file, &mut config.text_tokenizer_file]
+            .iter_mut()
+    {
+        let filename = extract_filename(file_path)
+            .with_context(|| format!("Failed to extract filename for {}", file_path))?;
+
+        let downloaded_path = repo
+            .get(&filename)
+            .await
+            .with_context(|| format!("Failed to download {} file", file_path))?;
+
+        **file_path = downloaded_path
+            .into_os_string()
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("{} path is not a valid string", file_path))?;
     }
 
     Ok(())
