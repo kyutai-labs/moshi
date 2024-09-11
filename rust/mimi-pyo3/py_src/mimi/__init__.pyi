@@ -12,7 +12,7 @@ def write_wav(filename, data, sample_rate):
     """
     pass
 
-class Tokenizer:
+class StreamTokenizer:
     def __init__(path, *, dtype="f32"):
         pass
 
@@ -21,5 +21,37 @@ class Tokenizer:
         pass
 
     def encode(self, pcm_data):
+        """ """
+        pass
+
+    def get_decoded(self):
+        """ """
+        pass
+
+    def get_encoded(self):
+        """ """
+        pass
+
+class Tokenizer:
+    def __init__(path, *, dtype="f32"):
+        pass
+
+    def decode(self, codes):
+        """ """
+        pass
+
+    def decode_step(self, codes):
+        """ """
+        pass
+
+    def encode(self, pcm_data):
+        """ """
+        pass
+
+    def encode_step(self, pcm_data):
+        """ """
+        pass
+
+    def reset(self):
         """ """
         pass
