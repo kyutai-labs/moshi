@@ -359,7 +359,7 @@ fn write_wav(
 }
 
 #[pymodule]
-fn mimi(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn rustymimi(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Tokenizer>()?;
     m.add_class::<StreamTokenizer>()?;
     m.add_function(wrap_pyfunction!(write_wav, m)?)?;

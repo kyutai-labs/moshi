@@ -1,11 +1,11 @@
 [package]
 name = "mimi-pyo3"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT/Apache-2.0"
 
 [lib]
-name = "mimi"
+name = "rustymimi"
 crate-type = ["cdylib"]
 
 [dependencies]

@@ -232,7 +232,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cwd = Path.cwd()
-    directory = "py_src/mimi/"
+    directory = "py_src/rustymimi/"
 
-    import mimi
-    write(mimi.mimi, directory, "mimi", check=args.check)
+    import rustymimi
+    write(rustymimi.rustymimi, directory, "rustymimi", check=args.check)
