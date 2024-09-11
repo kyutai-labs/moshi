@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 import sentencepiece
 
-import mimi
+import rustymimi
 
 def main():
     parser = argparse.ArgumentParser()
