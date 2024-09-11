@@ -41,9 +41,9 @@ class Stats:
 
 
 def run_audio_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
-    import mimi
+    import rustymimi
 
-    audio_tokenizer = mimi.Tokenizer(mimi_path)
+    audio_tokenizer = rustymimi.Tokenizer(mimi_path)
 
     model.warmup()
     gen = msh_mlx.models.LmGen(
@@ -76,12 +76,12 @@ def run_audio_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, step
     token_per_second = steps / (time.time() - start_time)
     print(f"steps: {steps}, token per sec: {token_per_second}")
     all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
-    mimi.write_wav("out.wav", all_out_pcm[0, 0], sample_rate=24000)
+    rustymimi.write_wav("out.wav", all_out_pcm[0, 0], sample_rate=24000)
 
 async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
-    import mimi
+    import rustymimi
 
-    audio_tokenizer = mimi.StreamTokenizer(mimi_path)
+    audio_tokenizer = rustymimi.StreamTokenizer(mimi_path)
     stats = Stats()
 
     model.warmup()
@@ -143,7 +143,7 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
         token_per_second = steps / (time.time() - start_time)
         print(f"steps: {steps}, token per sec: {token_per_second}")
         all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
-        mimi.write_wav("out.wav", all_out_pcm, sample_rate=24000)
+        rustymimi.write_wav("out.wav", all_out_pcm, sample_rate=24000)
 
     await asyncio.gather(recv_loop(), send_loop(), model_loop())
     # Discard the first times for sending and processing the first slice as this does not

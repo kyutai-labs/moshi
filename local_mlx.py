@@ -20,7 +20,7 @@ import mlx.core as mx
 import mlx.nn as nn
 
 from client_utils import AnyPrinter, Printer, RawPrinter
-import mimi
+import rustymimi
 import msh_mlx
 
 from huggingface_hub import hf_hub_download
@@ -139,7 +139,7 @@ def client(printer_q, client_to_server, server_to_client, args):
         mimi_file = hf_hub_download(args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors")
     input_queue = queue.Queue()
     output_queue = queue.Queue()
-    audio_tokenizer = mimi.StreamTokenizer(mimi_file)
+    audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)
     start = server_to_client.get()
     printer_q.put_nowait((PrinterType.INFO, f"[CLIENT] received '{start}' from server, starting..."))
 
