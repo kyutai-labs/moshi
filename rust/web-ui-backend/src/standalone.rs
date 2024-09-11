@@ -2,10 +2,10 @@
 // This source code is licensed under the license found in the
 // LICENSE file in the root directory of this source tree.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::extract::ws;
-use std::str::FromStr;
 use std::sync::Arc;
+use std::{path::Path, str::FromStr};
 
 use crate::{stream_both, StandaloneArgs};
 
@@ -38,9 +38,11 @@ impl Config {
     pub fn cert_file(&self, name: &str) -> Result<std::path::PathBuf> {
         let cert_dir = std::path::PathBuf::from(&self.cert_dir);
         let cert_file = cert_dir.join(name);
+
         if !cert_file.is_file() {
             anyhow::bail!("missing file {cert_file:?}");
         }
+
         Ok(cert_file)
     }
 }
@@ -113,7 +115,49 @@ pub async fn stream_handler(
     ws.on_upgrade(move |v| handle_socket(v, sm))
 }
 
+pub async fn download_from_hub(config: &mut stream_both::Config) -> Result<()> {
+    use hf_hub::api::tokio::Api;
+    let api = Api::new()?;
+
+    let repo = api.model(config.hf_repo.clone());
+
+    let extract_filename = |path: &str| -> Result<String> {
+        Path::new(path)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .map(String::from)
+            .ok_or_else(|| anyhow::anyhow!("{} has no file name", path))
+    };
+
+    for file_path in
+        [&mut config.lm_model_file, &mut config.encodec_model_file, &mut config.text_tokenizer_file]
+            .iter_mut()
+    {
+        let filename = extract_filename(file_path)
+            .with_context(|| format!("Failed to extract filename for {}", file_path))?;
+
+        let downloaded_path = repo
+            .get(&filename)
+            .await
+            .with_context(|| format!("Failed to download {} file", file_path))?;
+
+        **file_path = downloaded_path
+            .into_os_string()
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("{} path is not a valid string", file_path))?;
+    }
+
+    Ok(())
+}
+
 pub async fn run(args: &StandaloneArgs, config: &Config) -> Result<()> {
+    if config.cert_file("cert.pem").is_err() || config.cert_file("key.pem").is_err() {
+        let rcgen::CertifiedKey { cert, key_pair } =
+            rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
+        std::fs::write("cert.pem", cert.pem())?;
+        std::fs::write("key.pem", key_pair.serialize_pem())?;
+    }
+
     let cert_pem = config.cert_file("cert.pem")?;
     let key_pem = config.cert_file("key.pem")?;
     let tls_config =

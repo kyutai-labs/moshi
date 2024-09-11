@@ -18,7 +18,8 @@ candle-transformers = { workspace = true }
 clap = { version = "4.4.12", features = ["derive"] }
 env_logger = "0.10.1"
 futures-util = "0.3.30"
-hf-hub = "0.3.0"
+hf-hub = { version = "0.3.2", features = ["tokio"] }
+rcgen = "0.13.1"
 http = "1.1.0"
 lazy_static = "1.5.0"
 log = "0.4.20"

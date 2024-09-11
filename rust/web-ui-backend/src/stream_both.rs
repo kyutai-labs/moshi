@@ -13,6 +13,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     pub instance_name: String,
+    pub hf_repo: String,
     pub lm_model_file: String,
     pub log_dir: String,
     pub text_tokenizer_file: String,
@@ -36,6 +37,13 @@ impl Config {
         config.encodec_model_file = crate::utils::replace_env_vars(&config.encodec_model_file);
         config.lm_model_file = crate::utils::replace_env_vars(&config.lm_model_file);
         Ok(config)
+    }
+
+    /// Check if all modelling files are available on machine.
+    pub fn requires_model_download(&self) -> bool {
+        [&self.lm_model_file, &self.encodec_model_file, &self.text_tokenizer_file]
+            .iter()
+            .any(|file| !std::path::Path::new(file).exists())
     }
 }
 
