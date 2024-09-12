@@ -175,6 +175,7 @@ class ServerState:
                 await asyncio.sleep(0.001)
                 msg = opus_writer.read_bytes()
                 if len(msg) > 0:
+                    print("LEN OF MESSAGES HERE", len(msg), repr(msg[:16]))
                     await websocket.send(b"\x01" + msg)
 
 
@@ -185,6 +186,7 @@ class ServerState:
             opus_reader = sphn.OpusStreamReader(self.ec.sample_rate)
             self.ec.reset_streaming()
             self.lm_gen.reset_streaming()
+            await websocket.send(b'\x00')
             await asyncio.gather(opus_loop(), recv_loop(), send_loop())
         log("info", "done with connection")
 
@@ -193,6 +195,9 @@ async def main():
     state = ServerState()
     log("info", "warming up the model")
     state.warmup()
+    from gradio import networking
+    tunnel = networking.setup_tunnel('127.0.0.1', args.port, 'testlapin', None)
+    print("Tunnel", tunnel)
     log("info", f"listening to ws://{args.host}:{args.port}")
     async with serve(state.handle_conn, args.host, args.port):
         await asyncio.Future()  # run forever
