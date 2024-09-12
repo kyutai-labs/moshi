@@ -16,6 +16,7 @@ import websockets
 from websockets.server import serve
 
 from huggingface_hub import hf_hub_download
+from gradio import networking
 
 import msh
 
@@ -169,14 +170,18 @@ class ServerState:
                     log("info", f"frame handled in {1000 * (time.time() - be):.1f}ms")
 
         async def send_loop():
+            buf = []
             while True:
                 if close:
                     return
                 await asyncio.sleep(0.001)
                 msg = opus_writer.read_bytes()
                 if len(msg) > 0:
-                    print("LEN OF MESSAGES HERE", len(msg), repr(msg[:16]))
-                    await websocket.send(b"\x01" + msg)
+                    if msg[:4] == b'OggS':
+                        if buf:
+                            await websocket.send(b"\x01" + b''.join(buf))
+                            buf.clear()
+                    buf.append(msg)
 
 
         log("info", "accepted connection")
@@ -195,7 +200,6 @@ async def main():
     state = ServerState()
     log("info", "warming up the model")
     state.warmup()
-    from gradio import networking
     tunnel = networking.setup_tunnel('127.0.0.1', args.port, 'testlapin', None)
     print("Tunnel", tunnel)
     log("info", f"listening to ws://{args.host}:{args.port}")
