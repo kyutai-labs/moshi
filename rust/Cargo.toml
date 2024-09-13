@@ -7,6 +7,16 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT/Apache-2.0"
+description = "moshi, a real-time voice AI"
+repository = "https://github.com/kyutai-labs/moshi"
+keywords = ["machine-learning", "audio"]
+categories = ["science"]
+
+
 [workspace.dependencies]
 candle = { version = "0.6.0", package = "candle-core" }
 candle-nn = "0.6.0"
