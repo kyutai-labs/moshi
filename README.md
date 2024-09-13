@@ -88,7 +88,7 @@ pip.
 ```bash
 # Install from pip:
 pip install rustymimi==0.1.1
-# In order to compile the thing, run:
+# Alternatively, if you want to compile the package run:
 maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 ```
 
