@@ -14,7 +14,7 @@ command from within the `rust` directory.
 
 - Start the server.
 ```bash
-cargo run --features cuda --bin web-ui-backend -r -- --config web-ui-backend/config.json standalone
+cargo run --features cuda --bin moshi-backend -r -- --config moshi-backend/config.json standalone
 ```
 When using macOS, you can replace `--features cuda` with `--features metal`.
 

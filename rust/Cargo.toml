@@ -1,9 +1,9 @@
 [workspace]
 members = [
     "mimi-pyo3",
+    "moshi-backend",
     "moshi-cli",
     "moshi-core",
-    "web-ui-backend",
 ]
 resolver = "2"
 
