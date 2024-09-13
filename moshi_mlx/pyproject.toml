@@ -22,4 +22,4 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["moshi_mlx"]
+packages = ["moshi_mlx", "moshi_mlx.modules", "moshi_mlx.models", "moshi_mlx.utils"]

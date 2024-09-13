@@ -23,11 +23,16 @@ from .client_utils import AnyPrinter, Printer, RawPrinter
 import rustymimi
 import moshi_mlx
 
-from huggingface_hub import hf_hub_download
+import huggingface_hub
 
 SAMPLE_RATE = 24000
 CHANNELS = 1
 
+
+def hf_hub_download(repo, path: str) -> str:
+    if repo is None or repo == "":
+        raise ValueError(f"the --hf-repo flag is required to retrieve {path}")
+    return huggingface_hub.hf_hub_download(repo, path)
 
 class Stats:
     send_times: tp.List[float] = []
