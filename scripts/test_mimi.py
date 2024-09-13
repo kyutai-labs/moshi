@@ -10,6 +10,7 @@ import sentencepiece
 
 import rustymimi
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str)
@@ -24,7 +25,7 @@ def main():
     for i in range(steps + 1):
         if i == 1:
             start_time = time.time()
-        pcm_data = np.array([[[0.] * 1920]]).astype(np.float32)
+        pcm_data = np.array([[[0.0] * 1920]]).astype(np.float32)
         out = model.encode_step(pcm_data)
         print(out.shape)
         pcm_data = model.decode_step(out)

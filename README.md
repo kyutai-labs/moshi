@@ -2,7 +2,7 @@
 
 There are three separate versions of the moshi inference stack in this repo.
 - The rust version used in production is in the `rust` directory.
-- The python version using PyTorch is in the `msh` directory.
+- The python version using PyTorch is in the `moshi` directory.
 - The python version using MLX is in the `moshi_mlx` directory.
 
 ## Rust
@@ -50,7 +50,7 @@ to localhost (unsafe)".
 
 ## Python (PyTorch)
 
-The python api can be found in the `msh` directory. It provides a streaming
+The python api can be found in the `moshi` directory. It provides a streaming
 version of the audio tokenizer (mimi) and the lm model (moshi).
 
 In order to run in interactive mode, you need to start a server which will
@@ -64,7 +64,7 @@ rust version.
 
 Start the server with:
 ```bash
-python server_opus.py \
+PYTHONPATH=moshi python -m moshi.server \
     --mimi-weights tokenizer-e351c8d8-checkpoint125.safetensors \
     --tokenizer tokenizer_spm_32k_3.model \
     --moshi-weights moshiko_pt_301e30bf@120.safetensors
@@ -72,7 +72,7 @@ python server_opus.py \
 
 And then starts the client with:
 ```bash
-python client_opus.py
+PYTHONPATH=moshi python -m moshi.client
 ```
 
 When running on different machine, you can add the command line argument

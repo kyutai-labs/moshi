@@ -19,7 +19,7 @@ import typing as tp
 import mlx.core as mx
 import mlx.nn as nn
 
-from client_utils import AnyPrinter, Printer, RawPrinter
+from .client_utils import AnyPrinter, Printer, RawPrinter
 import rustymimi
 import moshi_mlx
 

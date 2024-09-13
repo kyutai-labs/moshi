@@ -26,7 +26,8 @@ class Resetable(tp.Protocol):
     def reset(self) -> None:
         pass
 
-State = tp.TypeVar('State', bound=Resetable)
+
+State = tp.TypeVar("State", bound=Resetable)
 
 
 class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
@@ -77,7 +78,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
                 for name, child in module.named_children():
                     _handle_module(prefix + "." + name, child)
 
-        _handle_module('', self)
+        _handle_module("", self)
         for name, child in self.named_children():
             _handle_module(name, child)
 
@@ -94,8 +95,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
         self._apply_named_streaming(_stop_streaming)
 
     @abc.abstractmethod
-    def _init_streaming_state(self, batch_size: int) -> State:
-        ...
+    def _init_streaming_state(self, batch_size: int) -> State: ...
 
     def streaming_forever(self, batch_size: int):
         self._start_streaming(batch_size)
@@ -112,11 +112,15 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
 
     def reset_streaming(self):
         """Reset the streaming state."""
+
         def _reset(name: str, module: StreamingModule):
             state = module._streaming_state
             if state is None:
-                raise ValueError(f"Trying to reset streaming, but {name} wasn't streaming.")
+                raise ValueError(
+                    f"Trying to reset streaming, but {name} wasn't streaming."
+                )
             state.reset()
+
         self._apply_named_streaming(_reset)
 
     def get_streaming_state(self) -> dict[str, tp.Any]:
@@ -132,6 +136,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
     def set_streaming_state(self, state: dict[str, tp.Any]):
         """Set the streaming state, including that of sub-modules."""
         state = dict(state)
+
         def _set(name: str, module: StreamingModule):
             if name in state:
                 module._streaming_state = state[name]
@@ -155,6 +160,7 @@ class _NullState:
 class StreamingContainer(StreamingModule[_NullState]):
     def _init_streaming_state(self, batch_size: int) -> _NullState:
         return _NullState()
+
 
 @dataclass
 class _StreamingAddState:
@@ -244,7 +250,9 @@ class _StreamingConvTrState:
         self.partial = None
 
 
-class RawStreamingConvTranspose1d(nn.ConvTranspose1d, StreamingModule[_StreamingConvTrState]):
+class RawStreamingConvTranspose1d(
+    nn.ConvTranspose1d, StreamingModule[_StreamingConvTrState]
+):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         assert self.padding[0] == 0, "Padding should be handled outside."
@@ -265,7 +273,9 @@ class RawStreamingConvTranspose1d(nn.ConvTranspose1d, StreamingModule[_Streaming
             return super().forward(x)
         else:
             if T == 0:
-                return torch.empty(B, self.out_channels, 0, device=x.device, dtype=x.dtype)
+                return torch.empty(
+                    B, self.out_channels, 0, device=x.device, dtype=x.dtype
+                )
             out = super().forward(x)
             OT = out.shape[-1]
             partial = self._streaming_state.partial
@@ -289,7 +299,6 @@ class RawStreamingConvTranspose1d(nn.ConvTranspose1d, StreamingModule[_Streaming
             out = out[..., : OT - invalid_steps]
             self._streaming_state.partial = partial
             return out
-
 
 
 def test():
@@ -334,8 +343,8 @@ def test():
                         zs.append(convtr(ys[-1]))
                 y_stream = torch.cat(ys, dim=-1)
                 z_stream = torch.cat(zs, dim=-1)
-                y = y[..., :y_stream.shape[-1]]
-                z = z[..., :z_stream.shape[-1]]
+                y = y[..., : y_stream.shape[-1]]
+                z = z[..., : z_stream.shape[-1]]
                 assert y.shape == y_stream.shape, (y.shape, y_stream.shape)
                 delta = (y_stream - y).norm() / y.norm()
                 assert delta <= 1e-6, delta

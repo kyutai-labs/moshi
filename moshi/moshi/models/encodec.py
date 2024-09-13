@@ -233,7 +233,6 @@ class EncodecModel(CompressionModel[_EncodecState]):
     def sample_rate(self) -> int:
         return self._sample_rate
 
-
     @property
     def total_codebooks(self):
         """Total number of quantizer codebooks available."""
@@ -307,17 +306,20 @@ class EncodecModel(CompressionModel[_EncodecState]):
         with self._context_for_encoder_decoder:
             emb = self.encoder(x)
         if self.encoder_transformer is not None:
-            emb, = self.encoder_transformer(emb)
+            (emb,) = self.encoder_transformer(emb)
         emb = self._to_framerate(emb)
         expected_length = self.frame_rate * length / self.sample_rate
         # Checking that we have the proper length given the advertised frame rate.
-        assert abs(emb.shape[-1] - expected_length) < 1, (emb.shape[-1], expected_length)
+        assert abs(emb.shape[-1] - expected_length) < 1, (
+            emb.shape[-1],
+            expected_length,
+        )
 
         q_res = self.quantizer(emb, self.frame_rate)
         emb = q_res.x
         emb = self._to_encoder_framerate(emb)
         if self.decoder_transformer is not None:
-            emb, = self.decoder_transformer(emb)
+            (emb,) = self.decoder_transformer(emb)
 
         with self._context_for_encoder_decoder:
             out = self.decoder(emb)
@@ -347,10 +349,10 @@ class EncodecModel(CompressionModel[_EncodecState]):
             emb = self.encoder(x)
         if self.encoder_transformer is not None:
             if state is None:
-                emb, = self.encoder_transformer(emb)
+                (emb,) = self.encoder_transformer(emb)
             else:
                 assert state.graphed_tr_enc is not None
-                emb, = state.graphed_tr_enc(emb)
+                (emb,) = state.graphed_tr_enc(emb)
         emb = self._to_framerate(emb)
         return emb
 
@@ -397,10 +399,10 @@ class EncodecModel(CompressionModel[_EncodecState]):
         emb = self._to_encoder_framerate(emb)
         if self.decoder_transformer is not None:
             if state is None:
-                emb, = self.decoder_transformer(emb)
+                (emb,) = self.decoder_transformer(emb)
             else:
                 assert state.graphed_tr_dec is not None
-                emb, = state.graphed_tr_dec(emb)
+                (emb,) = state.graphed_tr_dec(emb)
         with self._context_for_encoder_decoder:
             out = self.decoder(emb)
         # out contains extra padding added by the encoder and decoder

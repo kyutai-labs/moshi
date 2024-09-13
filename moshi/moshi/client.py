@@ -12,13 +12,18 @@ import sphn
 import sounddevice as sd
 import websockets
 
-from client_utils import AnyPrinter, Printer, RawPrinter
+from .client_utils import AnyPrinter, Printer, RawPrinter
 
 
 class Connection:
-    def __init__(self, printer: AnyPrinter,
-                 websocket: websockets.WebSocketClientProtocol,
-                 sample_rate: float = 24000, channels: int = 1, frame_size: int = 1920) -> None:
+    def __init__(
+        self,
+        printer: AnyPrinter,
+        websocket: websockets.WebSocketClientProtocol,
+        sample_rate: float = 24000,
+        channels: int = 1,
+        frame_size: int = 1920,
+    ) -> None:
         self.printer = printer
         self.websocket = websocket
         self.sample_rate = sample_rate
@@ -27,14 +32,18 @@ class Connection:
 
         self._done = False
         self._in_stream = sd.InputStream(
-            samplerate=sample_rate, channels=channels,
-            blocksize=self.frame_size, callback=self._on_audio_input)
+            samplerate=sample_rate,
+            channels=channels,
+            blocksize=self.frame_size,
+            callback=self._on_audio_input,
+        )
 
         self._out_stream = sd.OutputStream(
             samplerate=sample_rate,
             channels=channels,
             blocksize=frame_size,
-            callback=self._on_audio_output)
+            callback=self._on_audio_output,
+        )
         self._opus_writer = sphn.OpusStreamWriter(sample_rate)
         self._opus_reader = sphn.OpusStreamReader(sample_rate)
         self._output_queue = queue.Queue()
@@ -64,8 +73,8 @@ class Connection:
             else:
                 all_pcm_data = np.concatenate((all_pcm_data, pcm))
             while all_pcm_data.shape[-1] >= self.frame_size:
-                self._output_queue.put(all_pcm_data[:self.frame_size])
-                all_pcm_data = np.array(all_pcm_data[self.frame_size:])
+                self._output_queue.put(all_pcm_data[: self.frame_size])
+                all_pcm_data = np.array(all_pcm_data[self.frame_size :])
 
     async def _recv_loop(self) -> None:
         while True:
@@ -113,7 +122,9 @@ class Connection:
 
     async def run(self) -> None:
         with self._in_stream, self._out_stream:
-            await asyncio.gather(self._recv_loop(), self._decoder_loop(), self._queue_loop())
+            await asyncio.gather(
+                self._recv_loop(), self._decoder_loop(), self._queue_loop()
+            )
 
 
 async def do_connection(printer: AnyPrinter, uri: str, action):
@@ -137,7 +148,7 @@ async def run(printer: AnyPrinter, args):
 
 
 def main():
-    parser = argparse.ArgumentParser('client_opus')
+    parser = argparse.ArgumentParser("client_opus")
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
     args = parser.parse_args()
@@ -153,5 +164,6 @@ def main():
         printer.log("warning", "Interrupting, exiting connection.")
     printer.log("info", "All done!")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

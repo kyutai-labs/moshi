@@ -226,9 +226,9 @@ class SEANetEncoder(StreamingContainer):
                 mult * n_filters,
                 dimension,
                 last_kernel_size,
-                norm="none"
-                if self.disable_norm_outer_blocks == self.n_blocks
-                else norm,
+                norm=(
+                    "none" if self.disable_norm_outer_blocks == self.n_blocks else norm
+                ),
                 norm_kwargs=norm_params,
                 causal=causal,
                 pad_mode=pad_mode,
@@ -321,9 +321,9 @@ class SEANetDecoder(StreamingContainer):
                 dimension,
                 mult * n_filters,
                 kernel_size,
-                norm="none"
-                if self.disable_norm_outer_blocks == self.n_blocks
-                else norm,
+                norm=(
+                    "none" if self.disable_norm_outer_blocks == self.n_blocks else norm
+                ),
                 norm_kwargs=norm_params,
                 causal=causal,
                 pad_mode=pad_mode,

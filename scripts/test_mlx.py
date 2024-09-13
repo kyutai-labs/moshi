@@ -20,6 +20,7 @@ from mlx.utils import tree_map_with_path
 
 import moshi_mlx
 
+
 class Stats:
     send_times: tp.List[float] = []
     model_times: tp.List[tp.Tuple[float, float]] = []
@@ -40,7 +41,9 @@ class Stats:
         self.recv_times.append(t)
 
 
-def run_audio_gen(model: moshi_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
+def run_audio_gen(
+    model: moshi_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int
+):
     import rustymimi
 
     audio_tokenizer = rustymimi.Tokenizer(mimi_path)
@@ -53,7 +56,7 @@ def run_audio_gen(model: moshi_mlx.models.Lm, mimi_path: str, text_tokenizer, st
         audio_sampler=moshi_mlx.utils.Sampler(),
         check=False,
     )
-    pcm_data = np.array([[[0.] * 1920]]).astype(np.float32)
+    pcm_data = np.array([[[0.0] * 1920]]).astype(np.float32)
     all_out_pcm = []
     start_time = time.time()
     for _ in range(steps + 1):
@@ -66,7 +69,7 @@ def run_audio_gen(model: moshi_mlx.models.Lm, mimi_path: str, text_tokenizer, st
         if text_token not in (0, 3):
             _text = text_tokenizer.id_to_piece(text_token)
             _text = _text.replace("▁", " ")
-            print(_text, end='', flush=True)
+            print(_text, end="", flush=True)
         if audio_tokens is not None:
             audio_tokens = np.array(audio_tokens[:, :, None]).astype(np.uint32)
             out_pcm = audio_tokenizer.decode_step(audio_tokens)
@@ -78,7 +81,10 @@ def run_audio_gen(model: moshi_mlx.models.Lm, mimi_path: str, text_tokenizer, st
     all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
     rustymimi.write_wav("out.wav", all_out_pcm[0, 0], sample_rate=24000)
 
-async def run_audio_gen_stream(model: moshi_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
+
+async def run_audio_gen_stream(
+    model: moshi_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int
+):
     import rustymimi
 
     audio_tokenizer = rustymimi.StreamTokenizer(mimi_path)
@@ -95,14 +101,13 @@ async def run_audio_gen_stream(model: moshi_mlx.models.Lm, mimi_path: str, text_
     end_queue = queue.Queue()
 
     async def send_loop():
-        pcm_data = np.array([0.] * 1920).astype(np.float32)
+        pcm_data = np.array([0.0] * 1920).astype(np.float32)
         for _ in range(steps):
             await asyncio.sleep(1.0 / 13.0)
             stats.on_send(time.time())
             audio_tokenizer.encode(pcm_data)
         await asyncio.sleep(1.0)
         end_queue.put_nowait(True)
-
 
     async def model_loop():
         while True:
@@ -123,7 +128,7 @@ async def run_audio_gen_stream(model: moshi_mlx.models.Lm, mimi_path: str, text_
             if text_token not in (0, 3):
                 _text = text_tokenizer.id_to_piece(text_token)
                 _text = _text.replace("▁", " ")
-                print(_text, end='', flush=True)
+                print(_text, end="", flush=True)
             if audio_tokens is not None:
                 audio_tokens = np.array(audio_tokens).astype(np.uint32)
                 audio_tokenizer.decode(audio_tokens)
@@ -153,13 +158,19 @@ async def run_audio_gen_stream(model: moshi_mlx.models.Lm, mimi_path: str, text_
         "recv_times": stats.recv_times,
         "model_times": stats.model_times[1:],
     }
-    with open('timings.json', 'w') as json_file:
+    with open("timings.json", "w") as json_file:
         json.dump(stats, json_file)
     model_times = np.array(stats["model_times"])
     model_times = model_times[:, 1] - model_times[:, 0]
-    mean, stdev, min_v, max_v = np.mean(model_times), np.std(model_times), np.min(model_times), np.max(model_times)
-    print(f"model times, mean: {1000 * mean:.2f}ms, std: {1000 * stdev:.2f}ms, min: {1000 * min_v:.2f}ms, max: {1000 * max_v:.2f}ms")
-
+    mean, stdev, min_v, max_v = (
+        np.mean(model_times),
+        np.std(model_times),
+        np.min(model_times),
+        np.max(model_times),
+    )
+    print(
+        f"model times, mean: {1000 * mean:.2f}ms, std: {1000 * stdev:.2f}ms, min: {1000 * min_v:.2f}ms, max: {1000 * max_v:.2f}ms"
+    )
 
 
 def run_text_gen(model: moshi_mlx.models.Lm, text_tokenizer, steps: int):
@@ -181,7 +192,7 @@ def run_text_gen(model: moshi_mlx.models.Lm, text_tokenizer, steps: int):
         if text_token not in (0, 3):
             _text = text_tokenizer.id_to_piece(text_token)
             _text = _text.replace("▁", " ")
-            print(_text, end='', flush=True)
+            print(_text, end="", flush=True)
 
         last_text_token = last_text_token[None]
     print()
@@ -207,7 +218,6 @@ def main():
         model_file = str(Path.home() / "tmp/" / "moshiko_mlx_301e30bf@120.safetensors")
     if tokenizer_file is None:
         tokenizer_file = str(Path.home() / "tmp" / "tokenizer_spm_32k_3.model")
-
 
     print(f"loading text tokenizer {tokenizer_file}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
@@ -248,6 +258,7 @@ def main():
 
     if args.trace_file is not None:
         mx.metal.stop_capture()
+
 
 if __name__ == "__main__":
     main()

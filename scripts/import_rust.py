@@ -29,7 +29,7 @@ def import_model(in_path: Path, out_path: Path) -> None:
             model[k] = v
 
     n_q_main = 8
-    print(f"only exporting the first {n_q_main}/{n_q} depformer layers") 
+    print(f"only exporting the first {n_q_main}/{n_q} depformer layers")
     for idx in range(n_q_main):
         base = f"depformer.{idx}."
         model[base + "linear_in.weight"] = tch_model[f"depformer_in.{idx}.weight"]
