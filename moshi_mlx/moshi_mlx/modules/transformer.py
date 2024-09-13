@@ -9,6 +9,7 @@ from .kv_cache import KVCache, RotatingKVCache
 import mlx.core as mx
 import mlx.nn as nn
 
+
 @dataclass
 class TransformerConfig:
     d_model: int
@@ -55,6 +56,7 @@ class LayerScale(nn.Module):
     def __call__(self, xs: mx.array) -> mx.array:
         return xs * self.scale
 
+
 class Attention(nn.Module):
     def __init__(self, cfg: TransformerConfig):
         super().__init__()
@@ -90,13 +92,14 @@ class Attention(nn.Module):
         k_len = k.shape[2]
         k_target_len = t + min(self.cfg.context, k_len - t)
         if k_target_len < k_len:
-            k = k[:, :, k_len - k_target_len:]
-            v = v[:, :, k_len - k_target_len:]
+            k = k[:, :, k_len - k_target_len :]
+            v = v[:, :, k_len - k_target_len :]
 
         xs = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale, mask=mask)
         xs = xs.transpose(0, 2, 1, 3).reshape(b, t, hd)
         xs = self.out_proj(xs)
         return xs
+
 
 class MlpGating(nn.Module):
     def __init__(self, cfg: TransformerConfig):
@@ -114,6 +117,7 @@ class MlpGating(nn.Module):
         b, t, _ = xs.shape
         xs = xs.reshape(b, t, 2, -1)
         return self.linear_out(nn.silu(xs[:, :, 0]) * xs[:, :, 1])
+
 
 class MlpNoGating(nn.Module):
     def __init__(self, cfg: TransformerConfig):
@@ -166,6 +170,7 @@ class TransformerLayer(nn.Module):
         xs = xs + self.layer_scale_2(self.gating(self.norm2(xs)))
         return xs
 
+
 class Transformer(nn.Module):
     def __init__(self, cfg: TransformerConfig):
         super().__init__()
@@ -177,7 +182,7 @@ class Transformer(nn.Module):
         self,
         xs: mx.array,
         cache: List[KVCache] | List[RotatingKVCache],
-        ) -> mx.array:
+    ) -> mx.array:
         for layer, c in zip(self.layers, cache):
             xs = layer(xs, cache=c)
         return xs
@@ -192,6 +197,10 @@ class Transformer(nn.Module):
     def make_rot_cache(self) -> list[RotatingKVCache]:
         num_kv_heads = self.cfg.num_heads // self.cfg.kv_repeat
         return [
-            RotatingKVCache(head_dim=self.cfg.head_dim, n_kv_heads=num_kv_heads, max_size=self.cfg.max_seq_len)
+            RotatingKVCache(
+                head_dim=self.cfg.head_dim,
+                n_kv_heads=num_kv_heads,
+                max_size=self.cfg.max_seq_len,
+            )
             for _ in self.layers
         ]

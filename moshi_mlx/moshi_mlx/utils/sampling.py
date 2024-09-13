@@ -113,22 +113,23 @@ class Sampler:
     min_tokens_to_keep: int = 1
     logit_bias: Optional[Dict[int, float]] = None
 
-
     def __call__(self, logits: mx.array) -> Tuple[mx.array, float]:
         if self.logit_bias:
             indices = mx.array(list(self.logit_bias.keys()))
             values = mx.array(list(self.logit_bias.values()))
             logits[:, indices] += values
         logprobs = logits - mx.logsumexp(logits)
-    
+
         if self.temp == 0:
             token = mx.argmax(logits, axis=-1)
         else:
             if self.top_p > 0 and self.top_p < 1.0:
                 token = top_p_sampling(logits, self.top_p, self.temp)
             elif self.min_p != 0.0:
-                token = min_p_sampling(logits, self.min_p, self.min_tokens_to_keep, self.temp)
+                token = min_p_sampling(
+                    logits, self.min_p, self.min_tokens_to_keep, self.temp
+                )
             else:
                 token = categorical_sampling(logits, self.temp)
-    
+
         return token, logprobs
