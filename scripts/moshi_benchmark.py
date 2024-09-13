@@ -72,7 +72,7 @@ def streaming_test(bs):
             be = time.time()
             ev = torch.cuda.Event(enable_timing=True)
             ev.record()
-            tokens = lm_gen.step(codes[:, :, c: c + 1])
+            tokens = lm_gen.step(codes[:, :, c : c + 1])
             if tokens is None:
                 print("Skipping")
                 return
@@ -89,7 +89,9 @@ def streaming_test(bs):
         dg = ev.elapsed_time(evb)
         torch.cuda.synchronize()
         dt = time.time() - start_time
-        print(f"step time: {1000 * dt:.2f}ms, lm step: {1000 * dt_step:.2f}, gpu step {dg:.2f}")
+        print(
+            f"step time: {1000 * dt:.2f}ms, lm step: {1000 * dt_step:.2f}, gpu step {dg:.2f}"
+        )
         text_token = text_tokens[0].item()
         if text_token not in (0, 3):
             _text = text_tokenizer.id_to_piece(text_token)
