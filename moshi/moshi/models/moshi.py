@@ -2,7 +2,9 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-import moshi
+from ..modules import SEANetEncoder, SEANetDecoder, transformer
+from ..models import EncodecModel, LMModel
+from ..quantization import SplitResidualVectorQuantizer
 import torch
 from safetensors.torch import load_model
 from pathlib import Path
@@ -95,18 +97,18 @@ def _is_safetensors(filename: tp.Union[str, Path]) -> bool:
 
 
 def get_encodec(filename: tp.Union[str, Path], device):
-    encoder = moshi.modules.SEANetEncoder(**seanet_kwargs)
-    decoder = moshi.modules.SEANetDecoder(**seanet_kwargs)
-    encoder_transformer = moshi.modules.transformer.ProjectedTransformer(
+    encoder = SEANetEncoder(**seanet_kwargs)
+    decoder = SEANetDecoder(**seanet_kwargs)
+    encoder_transformer = transformer.ProjectedTransformer(
         device=device, **transformer_kwargs
     )
-    decoder_transformer = moshi.modules.transformer.ProjectedTransformer(
+    decoder_transformer = transformer.ProjectedTransformer(
         device=device, **transformer_kwargs
     )
-    quantizer = moshi.quantization.SplitResidualVectorQuantizer(
+    quantizer = SplitResidualVectorQuantizer(
         **quantizer_kwargs,
     )
-    model = moshi.models.EncodecModel(
+    model = EncodecModel(
         encoder,
         decoder,
         quantizer,
@@ -134,7 +136,7 @@ def get_encodec(filename: tp.Union[str, Path], device):
 
 def get_lm(filename: tp.Union[str, Path], device):
     dtype = torch.bfloat16
-    model = moshi.models.LMModel(
+    model = LMModel(
         device=device,
         dtype=dtype,
         **lm_kwargs,
