@@ -3,7 +3,8 @@
 # LICENSE file in the root directory of this source tree.
 
 from ..modules import SEANetEncoder, SEANetDecoder, transformer
-from ..models import EncodecModel, LMModel
+from .encodec import EncodecModel
+from .lm import LMModel
 from ..quantization import SplitResidualVectorQuantizer
 import torch
 from safetensors.torch import load_model

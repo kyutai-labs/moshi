@@ -22,7 +22,7 @@ from torch import nn
 from torch.nn import functional as F
 
 
-from .. import quantization as qt
+from ..quantization import QuantizedResult, BaseQuantizer, SplitResidualVectorQuantizer, ResidualVectorQuantizer
 from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
 from ..modules.streaming import StreamingModule, State
 from ..utils.compile import no_compile, CUDAGraphed
@@ -37,7 +37,7 @@ class CompressionModel(StreamingModule[State]):
     """
 
     @abstractmethod
-    def forward(self, x: torch.Tensor) -> qt.QuantizedResult: ...
+    def forward(self, x: torch.Tensor) -> QuantizedResult: ...
 
     @abstractmethod
     def encode(self, x: torch.Tensor) -> torch.Tensor:
@@ -123,7 +123,7 @@ class EncodecModel(CompressionModel[_EncodecState]):
         self,
         encoder: nn.Module,
         decoder: nn.Module,
-        quantizer: qt.BaseQuantizer,
+        quantizer: BaseQuantizer,
         frame_rate: float,
         encoder_frame_rate: float,
         sample_rate: int,
@@ -285,19 +285,19 @@ class EncodecModel(CompressionModel[_EncodecState]):
         else:
             return no_compile()
 
-    def forward(self, x: torch.Tensor) -> qt.QuantizedResult:
+    def forward(self, x: torch.Tensor) -> QuantizedResult:
         assert x.dim() == 3
         length = x.shape[-1]
         extra_metrics: tp.Dict[str, torch.Tensor] = {}
 
         if self.freeze_quantizer:
-            if isinstance(self.quantizer, qt.SplitResidualVectorQuantizer):
+            if isinstance(self.quantizer, SplitResidualVectorQuantizer):
                 self.quantizer.rvq_first.eval()
                 for i in range(
                     self.freeze_quantizer_level - self.quantizer.n_q_semantic
                 ):
                     self.quantizer.rvq_rest.vq.layers[i].eval()
-            elif isinstance(self.quantizer, qt.ResidualVectorQuantizer):
+            elif isinstance(self.quantizer, ResidualVectorQuantizer):
                 for i in range(self.freeze_quantizer_level):
                     self.quantizer.vq.layers[i].eval()
             else:
@@ -420,7 +420,7 @@ class WrapperCompressionModel(CompressionModel[State]):
         super().__init__()
         self.model = model
 
-    def forward(self, x: torch.Tensor) -> qt.QuantizedResult:
+    def forward(self, x: torch.Tensor) -> QuantizedResult:
         return self.model.forward(x)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:

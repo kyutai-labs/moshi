@@ -17,9 +17,9 @@ from websockets.server import serve
 
 from huggingface_hub import hf_hub_download
 
-from .models import moshi, EncodecModel, LMGen
+from .models import moshi_, EncodecModel, LMGen
 
-SAMPLE_RATE = moshi.SAMPLE_RATE
+SAMPLE_RATE = moshi_.SAMPLE_RATE
 DEVICE = "cuda:0"
 ENABLE_PROFILING = False
 
@@ -87,11 +87,11 @@ class ServerState:
 
     def __init__(self):
         log("info", "loading mimi")
-        self.ec = moshi.get_encodec(args.mimi_weights, DEVICE)
+        self.ec = moshi_.get_encodec(args.mimi_weights, DEVICE)
         log("info", "mimi loaded")
         self.text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)
         log("info", "loading moshi")
-        lm = moshi.get_lm(args.moshi_weights, DEVICE)
+        lm = moshi_.get_lm(args.moshi_weights, DEVICE)
         self.lm_gen = LMGen(lm)
 
         self.frame_size = int(self.ec.sample_rate / self.ec.frame_rate)

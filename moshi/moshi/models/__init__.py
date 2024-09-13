@@ -17,4 +17,4 @@ from .encodec import (
     EncodecModel,
 )
 from .lm import LMModel, LMGen
-from .moshi import get_encodec, get_lm
+from .moshi_ import get_encodec, get_lm
