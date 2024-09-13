@@ -231,7 +231,8 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         """Renormalizes values from `rvq_first` and `rvq_rest` and adds them.
 
         This allows correcting statistics that are normalized by the number of quantizers. To renormalize, we use the
-        number of quantizers that are actually used, e.g. taking into account quantizer dropout."""
+        number of quantizers that are actually used, e.g. taking into account quantizer dropout.
+        """
         n_q = n_q_semantic + n_q_acoustic
         renorm_first_val = first_val * n_q_semantic / n_q
         renorm_rest_val = rest_val * n_q_acoustic / n_q

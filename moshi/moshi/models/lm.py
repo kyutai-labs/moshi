@@ -290,9 +290,15 @@ class LMModel(StreamingContainer):
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
         B, K, S = sequence.shape
-        assert K == 1, f"Codebooks for Depformer streaming should be passed 1 by 1, got {K}."
-        assert S == 1, f"Steps for Depformer streaming should be passed 1 by 1, got {S}."
-        assert transformer_out.shape[1] == 1, "Transformer out should be a for a single step."
+        assert (
+            K == 1
+        ), f"Codebooks for Depformer streaming should be passed 1 by 1, got {K}."
+        assert (
+            S == 1
+        ), f"Steps for Depformer streaming should be passed 1 by 1, got {S}."
+        assert (
+            transformer_out.shape[1] == 1
+        ), "Transformer out should be a for a single step."
         last_token_input: tp.Optional[torch.Tensor] = None
         depformer_input = transformer_out
         if self.depformer_multi_linear:
@@ -327,6 +333,7 @@ class _LMGenState:
     def reset(self):
         self.offset = 0
 
+
 class LMGen(StreamingModule[_LMGenState]):
     def __init__(
         self,
@@ -348,15 +355,22 @@ class LMGen(StreamingModule[_LMGenState]):
         self.top_k = top_k
         self.top_k_text = top_k_text
         self.check = check
-        self.max_delay = max(lm_model.delays)  # with delays, we need to generate a few more time steps.
-        self.delays_cuda = torch.tensor(lm_model.delays, device=lm_model.device, dtype=torch.long)
+        self.max_delay = max(
+            lm_model.delays
+        )  # with delays, we need to generate a few more time steps.
+        self.delays_cuda = torch.tensor(
+            lm_model.delays, device=lm_model.device, dtype=torch.long
+        )
 
     def _init_streaming_state(self, batch_size: int) -> _LMGenState:
         lm_model = self.lm_model
         initial = lm_model._get_initial_token()
         cache = torch.full(
-            (batch_size, self.lm_model.num_codebooks, self.max_delay + 2), lm_model.ungenerated_token_id,
-            device=lm_model.device, dtype=torch.long)
+            (batch_size, self.lm_model.num_codebooks, self.max_delay + 2),
+            lm_model.ungenerated_token_id,
+            device=lm_model.device,
+            dtype=torch.long,
+        )
 
         graphed_main = CUDAGraphed(lm_model.forward_text)
         graphed_depth = CUDAGraphed(self.depformer_step)
@@ -367,14 +381,18 @@ class LMGen(StreamingModule[_LMGenState]):
     def step(self, input_tokens: torch.Tensor) -> torch.Tensor | None:
         state = self._streaming_state
         if state is None:
-            raise RuntimeError("You should wrap those calls with a `with lm_gen.streaming(): ...`.")
+            raise RuntimeError(
+                "You should wrap those calls with a `with lm_gen.streaming(): ...`."
+            )
         lm_model = self.lm_model
 
         assert input_tokens.dim() == 3, "Shape should be [B, K, T]."
         B, Ki, S = input_tokens.shape
         assert S == 1, "Only support being given steps one by one."
         needed_tokens = lm_model.num_codebooks - lm_model.dep_q - 1
-        assert Ki == needed_tokens, f"We expect {needed_tokens} tokens from the user stream, got {Ki}."
+        assert (
+            Ki == needed_tokens
+        ), f"We expect {needed_tokens} tokens from the user stream, got {Ki}."
 
         CT = state.cache.shape[2]
 
@@ -382,8 +400,9 @@ class LMGen(StreamingModule[_LMGenState]):
             k = lm_model.dep_q + 1 + q_other
             delay = lm_model.delays[k]
             write_position = (state.offset + delay) % CT
-            state.cache[:, k, write_position: write_position + 1] = input_tokens[:, q_other]
-
+            state.cache[:, k, write_position : write_position + 1] = input_tokens[
+                :, q_other
+            ]
 
         position = state.offset % CT
         for k, delay in enumerate(lm_model.delays):
@@ -391,11 +410,14 @@ class LMGen(StreamingModule[_LMGenState]):
             # token that are delayed, and thus have no good value to take.
             if state.offset <= delay:
                 state.cache[:, k, position] = state.initial[:, k, 0]
-        input_ = state.cache[:, :, position: position + 1]
+        input_ = state.cache[:, :, position : position + 1]
 
         if self.check:
             # Check that we are not feeding in any value that is not generated yet.
-            assert not (input_ == lm_model.ungenerated_token_id).any(), (state.offset, input_)
+            assert not (input_ == lm_model.ungenerated_token_id).any(), (
+                state.offset,
+                input_,
+            )
             assert (input_[:, lm_model.audio_offset :] <= lm_model.card).all(), input_
             assert (input_[:, :1] <= lm_model.text_card).all()
 
@@ -417,13 +439,17 @@ class LMGen(StreamingModule[_LMGenState]):
         state.offset += 1
         position = state.offset % CT
         state.cache[:, 0, position] = text_token
-        state.cache[:, 1: lm_model.dep_q + 1, position] = audio_tokens
+        state.cache[:, 1 : lm_model.dep_q + 1, position] = audio_tokens
 
         if state.offset <= self.max_delay:
             return None
         B = state.cache.shape[0]
-        gen_delays_cuda = self.delays_cuda[:lm_model.dep_q + 1]
-        index = ((state.offset - self.max_delay + gen_delays_cuda) % CT).view(1, -1, 1).expand(B, -1, 1)
+        gen_delays_cuda = self.delays_cuda[: lm_model.dep_q + 1]
+        index = (
+            ((state.offset - self.max_delay + gen_delays_cuda) % CT)
+            .view(1, -1, 1)
+            .expand(B, -1, 1)
+        )
         out = state.cache.gather(dim=2, index=index)
         return out
 
@@ -432,7 +458,7 @@ class LMGen(StreamingModule[_LMGenState]):
         text_token: torch.Tensor,
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
-        B, = text_token.shape
+        (B,) = text_token.shape
         prev_token = text_token
         lm_model = self.lm_model
         depformer_tokens: list[torch.Tensor] = []
@@ -452,7 +478,10 @@ class LMGen(StreamingModule[_LMGenState]):
                 depformer_tokens.append(next_token)
                 prev_token = next_token
 
-        assert len(depformer_tokens) == lm_model.dep_q, (len(depformer_tokens), lm_model.dep_q)
+        assert len(depformer_tokens) == lm_model.dep_q, (
+            len(depformer_tokens),
+            lm_model.dep_q,
+        )
         out = torch.stack(depformer_tokens, dim=1)
         assert out.shape == (B, lm_model.dep_q), out.shape
         return out

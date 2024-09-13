@@ -38,7 +38,7 @@ def torch_compile_lazy(fun):
     """torch.compile creates a huge pool of processes, even when not using the function at all,
     e.g. with Dora. This can polute stderr when doing CTRL+C. So we do it in a lazy way.
     """
-    if os.environ.get('NO_TORCH_COMPILE'):
+    if os.environ.get("NO_TORCH_COMPILE"):
         return fun
     fun_compiled = None
 
@@ -50,6 +50,7 @@ def torch_compile_lazy(fun):
         if fun_compiled is None:
             fun_compiled = torch.compile(fun)
         return fun_compiled(*args, **kwargs)
+
     return _wrapped
 
 
@@ -66,10 +67,10 @@ class Checkpoint(torch.autograd.Function):
         for arg in args:
             if isinstance(arg, torch.Tensor):
                 to_save.append(arg)
-                ctx.sources.append('tensor')
+                ctx.sources.append("tensor")
                 new_args.append(arg.detach())
             else:
-                ctx.sources.append('other')
+                ctx.sources.append("other")
                 ctx.others.append(arg)
                 new_args.append(arg)
         ctx.save_for_backward(*to_save)
@@ -92,10 +93,10 @@ class Checkpoint(torch.autograd.Function):
             pseudo_tensors_copy = list(pseudo_tensors)
             args = []
             for source in ctx.sources:
-                if source == 'other':
+                if source == "other":
                     args.append(ctx.others.pop(0))
                 else:
-                    assert source == 'tensor'
+                    assert source == "tensor"
                     args.append(pseudo_tensors_copy.pop(0))
             res = ctx.function(*args)
             # The second forward with grad computation allows us to connect the input leaf tensors
@@ -108,10 +109,10 @@ class Checkpoint(torch.autograd.Function):
         out: tp.List[tp.Optional[torch.Tensor]] = [None]
         for source in ctx.sources:
             # We still need to output `None` values for non tensor parameters.
-            if source == 'other':
+            if source == "other":
                 out.append(None)
             else:
-                assert source == 'tensor'
+                assert source == "tensor"
                 out.append(pseudo_tensors.pop(0).grad)
         return tuple(out)
 
@@ -123,7 +124,7 @@ def simple_checkpoint(module: torch.nn.Module, *args, **kwargs):
     https://github.com/pytorch/pytorch/issues/97436.
     Should be resolved in nightlies, but it is quite fun and simple to code it ourselves.
     """
-    if hasattr(module, '_fsdp_wrapped_module'):
+    if hasattr(module, "_fsdp_wrapped_module"):
         module_for_sig = module._fsdp_wrapped_module
     else:
         module_for_sig = module
@@ -133,7 +134,10 @@ def simple_checkpoint(module: torch.nn.Module, *args, **kwargs):
     bounded = sig.bind(*args, **kwargs)
     new_args = []
     for name, param in sig.parameters.items():
-        if param.kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}:
+        if param.kind in {
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        }:
             raise RuntimeError("simple_checkpoint doesn't support var args.")
         if name not in bounded.arguments:
             break
@@ -164,8 +168,8 @@ def _set_in_cuda_graph():
 def _is_cuda_graph_enabled() -> bool:
     if _disable_cuda_graph:
         return False
-    no_cuda_graph = os.environ.get('NO_CUDA_GRAPH', '')
-    if no_cuda_graph.lower() not in {'0', 'no', 'n', ''}:
+    no_cuda_graph = os.environ.get("NO_CUDA_GRAPH", "")
+    if no_cuda_graph.lower() not in {"0", "no", "n", ""}:
         return False
     return True
 
@@ -191,6 +195,7 @@ class CUDAGraphed:
             arguments are NOT supported for simplicity.
         warmup_steps: how many call to make normally before CUDA Graphing. In particular, this
             allows torch.compiled functions to get properly compiled."""
+
     def __init__(self, func: tp.Callable, warmup_steps: int = 1):
         self.func = func
         self.warmup_steps = warmup_steps
@@ -222,19 +227,29 @@ class CUDAGraphed:
 
         def _match_values_copy_tensors(args: tuple, target_args: tuple) -> None:
             if len(args) != len(target_args):
-                raise ValueError(f"Expected {len(target_args)}, but got {args} for CUDA Graphed function.")
+                raise ValueError(
+                    f"Expected {len(target_args)}, but got {args} for CUDA Graphed function."
+                )
             for idx, (source, target) in enumerate(zip(args, target_args)):
                 if isinstance(target, torch.Tensor):
                     if not isinstance(source, torch.Tensor):
-                        raise ValueError(f"Argument #{idx} was a tensor, and is no longer (now {source}).")
+                        raise ValueError(
+                            f"Argument #{idx} was a tensor, and is no longer (now {source})."
+                        )
                     if source.shape != target.shape:
-                        raise ValueError(f"Argument #{idx} had shape {target.shape}, but got shae {source.shape}")
+                        raise ValueError(
+                            f"Argument #{idx} had shape {target.shape}, but got shae {source.shape}"
+                        )
                     target.copy_(source)
                 else:
                     if isinstance(source, torch.Tensor):
-                        raise ValueError(f"Argument #{idx} was not a tensor {target}, but is now one.")
+                        raise ValueError(
+                            f"Argument #{idx} was not a tensor {target}, but is now one."
+                        )
                     if source is not target and source != target:
-                        raise ValueError(f"Argument #{idx} changed value from {target} to {source}.")
+                        raise ValueError(
+                            f"Argument #{idx} changed value from {target} to {source}."
+                        )
 
         with _set_in_cuda_graph():
             # Prevent any one under us to try and CUDA Graph things.

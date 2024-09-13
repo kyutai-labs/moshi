@@ -10,7 +10,10 @@ from ..utils.compile import torch_compile_lazy
 
 @torch_compile_lazy
 def apply_rope(
-    q: torch.Tensor, k: torch.Tensor, offset: torch.Tensor, max_period: float = 10_000,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    offset: torch.Tensor,
+    max_period: float = 10_000,
     time_before_heads: bool = False,
 ):
     """
@@ -38,7 +41,6 @@ def apply_rope(
         ts = ts.view(-1, 1, 1)
     else:
         ts = ts.view(1, -1, 1)
-
 
     dims = q.shape[:-1]
     q = q.view(*dims, D // 2, 2)
@@ -77,6 +79,12 @@ class RotaryEmbedding(nn.Module):
         super().__init__()
         self.max_period = max_period
 
-    def forward(self, q: torch.Tensor, k: torch.Tensor, offset: torch.Tensor, time_before_heads: bool = False):
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        offset: torch.Tensor,
+        time_before_heads: bool = False,
+    ):
         """Apply rope rotation to query or key tensor."""
         return apply_rope(q, k, offset, self.max_period, time_before_heads)

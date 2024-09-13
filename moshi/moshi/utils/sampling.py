@@ -104,6 +104,7 @@ def sample_token(
     assert next_token.shape[-1] == 1
     return next_token[..., 0]
 
+
 if __name__ == "__main__":
     torch.manual_seed(1234)
     device = "cpu"
@@ -112,7 +113,7 @@ if __name__ == "__main__":
         torch.backends.cudnn.allow_tf32 = False
         device = "cuda:0"
 
-    ps = torch.tensor([5., 2., 12., 6., 8., 1., 0., 4.], device=device)
+    ps = torch.tensor([5.0, 2.0, 12.0, 6.0, 8.0, 1.0, 0.0, 4.0], device=device)
     cnts = torch.zeros(ps.shape, dtype=torch.long, device=device)
     total_samples = 1000
     for _ in range(total_samples):
@@ -123,4 +124,3 @@ if __name__ == "__main__":
     print(ps / ps.sum())
     print(cnts / cnts.sum())
     assert max_diff < 1.5e-2
-

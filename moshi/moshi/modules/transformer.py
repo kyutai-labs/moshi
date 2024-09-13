@@ -151,7 +151,10 @@ def create_sin_embedding(
 
 
 def multi_linear(
-    num_linear: int, weight: torch.Tensor, x: torch.Tensor, offset: int,
+    num_linear: int,
+    weight: torch.Tensor,
+    x: torch.Tensor,
+    offset: int,
 ):
     """Utility to apply a multi linear layer to the given input. A multi linear layer
     applies a different set of weight for each time step.
@@ -196,7 +199,7 @@ class KVCacheResult(tp.NamedTuple):
     positions: torch.Tensor
 
     @staticmethod
-    def from_kv(keys: torch.Tensor, values: torch.Tensor) -> 'KVCacheResult':
+    def from_kv(keys: torch.Tensor, values: torch.Tensor) -> "KVCacheResult":
         B, H, T, D = keys.shape
         assert tuple(values.shape[:-1]) == (B, H, T)
         positions = torch.arange(T, device=keys.device, dtype=torch.long)
@@ -227,7 +230,8 @@ class RingKVCache:
         self.cache = torch.zeros(
             (2, batch_size, num_heads, capacity, dim_per_head),
             device=device,
-            dtype=dtype)
+            dtype=dtype,
+        )
         self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
 
     def reset(self):
@@ -236,7 +240,10 @@ class RingKVCache:
     def complete(self, k: torch.Tensor, v: torch.Tensor) -> KVCacheResult:
         assert k.shape[:-1] == v.shape[:-1], (k.shape, v.shape)
         B, H, T, D = k.shape
-        indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype) + self.end_offset
+        indexes = (
+            torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype)
+            + self.end_offset
+        )
         indexes = indexes % self.capacity
         self.cache[0].index_copy_(2, indexes, k)
         self.cache[1].index_copy_(2, indexes, v)
@@ -245,7 +252,9 @@ class RingKVCache:
         keys = self.cache[0]
         values = self.cache[1]
 
-        indexes = torch.arange(self.capacity, device=self.end_offset.device, dtype=torch.long)
+        indexes = torch.arange(
+            self.capacity, device=self.end_offset.device, dtype=torch.long
+        )
         invalid = indexes >= self.end_offset
 
         end_index = self.end_offset % self.capacity
@@ -340,16 +349,23 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             if self.weights_per_step:
                 capacity = self.weights_per_step
             else:
-                raise RuntimeError("Cannot create a streaming KVCache without a context to estimate capacity.")
+                raise RuntimeError(
+                    "Cannot create a streaming KVCache without a context to estimate capacity."
+                )
         else:
             capacity = self.context
         device = self.in_proj_weight.device
         # TODO: the following estimation will not work great with FSDP.
         dtype = self.in_proj_weight.dtype
         dim_per_head = self.embed_dim // self.num_heads
-        kv_cache = RingKVCache(batch_size, self.num_heads, dim_per_head, capacity, device, dtype)
-        return _MHAState(kv_cache, offset=torch.zeros(1, device=device, dtype=torch.long), offset_cpu=0)
-
+        kv_cache = RingKVCache(
+            batch_size, self.num_heads, dim_per_head, capacity, device, dtype
+        )
+        return _MHAState(
+            kv_cache,
+            offset=torch.zeros(1, device=device, dtype=torch.long),
+            offset_cpu=0,
+        )
 
     def _complete_kv(self, k, v) -> KVCacheResult:
         state = self._streaming_state
@@ -376,7 +392,9 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             )
         else:
             projected = nn.functional.linear(query, self.in_proj_weight)
-        q, k, v = rearrange(projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads)
+        q, k, v = rearrange(
+            projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
+        )
 
         if self.rope:
             q, k = self.rope(q, k, offset, time_before_heads=False)
@@ -384,7 +402,9 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         k, v, pos_k = self._complete_kv(k, v)
         if self.causal:
             pos_k = pos_k.view(1, -1)
-            pos_q = offset + torch.arange(T, device=q.device, dtype=torch.long).view(-1, 1)
+            pos_q = offset + torch.arange(T, device=q.device, dtype=torch.long).view(
+                -1, 1
+            )
             delta = pos_q - pos_k
             attn_bias = (pos_k >= 0) & (delta >= 0)
             if self.context is not None:
@@ -395,9 +415,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
         x = rearrange(x, "b h t d -> b t (h d)")
         if self.weights_per_step:
-            x = multi_linear(
-                self.weights_per_step, self.out_proj.weight, x, offset_cpu
-            )
+            x = multi_linear(self.weights_per_step, self.out_proj.weight, x, offset_cpu)
         else:
             x = self.out_proj(x)
         if state is not None:

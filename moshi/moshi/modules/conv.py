@@ -122,7 +122,9 @@ class NormConv1d(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        self.conv = apply_parametrization_norm(RawStreamingConv1d(*args, **kwargs), norm)
+        self.conv = apply_parametrization_norm(
+            RawStreamingConv1d(*args, **kwargs), norm
+        )
         self.norm_type = norm
 
     def forward(self, x):
@@ -215,7 +217,9 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
     @property
     def _effective_kernel_size(self) -> int:
         dilation = self.conv.conv.dilation[0]
-        return (self._kernel_size - 1) * dilation + 1  # effective kernel size with dilations
+        return (
+            self._kernel_size - 1
+        ) * dilation + 1  # effective kernel size with dilations
 
     @property
     def _padding_total(self) -> int:
@@ -224,7 +228,6 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
     def _init_streaming_state(self, batch_size: int) -> _StreamingConv1dState:
         assert self.causal, "streaming is only supported for causal convs"
         return _StreamingConv1dState(self._padding_total, self._padding_total)
-
 
     def forward(self, x):
         B, C, T = x.shape
@@ -299,7 +302,6 @@ class StreamingConvTranspose1d(StreamingModule[_StreamingConvTr1dState]):
     def _init_streaming_state(self, batch_size: int) -> _StreamingConvTr1dState:
         assert self.causal, "streaming is only supported for causal convtrs"
         return _StreamingConvTr1dState()
-
 
     def forward(self, x):
         kernel_size = self.convtr.convtr.kernel_size[0]

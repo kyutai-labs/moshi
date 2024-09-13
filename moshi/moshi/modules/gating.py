@@ -65,7 +65,9 @@ def _get_activation(name: str):
 def _make_gating(
     name: str, dim: int, dim_feedforward: int, **factory_kwargs
 ) -> nn.Module:
-    return ActivationGating(dim, dim_feedforward, _get_activation(name), **factory_kwargs)
+    return ActivationGating(
+        dim, dim_feedforward, _get_activation(name), **factory_kwargs
+    )
 
 
 def make_gating(
