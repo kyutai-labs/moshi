@@ -17,9 +17,9 @@ from websockets.server import serve
 
 from huggingface_hub import hf_hub_download
 
-import msh
+import moshi
 
-SAMPLE_RATE = msh.models.moshi.SAMPLE_RATE
+SAMPLE_RATE = moshi.models.moshi.SAMPLE_RATE
 DEVICE = "cuda:0"
 ENABLE_PROFILING = False
 
@@ -80,19 +80,19 @@ seed_all(42424242)
 
 @dataclass
 class ServerState:
-    ec: msh.models.EncodecModel
+    ec: moshi.models.EncodecModel
     text_tokenizer: sentencepiece.SentencePieceProcessor
-    lm_gen: msh.models.LMGen
+    lm_gen: moshi.models.LMGen
     lock: asyncio.Lock
 
     def __init__(self):
         log("info", "loading mimi")
-        self.ec = msh.models.moshi.get_encodec(args.mimi_weights, DEVICE)
+        self.ec = moshi.models.moshi.get_encodec(args.mimi_weights, DEVICE)
         log("info", "mimi loaded")
         self.text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)
         log("info", "loading moshi")
-        lm = msh.models.moshi.get_lm(args.moshi_weights, DEVICE)
-        self.lm_gen = msh.models.LMGen(lm)
+        lm = moshi.models.moshi.get_lm(args.moshi_weights, DEVICE)
+        self.lm_gen = moshi.models.LMGen(lm)
 
         self.frame_size = int(self.ec.sample_rate / self.ec.frame_rate)
         self.lock = asyncio.Lock()

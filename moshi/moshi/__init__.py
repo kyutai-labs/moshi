@@ -3,7 +3,7 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-msh is the inference codebase for Kyutai audio generation models.
+moshi is the inference codebase for Kyutai audio generation models.
 
 The code has been adapted from Audiocraft, see LICENSE.audiocraft
   Copyright (c) Meta Platforms, Inc. and affiliates.
