@@ -29,16 +29,23 @@ class LmConfig:
     audio_codebooks: int
     audio_delays: List[int]
 
-    @property 
+    @property
     def audio_eos_token(self) -> int:
         return self.audio_vocab_size - 2
 
-    @property 
+    @property
     def audio_padding_token(self) -> int:
         return self.audio_vocab_size - 1
 
+
 class DepFormerSlice(nn.Module):
-    def __init__(self, in_vocab_size: int, out_vocab_size: int, main_transformer_dim: int, cfg: TransformerConfig):
+    def __init__(
+        self,
+        in_vocab_size: int,
+        out_vocab_size: int,
+        main_transformer_dim: int,
+        cfg: TransformerConfig,
+    ):
         super().__init__()
 
         dim = cfg.d_model
@@ -83,7 +90,9 @@ class DepFormer(nn.Module):
         for c in cache:
             c.reset()
         for slice_idx, slice in enumerate(self.slices):
-            last_token = last_token if step_idx > 0 or slice_idx in (0, 1, 9) else mx.array(2048)
+            last_token = (
+                last_token if step_idx > 0 or slice_idx in (0, 1, 9) else mx.array(2048)
+            )
             xs = slice.linear_in(main_transformer_out) + slice.emb(last_token)
             xs = slice.transformer(xs, cache=cache)
             logits = slice.linear_out(xs)
@@ -111,10 +120,15 @@ class Lm(nn.Module):
             raise ValueError(f"unsupported norm type {cfg.transformer.norm}")
 
         self.text_linear = nn.Linear(dim, cfg.text_out_vocab_size, bias=False)
-        self.audio_embs = [nn.Embedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)]
-        self.transformer_cache: list[RotatingKVCache] = self.transformer.make_rot_cache()
-        self.depformer_cache: list[KVCache] = self.depformer.slices[0].transformer.make_cache()
-
+        self.audio_embs = [
+            nn.Embedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)
+        ]
+        self.transformer_cache: list[RotatingKVCache] = (
+            self.transformer.make_rot_cache()
+        )
+        self.depformer_cache: list[KVCache] = self.depformer.slices[
+            0
+        ].transformer.make_cache()
 
     def __call__(
         self,
@@ -136,7 +150,7 @@ class Lm(nn.Module):
         audio_sampler: sampling.Sampler,
     ) -> Tuple[mx.array, mx.array]:
         xs = self.text_emb(text_token_ids)
-        for (token_ids, emb) in zip(audio_token_ids, self.audio_embs):
+        for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             xs = xs + emb(token_ids)
         transformer_out = self.transformer(xs, cache=self.transformer_cache)
         transformer_out = self.out_norm(transformer_out)
@@ -167,13 +181,12 @@ class Lm(nn.Module):
             c.reset()
 
 
-
 def config_v0_1() -> LmConfig:
     transformer = TransformerConfig(
         d_model=4096,
         num_heads=32,
         num_layers=32,
-        dim_feedforward=4096 * 4, # dim * hidden_scale
+        dim_feedforward=4096 * 4,  # dim * hidden_scale
         causal=True,
         norm_first=True,
         bias_ff=False,
@@ -197,7 +210,7 @@ def config_v0_1() -> LmConfig:
             d_model=1024,
             num_heads=16,
             num_layers=6,
-            dim_feedforward=1024 * 4, # dim * hidden_scale
+            dim_feedforward=1024 * 4,  # dim * hidden_scale
             causal=True,
             norm_first=True,
             bias_ff=False,
@@ -227,4 +240,3 @@ def config_v0_1() -> LmConfig:
         audio_codebooks=16,
         audio_delays=([0] + [1] * 7) * 2,
     )
-

@@ -28,10 +28,12 @@ from huggingface_hub import hf_hub_download
 SAMPLE_RATE = 24000
 CHANNELS = 1
 
+
 class Stats:
     send_times: tp.List[float] = []
     model_times: tp.List[tp.Tuple[float, float]] = []
     recv_times: tp.List[float] = []
+
 
 class PrinterType(Enum):
     TOKEN = 1
@@ -44,9 +46,10 @@ class PrinterType(Enum):
     EVENT = 8
     QSIZE = 9
 
+
 def full_warmup(audio_tokenizer, client_to_server, server_to_client):
     for i in range(4):
-        pcm_data = np.array([0.] * 1920).astype(np.float32)
+        pcm_data = np.array([0.0] * 1920).astype(np.float32)
         audio_tokenizer.encode(pcm_data)
         while True:
             time.sleep(0.01)
@@ -64,23 +67,32 @@ def full_warmup(audio_tokenizer, client_to_server, server_to_client):
             if data is not None:
                 break
 
+
 def server(printer_q, client_to_server, server_to_client, args):
     model_file = args.model
     tokenizer_file = args.tokenizer
     if model_file is None:
         if args.quantized == 8:
-            model_file = hf_hub_download(args.hf_repo, "moshiko_mlx_301e30bf@120.q8.safetensors")
+            model_file = hf_hub_download(
+                args.hf_repo, "moshiko_mlx_301e30bf@120.q8.safetensors"
+            )
         elif args.quantized == 4:
-            model_file = hf_hub_download(args.hf_repo, "moshiko_mlx_301e30bf@120.q4.safetensors")
+            model_file = hf_hub_download(
+                args.hf_repo, "moshiko_mlx_301e30bf@120.q4.safetensors"
+            )
         elif args.quantized is not None:
             raise ValueError(f"Invalid quantized value: {args.quantized}")
         else:
-            model_file = hf_hub_download(args.hf_repo, "moshiko_mlx_301e30bf@120.safetensors")
+            model_file = hf_hub_download(
+                args.hf_repo, "moshiko_mlx_301e30bf@120.safetensors"
+            )
     if tokenizer_file is None:
         tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
     steps = args.steps
+
     def log(s):
         printer_q.put_nowait((PrinterType.INFO, s))
+
     log(f"[SERVER] loading text tokenizer {tokenizer_file}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
     mx.random.seed(299792458)
@@ -136,15 +148,18 @@ def server(printer_q, client_to_server, server_to_client, args):
 def client(printer_q, client_to_server, server_to_client, args):
     mimi_file = args.mimi
     if mimi_file is None:
-        mimi_file = hf_hub_download(args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors")
+        mimi_file = hf_hub_download(
+            args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors"
+        )
     input_queue = queue.Queue()
     output_queue = queue.Queue()
     audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)
     start = server_to_client.get()
-    printer_q.put_nowait((PrinterType.INFO, f"[CLIENT] received '{start}' from server, starting..."))
+    printer_q.put_nowait(
+        (PrinterType.INFO, f"[CLIENT] received '{start}' from server, starting...")
+    )
 
     full_warmup(audio_tokenizer, client_to_server, server_to_client)
-
 
     async def send_loop():
         while True:
@@ -194,6 +209,7 @@ def client(printer_q, client_to_server, server_to_client, args):
 
     cnt_output = 0
     last_qsize = 0
+
     def on_output(out_data, frames, time, status):
         nonlocal cnt_output, last_qsize
         assert out_data.shape == (1920, 1), out_data.shape
@@ -212,7 +228,6 @@ def client(printer_q, client_to_server, server_to_client, args):
                 printer_q.put_nowait((PrinterType.LAG, ""))
             out_data.fill(0)
 
-
     out_stream = sd.OutputStream(
         samplerate=SAMPLE_RATE,
         channels=CHANNELS,
@@ -223,10 +238,12 @@ def client(printer_q, client_to_server, server_to_client, args):
     async def go():
         with in_stream, out_stream:
             await asyncio.gather(recv_loop(), send_loop(), recv_loop2(), send_loop2())
+
     try:
         asyncio.run(go())
     except KeyboardInterrupt:
         pass
+
 
 def main(printer: AnyPrinter):
     parser = argparse.ArgumentParser()
@@ -244,7 +261,7 @@ def main(printer: AnyPrinter):
     printer_q = multiprocessing.Queue()
 
     # Create two processes
-    subprocess_args= printer_q, client_to_server, server_to_client, args
+    subprocess_args = printer_q, client_to_server, server_to_client, args
     p1 = multiprocessing.Process(target=client, args=subprocess_args)
     p2 = multiprocessing.Process(target=server, args=subprocess_args)
 
@@ -270,13 +287,15 @@ def main(printer: AnyPrinter):
                     printer.log("error", value)
                 elif ty == PrinterType.LAG:
                     printer.print_lag()
-                    events.append({"event": "lag", "time": time.time() })
+                    events.append({"event": "lag", "time": time.time()})
                 elif ty == PrinterType.HEADER:
                     printer.print_header()
                 elif ty == PrinterType.EVENT:
-                    events.append({"event": value, "time": time.time() })
+                    events.append({"event": value, "time": time.time()})
                 elif ty == PrinterType.QSIZE:
-                    events.append({"event": "qsize", "qsize": value, "time": time.time() })
+                    events.append(
+                        {"event": "qsize", "qsize": value, "time": time.time()}
+                    )
             except queue.Empty:
                 continue
     except KeyboardInterrupt:
@@ -316,15 +335,17 @@ def main(printer: AnyPrinter):
             args["qsize"] = e["qsize"]
         else:
             printer.log("warning", f"unknown event {event}")
-        chrome_events.append({
-            "name": name,
-            "cat": "",
-            "ph": ph,
-            "ts": e["time"] * 1e6,
-            "pid": 1,
-            "tid": tid,
-            "args": args,
-        })
+        chrome_events.append(
+            {
+                "name": name,
+                "cat": "",
+                "ph": ph,
+                "ts": e["time"] * 1e6,
+                "pid": 1,
+                "tid": tid,
+                "args": args,
+            }
+        )
     with open("mlx-trace.json", "w") as fobj:
         json.dump(chrome_events, fobj)
 
@@ -341,4 +362,3 @@ if __name__ == "__main__":
     else:
         printer = RawPrinter()
     main(printer)
-
