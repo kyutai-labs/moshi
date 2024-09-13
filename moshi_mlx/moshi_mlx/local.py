@@ -21,7 +21,7 @@ import mlx.nn as nn
 
 from client_utils import AnyPrinter, Printer, RawPrinter
 import rustymimi
-import msh_mlx
+import moshi_mlx
 
 from huggingface_hub import hf_hub_download
 
@@ -84,8 +84,8 @@ def server(printer_q, client_to_server, server_to_client, args):
     log(f"[SERVER] loading text tokenizer {tokenizer_file}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
     mx.random.seed(299792458)
-    lm_config = msh_mlx.models.config_v0_1()
-    model = msh_mlx.models.Lm(lm_config)
+    lm_config = moshi_mlx.models.config_v0_1()
+    model = moshi_mlx.models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if args.quantized is not None:
         group_size = 32 if args.quantized == 4 else 64
@@ -97,11 +97,11 @@ def server(printer_q, client_to_server, server_to_client, args):
 
     model.warmup()
     log("[SERVER] model warmed up")
-    gen = msh_mlx.models.LmGen(
+    gen = moshi_mlx.models.LmGen(
         model=model,
         max_steps=steps + 5,
-        text_sampler=msh_mlx.utils.Sampler(),
-        audio_sampler=msh_mlx.utils.Sampler(),
+        text_sampler=moshi_mlx.utils.Sampler(),
+        audio_sampler=moshi_mlx.utils.Sampler(),
         check=False,
     )
 
