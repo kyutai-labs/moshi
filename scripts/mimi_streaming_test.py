@@ -3,7 +3,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-import msh
+import moshi
 import time
 import torch
 import sphn
@@ -11,7 +11,7 @@ from torch.profiler import profile, ProfilerActivity
 import numpy as np
 import random
 
-SAMPLE_RATE = msh.models.moshi.SAMPLE_RATE
+SAMPLE_RATE = moshi.models.moshi.SAMPLE_RATE
 DEVICE = "cuda:0"
 ENABLE_PROFILING = False
 
@@ -35,7 +35,7 @@ seed_all(42424242)
 
 
 print("loading mimi")
-ec = msh.models.moshi.get_encodec(args.weights, DEVICE)
+ec = moshi.models.moshi.get_encodec(args.weights, DEVICE)
 print("mimi loaded")
 
 
