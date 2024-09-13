@@ -3,7 +3,7 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-msh_mlx is the MLX inference codebase for Kyutai audio generation models.
+moshi_mlx is the MLX inference codebase for Kyutai audio generation models.
 """
 
 # flake8: noqa

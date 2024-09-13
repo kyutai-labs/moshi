@@ -18,7 +18,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_map_with_path
 
-import msh_mlx
+import moshi_mlx
 
 class Stats:
     send_times: tp.List[float] = []
@@ -40,17 +40,17 @@ class Stats:
         self.recv_times.append(t)
 
 
-def run_audio_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
+def run_audio_gen(model: moshi_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
     import rustymimi
 
     audio_tokenizer = rustymimi.Tokenizer(mimi_path)
 
     model.warmup()
-    gen = msh_mlx.models.LmGen(
+    gen = moshi_mlx.models.LmGen(
         model=model,
         max_steps=steps + 5,
-        text_sampler=msh_mlx.utils.Sampler(),
-        audio_sampler=msh_mlx.utils.Sampler(),
+        text_sampler=moshi_mlx.utils.Sampler(),
+        audio_sampler=moshi_mlx.utils.Sampler(),
         check=False,
     )
     pcm_data = np.array([[[0.] * 1920]]).astype(np.float32)
@@ -78,18 +78,18 @@ def run_audio_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, step
     all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
     rustymimi.write_wav("out.wav", all_out_pcm[0, 0], sample_rate=24000)
 
-async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
+async def run_audio_gen_stream(model: moshi_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
     import rustymimi
 
     audio_tokenizer = rustymimi.StreamTokenizer(mimi_path)
     stats = Stats()
 
     model.warmup()
-    gen = msh_mlx.models.LmGen(
+    gen = moshi_mlx.models.LmGen(
         model=model,
         max_steps=steps + 5,
-        text_sampler=msh_mlx.utils.Sampler(),
-        audio_sampler=msh_mlx.utils.Sampler(),
+        text_sampler=moshi_mlx.utils.Sampler(),
+        audio_sampler=moshi_mlx.utils.Sampler(),
         check=False,
     )
     end_queue = queue.Queue()
@@ -162,11 +162,11 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
 
 
 
-def run_text_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
+def run_text_gen(model: moshi_mlx.models.Lm, text_tokenizer, steps: int):
     start_time = 0
     last_text_token = mx.array([[32000]])
-    text_sampler = msh_mlx.utils.Sampler()
-    audio_sampler = msh_mlx.utils.Sampler()
+    text_sampler = moshi_mlx.utils.Sampler()
+    audio_sampler = moshi_mlx.utils.Sampler()
     for i in range(steps + 1):
         if i == 1:
             start_time = time.time()
@@ -213,11 +213,11 @@ def main():
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
     mx.random.seed(299792458)
 
-    lm_config = msh_mlx.models.config_v0_1()
+    lm_config = moshi_mlx.models.config_v0_1()
     if args.verbose:
         print(f"model config:\n{lm_config}")
 
-    model = msh_mlx.models.Lm(lm_config)
+    model = moshi_mlx.models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if args.quantized is not None:
         nn.quantize(model, bits=args.quantized)

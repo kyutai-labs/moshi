@@ -3,7 +3,7 @@
 There are three separate versions of the moshi inference stack in this repo.
 - The rust version used in production is in the `rust` directory.
 - The python version using PyTorch is in the `msh` directory.
-- The python version using MLX is in the `msh_mlx` directory.
+- The python version using MLX is in the `moshi_mlx` directory.
 
 ## Rust
 
@@ -94,7 +94,7 @@ maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 
 Then the model can be run with:
 ```bash
-PYTHONPATH=. python local_mlx.py  \
+PYTHONPATH=moshi_mlx python -m moshi_mlx.local  \
     --model ~/tmp/moshiko_mlx_301e30bf@120.q8.safetensors \
     --mimi ~/tmp/tokenizer-e351c8d8-checkpoint125.safetensors \
     --quantized 8
