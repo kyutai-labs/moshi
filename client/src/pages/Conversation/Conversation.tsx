@@ -48,7 +48,7 @@ const buildURL = ({
     workerAddr = window.location.hostname + ":" + window.location.port;
     console.log("Overriding workerAddr to", workerAddr);
   }
-  const wsProtocol = (window.location.protocol === 'https:') ? 'wss://' : 'ws://';
+  const wsProtocol = (window.location.protocol === 'https:') ? 'wss' : 'ws';
   const url = new URL(`${wsProtocol}://${workerAddr}/api/chat`);
   if(workerAuthId) {
     url.searchParams.append("worker_auth_id", workerAuthId);
