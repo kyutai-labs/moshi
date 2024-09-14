@@ -12,8 +12,8 @@ import numpy as np
 import sentencepiece
 import sphn
 import torch
-import websockets
-from websockets.server import serve
+import aiohttp
+from aiohttp import web
 
 from huggingface_hub import hf_hub_download
 
@@ -114,13 +114,24 @@ class ServerState:
                 _ = self.ec.decode(tokens[:, 1:])
         torch.cuda.synchronize()
 
-    async def handle_conn(self, websocket, path):
+    async def handle_chat(self, request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
         async def recv_loop():
             nonlocal close
             try:
-                async for message in websocket:
+                async for message in ws:
+                    if message.type == aiohttp.WSMsgType.ERROR:
+                        log("error", f"{ws.exception()}")
+                        break
+                    elif message.type == aiohttp.WSMsgType.CLOSED:
+                        break
+                    elif message.type != aiohttp.WSMsgType.BINARY:
+                        log("error", f"unexpected message type {message.type}")
+                        continue
+                    message = message.data
                     if not isinstance(message, bytes):
-                        log("error", "unsupported message type {type(message)}")
+                        log("error", f"unsupported message type {type(message)}")
                         continue
                     if len(message) == 0:
                         log("warning", "empty message")
@@ -131,8 +142,6 @@ class ServerState:
                         opus_reader.append_bytes(payload)
                     else:
                         log("warning", "unknown message kind {kind}")
-            except websockets.exceptions.WebSocketException:
-                log("error", "dropped connection.")
             finally:
                 close = True
                 log("info", "connection closed")
@@ -172,7 +181,7 @@ class ServerState:
                             _text = _text.replace("▁", " ")
                             msg = b"\x02" + bytes(_text, encoding="utf8")
                             log("info", f"text token '{_text}'")
-                            await websocket.send(msg)
+                            await ws.send_bytes(msg)
                     log("info", f"frame handled in {1000 * (time.time() - be):.1f}ms")
 
         async def send_loop():
@@ -182,7 +191,7 @@ class ServerState:
                 await asyncio.sleep(0.001)
                 msg = opus_writer.read_bytes()
                 if len(msg) > 0:
-                    await websocket.send(b"\x01" + msg)
+                    await ws.send_bytes(b"\x01" + msg)
 
         log("info", "accepted connection")
         close = False
@@ -193,16 +202,19 @@ class ServerState:
             self.lm_gen.reset_streaming()
             await asyncio.gather(opus_loop(), recv_loop(), send_loop())
         log("info", "done with connection")
+        return ws
 
 
-async def main():
+def main():
     state = ServerState()
     log("info", "warming up the model")
     state.warmup()
+    app = web.Application()
+    # TODO(laurent): serve some static directory so as to re-use the web UI.
+    # app.router.add_get('/', handle_http_request)  # HTTP route
+    app.router.add_get('/api/chat', state.handle_chat)
     log("info", f"listening to ws://{args.host}:{args.port}")
-    async with serve(state.handle_conn, args.host, args.port):
-        await asyncio.Future()  # run forever
-
+    web.run_app(app, port=args.port)
 
 with torch.no_grad():
-    asyncio.run(main())
+    main()

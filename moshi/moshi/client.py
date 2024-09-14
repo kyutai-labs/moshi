@@ -10,7 +10,7 @@ import sys
 import numpy as np
 import sphn
 import sounddevice as sd
-import websockets
+import aiohttp
 
 from .client_utils import AnyPrinter, Printer, RawPrinter
 
@@ -19,7 +19,7 @@ class Connection:
     def __init__(
         self,
         printer: AnyPrinter,
-        websocket: websockets.WebSocketClientProtocol,
+        websocket: aiohttp.ClientWebSocketResponse,
         sample_rate: float = 24000,
         channels: int = 1,
         frame_size: int = 1920,
@@ -56,8 +56,9 @@ class Connection:
             msg = self._opus_writer.read_bytes()
             if len(msg) > 0:
                 try:
-                    await self.websocket.send(b"\x01" + msg)
-                except websockets.WebSocketException:
+                    await self.websocket.send_bytes(b"\x01" + msg)
+                except Exception as e:
+                    print(e)
                     self._lost_connection()
                     return
 
@@ -77,28 +78,38 @@ class Connection:
                 all_pcm_data = np.array(all_pcm_data[self.frame_size :])
 
     async def _recv_loop(self) -> None:
-        while True:
-            try:
-                message = await self.websocket.recv()
-            except websockets.exceptions.WebSocketException:
-                self._lost_connection()
-                return
-            if not isinstance(message, bytes):
-                self.printer.log("warning", f"unsupported message type {type(message)}")
-                continue
-            if len(message) == 0:
-                self.printer.log("warning", "empty message")
-                continue
-            kind = message[0]
-            if kind == 1:  # audio
-                payload = message[1:]
-                self._opus_reader.append_bytes(payload)
-                self.printer.print_pending()
-            elif kind == 2:  # text
-                payload = message[1:]
-                self.printer.print_token(payload.decode())
-            else:
-                self.printer.log("warning", f"unknown message kind {kind}")
+        try:
+            async for message in self.websocket:
+                if message.type == aiohttp.WSMsgType.CLOSED:
+                    self.printer.log("info", "Connection closed")
+                    break
+                elif message.type == aiohttp.WSMsgType.ERROR:
+                    self.printer.log("error", f"{self.websocket.exception()}")
+                    break
+                elif message.type != aiohttp.WSMsgType.BINARY:
+                    self.printer.log("error", f"received from server: {message.type}")
+                    continue
+                message = message.data
+                if not isinstance(message, bytes):
+                    self.printer.log("warning", f"unsupported message type {type(message)}")
+                    continue
+                if len(message) == 0:
+                    self.printer.log("warning", "empty message")
+                    continue
+                kind = message[0]
+                if kind == 1:  # audio
+                    payload = message[1:]
+                    self._opus_reader.append_bytes(payload)
+                    self.printer.print_pending()
+                elif kind == 2:  # text
+                    payload = message[1:]
+                    self.printer.print_token(payload.decode())
+                else:
+                    self.printer.log("warning", f"unknown message kind {kind}")
+        except Exception as e:
+            print(e)
+            self._lost_connection()
+            return
 
     def _lost_connection(self) -> None:
         if not self._done:
@@ -126,25 +137,14 @@ class Connection:
                 self._recv_loop(), self._decoder_loop(), self._queue_loop()
             )
 
-
-async def do_connection(printer: AnyPrinter, uri: str, action):
-    try:
-        async with websockets.connect(uri) as websocket:
+async def run(printer: AnyPrinter, args):
+    uri = f"ws://{args.host}:{args.port}/api/chat"
+    async with aiohttp.ClientSession() as session:
+        async with session.ws_connect(uri) as ws:
             printer.log("info", "connected!")
             printer.print_header()
-            await action(websocket)
-    except websockets.WebSocketException:
-        printer.log("error", "Failed to connect!")
-        sys.exit(1)
-
-
-async def run(printer: AnyPrinter, args):
-    async def action(websocket: websockets.WebSocketClientProtocol):
-        connection = Connection(printer, websocket)
-        await connection.run()
-
-    uri = f"ws://{args.host}:{args.port}"
-    await do_connection(printer, uri, action)
+            connection = Connection(printer, ws)
+            await connection.run()
 
 
 def main():

@@ -5,5 +5,5 @@ sounddevice==0.5.0
 soundfile==0.12.1
 sphn==0.1.4
 torch==2.2.0
-websockets>=11.0.3, <13.1
+aiohttp>=3.10.5, <3.11
 huggingface-hub==0.24.6
