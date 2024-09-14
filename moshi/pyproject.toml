@@ -16,6 +16,7 @@ dependencies = [
 ]
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
+license = {text = "MIT"}
 
 
 [build-system]
