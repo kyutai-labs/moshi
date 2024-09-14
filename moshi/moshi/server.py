@@ -202,6 +202,8 @@ class ServerState:
             opus_reader = sphn.OpusStreamReader(self.ec.sample_rate)
             self.ec.reset_streaming()
             self.lm_gen.reset_streaming()
+            # Send the handshake.
+            await ws.send_bytes(b'\x00')
             await asyncio.gather(opus_loop(), recv_loop(), send_loop())
         log("info", "done with connection")
         return ws
