@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import random
 import time
 
+import os
 import numpy as np
 import sentencepiece
 import sphn
@@ -45,6 +46,7 @@ def log(level: str, msg: str):
 parser = argparse.ArgumentParser()
 parser.add_argument("--host", default="localhost", type=str)
 parser.add_argument("--port", default=8998, type=int)
+parser.add_argument("--static", type=str)
 parser.add_argument("--tokenizer", type=str)
 parser.add_argument("--moshi-weights", type=str)
 parser.add_argument("--mimi-weights", type=str)
@@ -210,9 +212,12 @@ def main():
     log("info", "warming up the model")
     state.warmup()
     app = web.Application()
-    # TODO(laurent): serve some static directory so as to re-use the web UI.
-    # app.router.add_get('/', handle_http_request)  # HTTP route
     app.router.add_get('/api/chat', state.handle_chat)
+    if args.static is not None:
+        async def handle_root(request):
+            return web.FileResponse(os.path.join(args.static, 'index.html'))
+        app.router.add_get('/', handle_root)
+        app.router.add_static('/', path=args.static, name='static')
     log("info", f"listening to ws://{args.host}:{args.port}")
     web.run_app(app, port=args.port)
 
