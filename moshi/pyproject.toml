@@ -12,7 +12,7 @@ dependencies = [
     "sounddevice == 0.5",
     "sphn >= 0.1.4",
     "torch >= 2.2.0, < 2.5",
-    "websockets >= 11.0.3, < 11.1",
+    "aiohttp>=3.10.5, <3.11",
 ]
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
