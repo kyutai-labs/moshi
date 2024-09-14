@@ -12,6 +12,7 @@ import numpy as np
 import sentencepiece
 import sphn
 import torch
+import aiohttp
 from aiohttp import web
 
 from huggingface_hub import hf_hub_download
@@ -120,8 +121,17 @@ class ServerState:
             nonlocal close
             try:
                 async for message in ws:
+                    if message.type == aiohttp.WSMsgType.ERROR:
+                        log("error", f"{ws.exception()}")
+                        break
+                    elif message.type == aiohttp.WSMsgType.CLOSED:
+                        break
+                    elif message.type != aiohttp.WSMsgType.BINARY:
+                        log("error", f"unexpected message type {message.type}")
+                        continue
+                    message = message.data
                     if not isinstance(message, bytes):
-                        log("error", "unsupported message type {type(message)}")
+                        log("error", f"unsupported message type {type(message)}")
                         continue
                     if len(message) == 0:
                         log("warning", "empty message")
