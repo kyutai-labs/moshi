@@ -12,7 +12,7 @@ use crate::{stream_both, StandaloneArgs};
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct Config {
     cert_dir: String,
-    static_dir: String,
+    pub static_dir: String,
     addr: String,
     port: u16,
 
@@ -156,6 +156,7 @@ pub async fn run(args: &StandaloneArgs, config: &Config) -> Result<()> {
         config.port,
     ));
     let state = Arc::new(stream_both::AppStateInner::new(args, &config.stream)?);
+    tracing::info!("serving static dir {}", config.static_dir);
     let app = axum::Router::new()
         .route("/api/chat", axum::routing::get(stream_handler))
         .fallback_service(

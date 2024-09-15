@@ -8,6 +8,6 @@
   "encodec_num_codebooks": 8,
   "static_dir": "../client/dist",
   "addr": "0.0.0.0",
-  "port": 8080,
+  "port": 8998,
   "cert_dir": "."
 }

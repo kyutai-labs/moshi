@@ -123,6 +123,30 @@ async fn main() -> Result<()> {
             if config.stream.requires_model_download() {
                 standalone::download_from_hub(&mut config.stream).await?;
             }
+            if !std::path::PathBuf::from(&config.static_dir).exists() {
+                use hf_hub::api::tokio::Api;
+                let api = Api::new()?;
+                let repo = api.model(config.stream.hf_repo.clone());
+                let dist_tgz = repo.get("dist.tgz").await?;
+                if let Some(parent) = dist_tgz.parent() {
+                    let dist = parent.join("dist");
+                    if !dist.exists() {
+                        let output = std::process::Command::new("tar")
+                            .arg("-xzf")
+                            .arg(&dist_tgz)
+                            .arg("-C")
+                            .arg(parent)
+                            .output()?;
+                        if !output.status.success() {
+                            anyhow::bail!(
+                                "error extract {dist_tgz:?}: {}",
+                                String::from_utf8_lossy(&output.stderr)
+                            );
+                        }
+                    }
+                    config.static_dir = dist.to_string_lossy().to_string()
+                }
+            }
             standalone::run(&standalone_args, &config).await?;
         }
         Command::Benchmark(standalone_args) => {
