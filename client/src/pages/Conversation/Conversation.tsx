@@ -11,7 +11,6 @@ import { MediaContext } from "./MediaContext";
 import { ServerInfo } from "./components/ServerInfo/ServerInfo";
 import { ModelParamsValues, useModelParams } from "./hooks/useModelParams";
 import { ModelParams } from "./components/ModelParams/ModelParams";
-import { Feedback } from "./components/Feedback/Feedback";
 import fixWebmDuration from "webm-duration-fix";
 import canvasLogo from "./canvas-logo.png";
 import { getMimeType, getExtension } from "./getMimeType";
@@ -44,7 +43,7 @@ const buildURL = ({
   textSeed: number;
   audioSeed: number;
 }) => {
-  if (workerAddr == "same") {
+  if (workerAddr == "same" || workerAddr == "") {
     workerAddr = window.location.hostname + ":" + window.location.port;
     console.log("Overriding workerAddr to", workerAddr);
   }
@@ -306,9 +305,6 @@ export const Conversation:FC<ConversationProps> = ({
                 }
               />
               <UserAudio copyCanvasRef={canvasRef}/>
-              <div className={`absolute bottom-0 right-0  bg-black p-2 flex border-l-2 border-t-2 border-white`}>
-                <Feedback workerAuthId={workerAuthId} sessionAuthId={sessionAuthId} sessionId={sessionId} email={email} />
-              </div>
               <div className="pt-8 text-sm flex justify-center items-center flex-col download-links">
                 {audioURL && <div><a href={audioURL} download={`moshi audio.${getExtension("audio")}`} className="pt-2 text-center block">Download audio</a></div>}
                 {videoURL && <div><a href={videoURL} download={`moshi video.${getExtension("video")}`} className="pt-2 text-center">Download video</a></div>}
