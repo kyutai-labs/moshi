@@ -5,6 +5,7 @@
 from dataclasses import dataclass
 import sys
 
+
 def colorize(text, color):
     code = f"\033[{color}m"
     restore = "\033[0m"
@@ -20,7 +21,7 @@ def make_log(level: str, msg: str) -> str:
         prefix = colorize("Error:", "1;31")
     else:
         raise ValueError(f"Unknown level {level}")
-    return prefix + ' ' + msg
+    return prefix + " " + msg
 
 
 class RawPrinter:
@@ -39,7 +40,7 @@ class RawPrinter:
         print(f"{level.capitalize()}: {msg}", file=self.err_stream)
 
     def print_lag(self):
-        self.err_stream.write(colorize(' [LAG]', '31'))
+        self.err_stream.write(colorize(" [LAG]", "31"))
         self.err_stream.flush()
 
     def print_pending(self):
@@ -92,7 +93,7 @@ class Line:
         else:
             entries = list(self._line)
         self._line.clear()
-        self.stream.write('\r')
+        self.stream.write("\r")
         for entry in entries:
             self._line.append(entry)
             self.stream.write(entry.render())
@@ -102,8 +103,8 @@ class Line:
     def newline(self):
         missing = self._max_line_length - len(self)
         if missing > 0:
-            self.stream.write(' ' * missing)
-        self.stream.write('\n')
+            self.stream.write(" " * missing)
+        self.stream.write("\n")
         self._line.clear()
         self._max_line_length = 0
         self._has_padding = False
@@ -111,7 +112,7 @@ class Line:
     def flush(self):
         missing = self._max_line_length - len(self)
         if missing > 0:
-            self.stream.write(' ' * missing)
+            self.stream.write(" " * missing)
             self._has_padding = True
         self.stream.flush()
 
@@ -126,10 +127,10 @@ class Printer:
         self._pending_printed = False
 
     def print_header(self):
-        self.line.add(' ' + '-' * (self.max_cols) + ' ')
+        self.line.add(" " + "-" * (self.max_cols) + " ")
         self.line.newline()
         self.line.flush()
-        self.line.add('| ')
+        self.line.add("| ")
 
     def _remove_pending(self) -> bool:
         if self._pending_printed:
@@ -144,23 +145,23 @@ class Printer:
         if len(token) <= remaining:
             self.line.add(token, color)
         else:
-            end = ' ' * remaining + ' |'
-            if token.startswith(' '):
+            end = " " * remaining + " |"
+            if token.startswith(" "):
                 token = token.lstrip()
                 self.line.add(end)
                 self.line.newline()
-                self.line.add('| ')
+                self.line.add("| ")
                 self.line.add(token, color)
             else:
                 assert color is None
                 erase_count = None
-                cumulated = ''
+                cumulated = ""
                 for idx, entry in enumerate(self.line._line[::-1]):
                     if entry.color:
                         # probably a LAG message
                         erase_count = idx
                         break
-                    if entry.msg.startswith(' '):
+                    if entry.msg.startswith(" "):
                         erase_count = idx + 1
                         cumulated = entry.msg + cumulated
                         break
@@ -168,17 +169,17 @@ class Printer:
                     if erase_count > 0:
                         self.line.erase(erase_count)
                     remaining = self.max_cols - len(self.line)
-                    end = ' ' * remaining + ' |'
+                    end = " " * remaining + " |"
                     self.line.add(end)
                     self.line.newline()
-                    self.line.add('| ')
+                    self.line.add("| ")
                     token = cumulated.lstrip() + token
                     self.line.add(token)
                 else:
                     self.line.add(token[:remaining])
-                    self.line.add(' |')
+                    self.line.add(" |")
                     self.line.newline()
-                    self.line.add('| ')
+                    self.line.add("| ")
                     self.line.add(token[remaining:])
         self.line.flush()
 
@@ -192,13 +193,13 @@ class Printer:
         self.err_stream.flush()
 
     def print_lag(self):
-        self.print_token(' [LAG]', '31')
+        self.print_token(" [LAG]", "31")
 
     def print_pending(self):
-        chars = ['|', '/', '-', '\\']
+        chars = ["|", "/", "-", "\\"]
         count = int(self._pending_count / 5)
         char = chars[count % len(chars)]
-        colors = ['32', '33', '31']
+        colors = ["32", "33", "31"]
         self._remove_pending()
         self.line.add(char, colors[count % len(colors)])
         self._pending_printed = True
@@ -206,6 +207,3 @@ class Printer:
 
 
 AnyPrinter = Printer | RawPrinter
-
-
-

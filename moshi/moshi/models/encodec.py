@@ -22,7 +22,12 @@ from torch import nn
 from torch.nn import functional as F
 
 
-from ..quantization import QuantizedResult, BaseQuantizer, SplitResidualVectorQuantizer, ResidualVectorQuantizer
+from ..quantization import (
+    QuantizedResult,
+    BaseQuantizer,
+    SplitResidualVectorQuantizer,
+    ResidualVectorQuantizer,
+)
 from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
 from ..modules.streaming import StreamingModule, State
 from ..utils.compile import no_compile, CUDAGraphed

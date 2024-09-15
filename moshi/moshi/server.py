@@ -119,6 +119,7 @@ class ServerState:
     async def handle_chat(self, request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
+
         async def recv_loop():
             nonlocal close
             try:
@@ -203,7 +204,7 @@ class ServerState:
             self.ec.reset_streaming()
             self.lm_gen.reset_streaming()
             # Send the handshake.
-            await ws.send_bytes(b'\x00')
+            await ws.send_bytes(b"\x00")
             await asyncio.gather(opus_loop(), recv_loop(), send_loop())
         log("info", "done with connection")
         return ws
@@ -214,7 +215,7 @@ def main():
     log("info", "warming up the model")
     state.warmup()
     app = web.Application()
-    app.router.add_get('/api/chat', state.handle_chat)
+    app.router.add_get("/api/chat", state.handle_chat)
     static_path: None | str = None
     if args.static is None:
         log("info", f"retrieving the static content")
@@ -223,13 +224,18 @@ def main():
         # When set to the "none" string, we don't serve any static content.
         static_path = args.static
     if static_path is not None:
+
         async def handle_root(_):
-            return web.FileResponse(os.path.join(static_path, 'index.html'))
+            return web.FileResponse(os.path.join(static_path, "index.html"))
+
         log("info", f"serving static content from {static_path}")
-        app.router.add_get('/', handle_root)
-        app.router.add_static('/', path=static_path, follow_symlinks=True, name='static')
+        app.router.add_get("/", handle_root)
+        app.router.add_static(
+            "/", path=static_path, follow_symlinks=True, name="static"
+        )
     log("info", f"listening to ws://{args.host}:{args.port}")
     web.run_app(app, port=args.port)
+
 
 with torch.no_grad():
     main()

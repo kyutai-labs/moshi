@@ -33,10 +33,12 @@ SAMPLE_RATE = 24000
 FRAME_SIZE = 1920
 CHANNELS = 1
 
+
 def colorize(text, color):
     code = f"\033[{color}m"
     restore = "\033[0m"
     return "".join([code, text, restore])
+
 
 def log(level: str, msg: str):
     if level == "warning":
@@ -54,6 +56,7 @@ def hf_hub_download(repo, path: str) -> str:
     if repo is None or repo == "":
         raise ValueError(f"the --hf-repo flag is required to retrieve {path}")
     return huggingface_hub.hf_hub_download(repo, path)
+
 
 class Stats:
     send_times: tp.List[float] = []
@@ -216,9 +219,11 @@ def web_server(client_to_server, server_to_client, args):
                 continue
 
     lock = asyncio.Lock()
+
     async def handle_chat(request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
+
         async def recv_loop():
             nonlocal close
             try:
@@ -263,8 +268,8 @@ def web_server(client_to_server, server_to_client, args):
                 else:
                     all_pcm_data = np.concatenate((all_pcm_data, pcm))
                 while all_pcm_data.shape[-1] >= FRAME_SIZE:
-                    chunk = all_pcm_data[: FRAME_SIZE]
-                    all_pcm_data = all_pcm_data[FRAME_SIZE :]
+                    chunk = all_pcm_data[:FRAME_SIZE]
+                    all_pcm_data = all_pcm_data[FRAME_SIZE:]
                     input_queue.put_nowait(chunk)
 
         async def send_loop():
@@ -299,15 +304,14 @@ def web_server(client_to_server, server_to_client, args):
             opus_writer = sphn.OpusStreamWriter(SAMPLE_RATE)
             opus_reader = sphn.OpusStreamReader(SAMPLE_RATE)
             # Send the handshake.
-            await ws.send_bytes(b'\x00')
+            await ws.send_bytes(b"\x00")
             await asyncio.gather(opus_loop(), recv_loop(), send_loop(), another_loop())
         log("info", "done with connection")
         return ws
 
-
     async def go():
         app = web.Application()
-        app.router.add_get('/api/chat', handle_chat)
+        app.router.add_get("/api/chat", handle_chat)
         static_path: None | str = None
         if args.static is None:
             log("info", f"retrieving the static content")
@@ -315,23 +319,27 @@ def web_server(client_to_server, server_to_client, args):
             dist_tgz = Path(dist_tgz)
             dist = dist_tgz.parent / "dist"
             if not dist.exists():
-                with tarfile.open(dist_tgz, 'r:gz') as tar:
+                with tarfile.open(dist_tgz, "r:gz") as tar:
                     tar.extractall(path=dist_tgz.parent)
             static_path = str(dist)
         elif args.static != "none":
             # When set to the "none" string, we don't serve any static content.
             static_path = args.static
         if static_path is not None:
+
             async def handle_root(_):
-                return web.FileResponse(os.path.join(static_path, 'index.html'))
+                return web.FileResponse(os.path.join(static_path, "index.html"))
+
             log("info", f"serving static content from {static_path}")
-            app.router.add_get('/', handle_root)
-            app.router.add_static('/', path=static_path, name='static')
+            app.router.add_get("/", handle_root)
+            app.router.add_static("/", path=static_path, name="static")
         log("info", f"listening to ws://{args.host}:{args.port}")
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, args.host, args.port)
-        await asyncio.gather(recv_loop(), send_loop(), recv_loop2(), send_loop2(), site.start())
+        await asyncio.gather(
+            recv_loop(), send_loop(), recv_loop2(), send_loop2(), site.start()
+        )
         await runner.cleanup()
 
     try:
