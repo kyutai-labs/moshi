@@ -10,7 +10,6 @@ import sys
 import time
 import numpy as np
 import multiprocessing
-from pathlib import Path
 import sentencepiece
 import sounddevice as sd
 from enum import Enum

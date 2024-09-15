@@ -4,9 +4,6 @@
 
 import argparse
 import asyncio
-import json
-from logging import WARN
-from os.path import exists
 import queue
 import os
 import tarfile

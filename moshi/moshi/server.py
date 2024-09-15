@@ -5,7 +5,9 @@
 import argparse
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 import random
+import tarfile
 import time
 
 import os
@@ -16,7 +18,7 @@ import torch
 import aiohttp
 from aiohttp import web
 
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import hf_hub_download
 
 from .models import moshi_, EncodecModel, LMGen
 
@@ -219,7 +221,13 @@ def main():
     static_path: None | str = None
     if args.static is None:
         log("info", f"retrieving the static content")
-        static_path = snapshot_download("lmz/moshi-ui", repo_type="space")
+        dist_tgz = hf_hub_download(args.hf_repo, "dist.tgz")
+        dist_tgz = Path(dist_tgz)
+        dist = dist_tgz.parent / "dist"
+        if not dist.exists():
+            with tarfile.open(dist_tgz, "r:gz") as tar:
+                tar.extractall(path=dist_tgz.parent)
+        static_path = str(dist)
     elif args.static != "none":
         # When set to the "none" string, we don't serve any static content.
         static_path = args.static
