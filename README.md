@@ -1,10 +1,50 @@
 # moshi
 
 There are three separate versions of the moshi inference stack in this repo.
-- The rust version used in production is in the `rust` directory.
 - The python version using PyTorch is in the `moshi` directory.
 - The python version using MLX is in the `moshi_mlx` directory.
+- The rust version used in production is in the `rust` directory.
 
+## Python (PyTorch)
+
+The python api can be found in the `moshi` directory. It provides a streaming
+version of the audio tokenizer (mimi) and the lm model (moshi).
+
+In order to run in interactive mode, you need to start a server which will
+run the model, you can then use either the web UI or a command line client.
+
+Start the server with:
+```bash
+PYTHONPATH=moshi python -m moshi.server
+```
+
+And then access the web UI on [localhost:8998](http://localhost:8998).
+
+If the server is running on a remote box, you may want to forward the 8998 port
+via your ssh connection so as to be able to access the web UI locally.
+
+Accessing a server that is not localhost via http may cause issues around using
+the microphone in the web UI (in some browsers this is only allowed using
+https).
+
+## Python (MLX) for local inference on macOS
+
+You can eithr compile and install the `rustymimi` extension or install it via
+pip.
+```bash
+# Install from pip:
+pip install rustymimi==0.1.1
+# Alternatively, if you want to compile the package run:
+maturin dev -r -m rust/mimi-pyo3/Cargo.toml
+```
+
+Then the model can be run with:
+```bash
+PYTHONPATH=moshi_mlx python -m moshi_mlx.local  \
+    --model ~/tmp/moshiko_mlx_301e30bf@120.q8.safetensors \
+    --mimi ~/tmp/tokenizer-e351c8d8-checkpoint125.safetensors \
+    --quantized 8
+```
 ## Rust
 
 The rust inference code uses a client-server infrastructure.
@@ -48,54 +88,3 @@ some warnings about the site being unsafe. When using chrome you can bypass it
 by selecting "Details" or "Advanced", then "Visit this unsafe site" or "Proceed
 to localhost (unsafe)".
 
-## Python (PyTorch)
-
-The python api can be found in the `moshi` directory. It provides a streaming
-version of the audio tokenizer (mimi) and the lm model (moshi).
-
-In order to run in interactive mode, you need to start a server which will
-run the model, and a client that captures the sound from the microphone
-and passes it to the server, get some data back from the server and plays it
-on the speakers.
-
-The client and server do not have to run on the same machine, the protocol used
-to transfer data between the client and the server should be compatible with the
-rust version.
-
-Start the server with:
-```bash
-PYTHONPATH=moshi python -m moshi.server \
-    --mimi-weights tokenizer-e351c8d8-checkpoint125.safetensors \
-    --tokenizer tokenizer_spm_32k_3.model \
-    --moshi-weights moshiko_pt_301e30bf@120.safetensors
-```
-
-And then starts the client with:
-```bash
-PYTHONPATH=moshi python -m moshi.client
-```
-
-When running on different machine, you can add the command line argument
-`--host 0.0.0.0` to the server so that it accepts remote connections and
-the argument `--host 192.168.0.42` to the client where `192.168.0.42` is
-the ip of the server. The default port is `9998` and can be overriden with
-`--port`.
-
-## Python (MLX) for local inference on macOS
-
-You can eithr compile and install the `rustymimi` extension or install it via
-pip.
-```bash
-# Install from pip:
-pip install rustymimi==0.1.1
-# Alternatively, if you want to compile the package run:
-maturin dev -r -m rust/mimi-pyo3/Cargo.toml
-```
-
-Then the model can be run with:
-```bash
-PYTHONPATH=moshi_mlx python -m moshi_mlx.local  \
-    --model ~/tmp/moshiko_mlx_301e30bf@120.q8.safetensors \
-    --mimi ~/tmp/tokenizer-e351c8d8-checkpoint125.safetensors \
-    --quantized 8
-```
