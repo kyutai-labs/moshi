@@ -85,8 +85,11 @@ def full_warmup(audio_tokenizer, client_to_server, server_to_client):
         client_to_server.put_nowait(data)
         if i == 0:
             continue
-        audio_tokens = server_to_client.get()
-        audio_tokenizer.decode(audio_tokens)
+        while True:
+            kind, data = server_to_client.get()
+            if kind == 0:
+                audio_tokenizer.decode(data)
+                break
         while True:
             time.sleep(0.01)
             data = audio_tokenizer.get_decoded()
@@ -152,10 +155,10 @@ def model_server(client_to_server, server_to_client, args):
             if text_token not in (0, 3):
                 _text = text_tokenizer.id_to_piece(text_token)
                 _text = _text.replace("▁", " ")
-                log("info", f"token {_text}")
+                server_to_client.put_nowait((1, _text))
             if audio_tokens is not None:
                 audio_tokens = np.array(audio_tokens).astype(np.uint32)
-                server_to_client.put_nowait(audio_tokens)
+                server_to_client.put_nowait((0, audio_tokens))
     except KeyboardInterrupt:
         pass
 
@@ -168,6 +171,7 @@ def web_server(client_to_server, server_to_client, args):
         )
     input_queue = queue.Queue()
     output_queue = queue.Queue()
+    text_queue = queue.Queue()
     audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)
     start = server_to_client.get()
     log("info", f"[CLIENT] received '{start}' from server, starting...")
@@ -202,11 +206,14 @@ def web_server(client_to_server, server_to_client, args):
     async def recv_loop2():
         while True:
             try:
-                audio_tokens = server_to_client.get(block=False)
+                kind, data = server_to_client.get(block=False)
+                if kind == 0:
+                    audio_tokenizer.decode(data)
+                elif kind == 1:
+                    text_queue.put_nowait(data)
             except queue.Empty:
                 await asyncio.sleep(0.001)
                 continue
-            audio_tokenizer.decode(audio_tokens)
 
     lock = asyncio.Lock()
     async def handle_chat(request):
@@ -268,6 +275,11 @@ def web_server(client_to_server, server_to_client, args):
                 msg = opus_writer.read_bytes()
                 if len(msg) > 0:
                     await ws.send_bytes(b"\x01" + msg)
+                try:
+                    _text = text_queue.get(block=False)
+                    await ws.send_bytes(b"\x02" + bytes(_text, encoding="utf8"))
+                except queue.Empty:
+                    continue
 
         async def another_loop():
             while True:
