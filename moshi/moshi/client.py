@@ -91,7 +91,9 @@ class Connection:
                     continue
                 message = message.data
                 if not isinstance(message, bytes):
-                    self.printer.log("warning", f"unsupported message type {type(message)}")
+                    self.printer.log(
+                        "warning", f"unsupported message type {type(message)}"
+                    )
                     continue
                 if len(message) == 0:
                     self.printer.log("warning", "empty message")
@@ -136,6 +138,7 @@ class Connection:
             await asyncio.gather(
                 self._recv_loop(), self._decoder_loop(), self._queue_loop()
             )
+
 
 async def run(printer: AnyPrinter, args):
     uri = f"ws://{args.host}:{args.port}/api/chat"

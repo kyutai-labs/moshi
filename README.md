@@ -29,7 +29,7 @@ https).
 
 ## Python (MLX) for local inference on macOS
 
-You can eithr compile and install the `rustymimi` extension or install it via
+You can either compile and install the `rustymimi` extension or install it via
 pip.
 ```bash
 # Install from pip:
@@ -45,6 +45,10 @@ PYTHONPATH=moshi_mlx python -m moshi_mlx.local  \
     --mimi ~/tmp/tokenizer-e351c8d8-checkpoint125.safetensors \
     --quantized 8
 ```
+
+This uses a command line interface, alternatively you can use `local_web` to use
+the web UI, connection is via http on [localhost:8998](http://localhost:8998).
+
 ## Rust
 
 In order to run the rust inference server, use the following command from within

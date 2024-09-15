@@ -34,6 +34,7 @@ def hf_hub_download(repo, path: str) -> str:
         raise ValueError(f"the --hf-repo flag is required to retrieve {path}")
     return huggingface_hub.hf_hub_download(repo, path)
 
+
 class Stats:
     send_times: tp.List[float] = []
     model_times: tp.List[tp.Tuple[float, float]] = []

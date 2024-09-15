@@ -1,3 +1,4 @@
+aiohttp>=3.10.5, <3.11
 blessed==1.20.0
 cffi==1.17.0
 dashing==0.1.0
