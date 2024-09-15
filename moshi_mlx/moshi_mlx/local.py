@@ -5,28 +5,49 @@
 import argparse
 import asyncio
 import json
+from logging import WARN
+from os.path import exists
 import queue
-import sys
+import os
+import tarfile
 import time
 import numpy as np
 import multiprocessing
 from pathlib import Path
 import sentencepiece
-import sounddevice as sd
 from enum import Enum
 import typing as tp
+import sphn
+import aiohttp
+from aiohttp import web
 
 import mlx.core as mx
 import mlx.nn as nn
 
-from .client_utils import AnyPrinter, Printer, RawPrinter
 import rustymimi
 import moshi_mlx
 
 import huggingface_hub
 
 SAMPLE_RATE = 24000
+FRAME_SIZE = 1920
 CHANNELS = 1
+
+def colorize(text, color):
+    code = f"\033[{color}m"
+    restore = "\033[0m"
+    return "".join([code, text, restore])
+
+def log(level: str, msg: str):
+    if level == "warning":
+        prefix = colorize("[Warn]", "1;31")
+    elif level == "info":
+        prefix = colorize("[Info]", "1;34")
+    elif level == "error":
+        prefix = colorize("[Err ]", "1;31")
+    else:
+        raise ValueError(f"Unknown level {level}")
+    print(prefix + " " + msg)
 
 
 def hf_hub_download(repo, path: str) -> str:
@@ -73,7 +94,7 @@ def full_warmup(audio_tokenizer, client_to_server, server_to_client):
                 break
 
 
-def server(printer_q, client_to_server, server_to_client, args):
+def model_server(client_to_server, server_to_client, args):
     model_file = args.model
     tokenizer_file = args.tokenizer
     if model_file is None:
@@ -95,10 +116,7 @@ def server(printer_q, client_to_server, server_to_client, args):
         tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
     steps = args.steps
 
-    def log(s):
-        printer_q.put_nowait((PrinterType.INFO, s))
-
-    log(f"[SERVER] loading text tokenizer {tokenizer_file}")
+    log("info", f"[SERVER] loading text tokenizer {tokenizer_file}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
     mx.random.seed(299792458)
     lm_config = moshi_mlx.models.config_v0_1()
@@ -108,12 +126,12 @@ def server(printer_q, client_to_server, server_to_client, args):
         group_size = 32 if args.quantized == 4 else 64
         nn.quantize(model, bits=args.quantized, group_size=group_size)
 
-    log(f"[SERVER] loading weights {model_file}")
+    log("info", f"[SERVER] loading weights {model_file}")
     model.load_weights(model_file, strict=True)
-    log("[SERVER] weights loaded")
+    log("info", "[SERVER] weights loaded")
 
     model.warmup()
-    log("[SERVER] model warmed up")
+    log("info", "[SERVER] model warmed up")
     gen = moshi_mlx.models.LmGen(
         model=model,
         max_steps=steps + 5,
@@ -123,15 +141,10 @@ def server(printer_q, client_to_server, server_to_client, args):
     )
 
     server_to_client.put("start")
-    log("[SERVER] connected!")
-    printed_header = False
+    log("info", "[SERVER] connected!")
     try:
         while True:
             data = client_to_server.get()
-            printer_q.put_nowait((PrinterType.EVENT, "s_get"))
-            if not printed_header:
-                printed_header = True
-                printer_q.put_nowait((PrinterType.HEADER, ""))
             data = mx.array(data).transpose(1, 0)[:, :8]
             text_token = gen.step(data)
             text_token = text_token[0].item()
@@ -139,18 +152,15 @@ def server(printer_q, client_to_server, server_to_client, args):
             if text_token not in (0, 3):
                 _text = text_tokenizer.id_to_piece(text_token)
                 _text = _text.replace("▁", " ")
-                printer_q.put_nowait((PrinterType.TOKEN, _text))
-            else:
-                printer_q.put_nowait((PrinterType.PENDING, ""))
+                log("info", f"token {_text}")
             if audio_tokens is not None:
                 audio_tokens = np.array(audio_tokens).astype(np.uint32)
                 server_to_client.put_nowait(audio_tokens)
-            printer_q.put_nowait((PrinterType.EVENT, "s_put"))
     except KeyboardInterrupt:
         pass
 
 
-def client(printer_q, client_to_server, server_to_client, args):
+def web_server(client_to_server, server_to_client, args):
     mimi_file = args.mimi
     if mimi_file is None:
         mimi_file = hf_hub_download(
@@ -160,9 +170,7 @@ def client(printer_q, client_to_server, server_to_client, args):
     output_queue = queue.Queue()
     audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)
     start = server_to_client.get()
-    printer_q.put_nowait(
-        (PrinterType.INFO, f"[CLIENT] received '{start}' from server, starting...")
-    )
+    log("info", f"[CLIENT] received '{start}' from server, starting...")
 
     full_warmup(audio_tokenizer, client_to_server, server_to_client)
 
@@ -171,7 +179,6 @@ def client(printer_q, client_to_server, server_to_client, args):
             await asyncio.sleep(0.001)
             try:
                 pcm_data = input_queue.get(block=False)
-                printer_q.put_nowait((PrinterType.EVENT, "encode"))
                 audio_tokenizer.encode(pcm_data)
             except queue.Empty:
                 continue
@@ -182,7 +189,6 @@ def client(printer_q, client_to_server, server_to_client, args):
             if data is None:
                 await asyncio.sleep(0.001)
                 continue
-            printer_q.put_nowait((PrinterType.EVENT, "decoded"))
             output_queue.put_nowait(data)
 
     async def send_loop2():
@@ -191,7 +197,6 @@ def client(printer_q, client_to_server, server_to_client, args):
             if data is None:
                 await asyncio.sleep(0.001)
                 continue
-            printer_q.put_nowait((PrinterType.EVENT, "encoded"))
             client_to_server.put_nowait(data)
 
     async def recv_loop2():
@@ -201,48 +206,121 @@ def client(printer_q, client_to_server, server_to_client, args):
             except queue.Empty:
                 await asyncio.sleep(0.001)
                 continue
-            printer_q.put_nowait((PrinterType.EVENT, "decode"))
             audio_tokenizer.decode(audio_tokens)
 
-    def on_input(in_data, frames, time, status):
-        in_data = in_data[:, 0].astype(np.float32)
-        input_queue.put_nowait(in_data)
+    lock = asyncio.Lock()
+    async def handle_chat(request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async def recv_loop():
+            nonlocal close
+            try:
+                async for message in ws:
+                    if message.type == aiohttp.WSMsgType.ERROR:
+                        log("error", f"{ws.exception()}")
+                        break
+                    elif message.type == aiohttp.WSMsgType.CLOSED:
+                        break
+                    elif message.type != aiohttp.WSMsgType.BINARY:
+                        log("error", f"unexpected message type {message.type}")
+                        continue
+                    message = message.data
+                    if not isinstance(message, bytes):
+                        log("error", f"unsupported message type {type(message)}")
+                        continue
+                    if len(message) == 0:
+                        log("warning", "empty message")
+                        continue
+                    kind = message[0]
+                    if kind == 1:  # audio
+                        payload = message[1:]
+                        opus_reader.append_bytes(payload)
+                    else:
+                        log("warning", f"unknown message kind {kind}")
+            finally:
+                close = True
+                log("info", "connection closed")
 
-    in_stream = sd.InputStream(
-        samplerate=SAMPLE_RATE, channels=CHANNELS, blocksize=1920, callback=on_input
-    )
+        async def opus_loop():
+            all_pcm_data = None
 
-    cnt_output = 0
-    last_qsize = 0
+            while True:
+                if close:
+                    return
+                await asyncio.sleep(0.001)
+                pcm = opus_reader.read_pcm()
+                if pcm.shape[-1] == 0:
+                    continue
+                if all_pcm_data is None:
+                    all_pcm_data = pcm
+                else:
+                    all_pcm_data = np.concatenate((all_pcm_data, pcm))
+                while all_pcm_data.shape[-1] >= FRAME_SIZE:
+                    chunk = all_pcm_data[: FRAME_SIZE]
+                    all_pcm_data = all_pcm_data[FRAME_SIZE :]
+                    input_queue.put_nowait(chunk)
 
-    def on_output(out_data, frames, time, status):
-        nonlocal cnt_output, last_qsize
-        assert out_data.shape == (1920, 1), out_data.shape
-        cnt_output += 1
-        qsize = output_queue.qsize()
-        if last_qsize != qsize:
-            last_qsize = qsize
-            printer_q.put_nowait((PrinterType.QSIZE, qsize))
-        try:
-            pcm_data = output_queue.get(block=False)
-            # TODO: handle other shapes by using some form of fifo/ring buffer.
-            assert pcm_data.shape == (1920,), pcm_data.shape
-            out_data[:, 0] = pcm_data
-        except queue.Empty:
-            if cnt_output > 3:
-                printer_q.put_nowait((PrinterType.LAG, ""))
-            out_data.fill(0)
+        async def send_loop():
+            while True:
+                if close:
+                    return
+                await asyncio.sleep(0.001)
+                msg = opus_writer.read_bytes()
+                if len(msg) > 0:
+                    await ws.send_bytes(b"\x01" + msg)
 
-    out_stream = sd.OutputStream(
-        samplerate=SAMPLE_RATE,
-        channels=CHANNELS,
-        blocksize=1920,
-        callback=on_output,
-    )
+        async def another_loop():
+            while True:
+                if close:
+                    return
+                await asyncio.sleep(0.001)
+                try:
+                    pcm_data = output_queue.get(block=False)
+                    assert pcm_data.shape == (1920,), pcm_data.shape
+                    opus_writer.append_pcm(pcm_data)
+                except queue.Empty:
+                    continue
+
+        log("info", "accepted connection")
+        close = False
+        async with lock:
+            opus_writer = sphn.OpusStreamWriter(SAMPLE_RATE)
+            opus_reader = sphn.OpusStreamReader(SAMPLE_RATE)
+            # Send the handshake.
+            await ws.send_bytes(b'\x00')
+            await asyncio.gather(opus_loop(), recv_loop(), send_loop(), another_loop())
+        log("info", "done with connection")
+        return ws
+
 
     async def go():
-        with in_stream, out_stream:
-            await asyncio.gather(recv_loop(), send_loop(), recv_loop2(), send_loop2())
+        app = web.Application()
+        app.router.add_get('/api/chat', handle_chat)
+        static_path: None | str = None
+        if args.static is None:
+            log("info", f"retrieving the static content")
+            dist_tgz = hf_hub_download(args.hf_repo, "dist.tgz")
+            dist_tgz = Path(dist_tgz)
+            dist = dist_tgz.parent / "dist"
+            if not dist.exists():
+                with tarfile.open(dist_tgz, 'r:gz') as tar:
+                    tar.extractall(path=dist_tgz.parent)
+            static_path = str(dist)
+        elif args.static != "none":
+            # When set to the "none" string, we don't serve any static content.
+            static_path = args.static
+        if static_path is not None:
+            async def handle_root(_):
+                return web.FileResponse(os.path.join(static_path, 'index.html'))
+            log("info", f"serving static content from {static_path}")
+            app.router.add_get('/', handle_root)
+            app.router.add_static('/', path=static_path, name='static')
+        log("info", f"listening to ws://{args.host}:{args.port}")
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, args.host, args.port)
+        await asyncio.gather(recv_loop(), send_loop(), recv_loop2(), send_loop2(), site.start())
+        await runner.cleanup()
 
     try:
         asyncio.run(go())
@@ -250,7 +328,7 @@ def client(printer_q, client_to_server, server_to_client, args):
         pass
 
 
-def main(printer: AnyPrinter):
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--model", type=str)
@@ -258,17 +336,19 @@ def main(printer: AnyPrinter):
     parser.add_argument("--quantized", type=int)
     parser.add_argument("--steps", default=2500, type=int)
     parser.add_argument("--hf-repo", type=str, default="")
+    parser.add_argument("--static", type=str)
+    parser.add_argument("--host", default="localhost", type=str)
+    parser.add_argument("--port", default=8998, type=int)
 
     args = parser.parse_args()
 
     client_to_server = multiprocessing.Queue()
     server_to_client = multiprocessing.Queue()
-    printer_q = multiprocessing.Queue()
 
     # Create two processes
-    subprocess_args = printer_q, client_to_server, server_to_client, args
-    p1 = multiprocessing.Process(target=client, args=subprocess_args)
-    p2 = multiprocessing.Process(target=server, args=subprocess_args)
+    subprocess_args = client_to_server, server_to_client, args
+    p1 = multiprocessing.Process(target=web_server, args=subprocess_args)
+    p2 = multiprocessing.Process(target=model_server, args=subprocess_args)
 
     # Start the processes
     p1.start()
@@ -278,92 +358,16 @@ def main(printer: AnyPrinter):
     try:
         while p1.is_alive() and p2.is_alive():
             time.sleep(0.001)
-            try:
-                ty, value = printer_q.get_nowait()
-                if ty == PrinterType.TOKEN:
-                    printer.print_token(value)
-                elif ty == PrinterType.PENDING:
-                    printer.print_pending()
-                elif ty == PrinterType.INFO:
-                    printer.log("info", value)
-                elif ty == PrinterType.WARNING:
-                    printer.log("warning", value)
-                elif ty == PrinterType.ERROR:
-                    printer.log("error", value)
-                elif ty == PrinterType.LAG:
-                    printer.print_lag()
-                    events.append({"event": "lag", "time": time.time()})
-                elif ty == PrinterType.HEADER:
-                    printer.print_header()
-                elif ty == PrinterType.EVENT:
-                    events.append({"event": value, "time": time.time()})
-                elif ty == PrinterType.QSIZE:
-                    events.append(
-                        {"event": "qsize", "qsize": value, "time": time.time()}
-                    )
-            except queue.Empty:
-                continue
     except KeyboardInterrupt:
-        printer.log("warning", "Interrupting, exiting connection.")
+        log("warning", "Interrupting, exiting connection.")
         p1.terminate()
         p2.terminate()
-
-    printer.log("info", "saving trace")
-    chrome_events = []
-    for e in events:
-        name, ph, tid, args = "unk", "X", 1, {}
-        event = e["event"]
-        if event == "s_get":
-            name, ph = "model", "B"
-            tid = 3
-        elif event == "s_put":
-            name, ph = "model", "E"
-            tid = 3
-        elif event == "encode":
-            name, ph = "encode", "B"
-            tid = 1
-        elif event == "encoded":
-            name, ph = "encode", "E"
-            tid = 1
-        elif event == "decode":
-            name, ph = "decode", "B"
-            tid = 2
-        elif event == "decoded":
-            name, ph = "decode", "E"
-            tid = 2
-        elif event == "lag":
-            name, ph = "lag", "i"
-            tid = 2
-        elif event == "qsize":
-            name, ph = "qsize", "C"
-            tid = 4
-            args["qsize"] = e["qsize"]
-        else:
-            printer.log("warning", f"unknown event {event}")
-        chrome_events.append(
-            {
-                "name": name,
-                "cat": "",
-                "ph": ph,
-                "ts": e["time"] * 1e6,
-                "pid": 1,
-                "tid": tid,
-                "args": args,
-            }
-        )
-    with open("mlx-trace.json", "w") as fobj:
-        json.dump(chrome_events, fobj)
 
     # Wait for both processes to finish
     p1.join()
     p2.join()
-    printer.log("info", "All done!")
+    log("info", "All done!")
 
 
 if __name__ == "__main__":
-    printer: AnyPrinter
-    if sys.stdout.isatty():
-        printer = Printer()
-    else:
-        printer = RawPrinter()
-    main(printer)
+    main()

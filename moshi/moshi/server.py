@@ -143,7 +143,7 @@ class ServerState:
                         payload = message[1:]
                         opus_reader.append_bytes(payload)
                     else:
-                        log("warning", "unknown message kind {kind}")
+                        log("warning", f"unknown message kind {kind}")
             finally:
                 close = True
                 log("info", "connection closed")

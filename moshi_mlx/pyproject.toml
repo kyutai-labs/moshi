@@ -12,6 +12,7 @@ dependencies = [
     "sounddevice == 0.5",
     "sphn >= 0.1.4",
     "mlx >= 0.17.2, < 0.18",
+    "aiohttp>=3.10.5, <3.11",
 ]
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
