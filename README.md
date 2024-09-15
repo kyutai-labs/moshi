@@ -47,34 +47,49 @@ PYTHONPATH=moshi_mlx python -m moshi_mlx.local  \
 ```
 ## Rust
 
-The rust inference code uses a client-server infrastructure.
+In order to run the rust inference server, use the following command from within
+the `rust` directory:
 
-In order to run the inference server in standalone mode, run the following
-command from within the `rust` directory.
-
-- Start the server.
 ```bash
 cargo run --features cuda --bin moshi-backend -r -- --config moshi-backend/config.json standalone
 ```
+
 When using macOS, you can replace `--features cuda` with `--features metal`.
 
 Alternatively you can use `config-q8.json` rather than `config.json` to use the
 quantified q8 model.
 
-Once the server has printed 'standalone worker listening', you can connect to it
-either via the web UI or using the command line interface. Multiple sessions can
-be run one after another without having to restart the server.
+Once the server has printed 'standalone worker listening', you can use the web
+UI. By default the rust version uses https so it will be at
+[localhost:8998](https://localhost:8998).
 
-### Command Line
+You will get some warnings about the site being unsafe. When using chrome you
+can bypass it by selecting "Details" or "Advanced", then "Visit this unsafe
+site" or "Proceed to localhost (unsafe)".
 
-For the CLI, run.
+## Clients
+
+We recommend using the web UI as it provides some echo cancellation that helps
+the overall model quality. Alternatively we provide some command line interfaces
+for the rust and python versions, the protocol is the same as with the web UI so
+there is nothing to change on the server side.
+
+### Rust Command Line
+
+From within the `rust` directory, run the following:
 ```bash
 cargo run --bin moshi-cli -r -- tui --host localhost
 ```
 
+### Python with PyTorch
+
+```bash
+PYTHONPATH=moshi python -m moshi.client
+```
+
 ### WebUI
 
-The web UI can be used as an alternative to the CLI. In order to do so, run the
+The web UI can be built from this repo via the
 following steps (these will require `npm` being installed).
 ```bash
 cd client
@@ -82,9 +97,4 @@ npm install
 npm run build
 ```
 
-Then run the server in the same way mentioned above and from your web browser
-navigate to `https://127.0.0.1:8080/?worker_addr=127.0.0.1:8080`. You will get
-some warnings about the site being unsafe. When using chrome you can bypass it
-by selecting "Details" or "Advanced", then "Visit this unsafe site" or "Proceed
-to localhost (unsafe)".
-
+The web UI can then be found in the `client/dist` directory.
