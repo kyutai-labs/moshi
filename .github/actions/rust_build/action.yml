@@ -5,6 +5,8 @@ inputs:
     default: ubuntu-latest
   toolchain:
     default: stable
+  target:
+    default: check
 runs:
   using: "composite"
   steps:
@@ -22,7 +24,7 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           rust/target/
-        key: ${{ inputs.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ inputs.os }}-cargo-${{ inputs.target }}-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: ${{ runner.os }}-cargo-
     - name: install deps
       shell: bash

@@ -45,6 +45,8 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: ./.github/actions/rust_build
+        with:
+          target: test
       - name: check
         shell: bash
         run: |

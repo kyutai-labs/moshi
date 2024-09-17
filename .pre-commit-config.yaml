@@ -7,7 +7,7 @@ repos:
       entry: bash -c 'cd moshi && flake8'
       pass_filenames: false
     - id: pyright-moshi
-      name: pyrgith on moshi package
+      name: pyright on moshi package
       language: system
       entry: bash -c 'cd moshi && pyright'
       pass_filenames: false
