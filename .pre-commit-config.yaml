@@ -1,10 +1,9 @@
 repos:
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1
+  - repo: local
     hooks:
-    - id: flake8
+    - id: flake8-moshi
+      name: flake8 on moshi package
+      language: system
+      entry: bash -c 'cd moshi && flake8'
+      pass_filenames: false
 
-  - repo: https://github.com/RobertCraigie/pyright-python
-    rev: v1.1.380
-    hooks:
-    - id: pyright
