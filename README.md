@@ -1,5 +1,17 @@
 # moshi
 
+![docs badge](https://github.com/kyutai-labs/moshi/workflows/audiocraft_docs/badge.svg)
+![linter badge](https://github.com/kyutai-labs/moshi/workflows/audiocraft_linter/badge.svg)
+![tests badge](https://github.com/kyutai-labs/moshi/workflows/audiocraft_tests/badge.svg)
+
+ Moshi is a speech-text foundation model and full-duplex spoken dialogue framework.
+ It uses Mimi, a state-of-the-art streaming neural audio codec. Mimi operates at 12.5 Hz, and compress
+ audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size),
+ yet performs better than existing codec like SpeechTokenizer (50 Hz, 4 kbps), which are not streaming.
+
+
+
+
 There are three separate versions of the moshi inference stack in this repo.
 - The python version using PyTorch is in the `moshi` directory.
 - The python version using MLX is in the `moshi_mlx` directory.
