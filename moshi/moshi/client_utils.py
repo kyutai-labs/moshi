@@ -1,6 +1,8 @@
 # Copyright (c) Kyutai, all rights reserved.
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
+"""Utilities for the command line client, in particular for handling interactions with the terminal.
+"""
 
 from dataclasses import dataclass
 import sys
@@ -14,11 +16,11 @@ def colorize(text, color):
 
 def make_log(level: str, msg: str) -> str:
     if level == "warning":
-        prefix = colorize("Warning:", "1;31")
+        prefix = colorize("[Warn]", "1;31")
     elif level == "info":
-        prefix = colorize("Info:", "1;34")
+        prefix = colorize("[Info]", "1;34")
     elif level == "error":
-        prefix = colorize("Error:", "1;31")
+        prefix = colorize("[Err ]", "1;31")
     else:
         raise ValueError(f"Unknown level {level}")
     return prefix + " " + msg

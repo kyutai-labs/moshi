@@ -1,6 +1,7 @@
 # Copyright (c) Kyutai, all rights reserved.
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
+"""Client for the Moshi server."""
 
 import argparse
 import asyncio
@@ -75,7 +76,7 @@ class Connection:
                 all_pcm_data = np.concatenate((all_pcm_data, pcm))
             while all_pcm_data.shape[-1] >= self.frame_size:
                 self._output_queue.put(all_pcm_data[: self.frame_size])
-                all_pcm_data = np.array(all_pcm_data[self.frame_size :])
+                all_pcm_data = np.array(all_pcm_data[self.frame_size:])
 
     async def _recv_loop(self) -> None:
         try:
@@ -152,8 +153,11 @@ async def run(printer: AnyPrinter, args):
 
 def main():
     parser = argparse.ArgumentParser("client_opus")
-    parser.add_argument("--host", default="localhost", type=str)
-    parser.add_argument("--port", default=8998, type=int)
+    parser.add_argument("--host", default="localhost", type=str, help="Hostname to connect to.")
+    parser.add_argument("--port", default=8998, type=int, help="Port to connect to.")
+    parser.add_argument("--https", action='store_true',
+                        help="Set this flag for using a https connection.")
+    parser.add_argument("--url", type=str, 'Provide '
     args = parser.parse_args()
     printer: AnyPrinter
 

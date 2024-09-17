@@ -1,6 +1,5 @@
 [project]
 name = "moshi"
-version = "0.0.1"
 requires-python = ">= 3.10"
 description = "Moshi is moshi"
 dependencies = [
@@ -17,6 +16,7 @@ dependencies = [
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 license = {text = "MIT"}
+dynamic = ["version"]
 
 
 [build-system]
