@@ -1,0 +1,53 @@
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main, refacto ]
+
+name: Rust CI
+
+jobs:
+  check:
+    name: Check
+    defaults:
+      run:
+        working-directory: ./rust
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        rust: [stable]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: ./.github/actions/rust_build
+      - name: check
+        shell: bash
+        run: |
+          cargo check
+      - name: clippy
+        shell: bash
+        run: |
+          cargo clippy -- -D warnings
+      - name: fmt
+        shell: bash
+        run: |
+          cargo fmt --all -- --check
+  test:
+    name: Test
+    defaults:
+      run:
+        working-directory: ./rust
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        rust: [stable]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: ./.github/actions/rust_build
+        with:
+          target: test
+      - name: test
+        shell: bash
+        run: |
+          cargo test

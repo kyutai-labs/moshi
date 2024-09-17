@@ -1,0 +1,33 @@
+name: rust_build
+description: 'Setup rust env'
+inputs:
+  os:
+    default: ubuntu-latest
+  toolchain:
+    default: stable
+  target:
+    default: check
+runs:
+  using: "composite"
+  steps:
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ inputs.toolchain }}
+        override: true
+    - name: cargo cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          rust/target/
+        key: ${{ inputs.os }}-cargo-${{ inputs.target }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: ${{ inputs.os }}-cargo-
+    - name: install deps
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install libasound2-dev

@@ -321,12 +321,12 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         return self.rvq_first.dimension
 
     @property
-    def semantic_quantizer(self):
+    def semantic_quantizer(self) -> ResidualVectorQuantizer:
         """This returns the quantizer that models the first level of the hierarchy (typically semantic)."""
         return self.rvq_first
 
     @property
-    def acoustic_quantizer(self):
+    def acoustic_quantizer(self) -> ResidualVectorQuantizer:
         """This returns the quantizer that models the higher levels of the hierarchy (typically acoustic)."""
         return self.rvq_rest
 

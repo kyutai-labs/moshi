@@ -8,10 +8,9 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-import math
 import typing as tp
 
-from einops import rearrange, repeat
+from einops import rearrange
 import torch
 from torch import nn
 from torch import distributed
@@ -339,7 +338,7 @@ class ResidualVectorQuantization(nn.Module):
         n_q = n_q or len(self.layers)
         previous_layer_is_initialized = True
 
-        for i, layer in enumerate(self.layers[:n_q]):
+        for i, layer in enumerate(self.layers[:n_q]):  # type: ignore
             quantized, codes, loss, metrics = layer(
                 residual, initialize=previous_layer_is_initialized
             )
@@ -366,7 +365,7 @@ class ResidualVectorQuantization(nn.Module):
         residual = x
         all_indices = []
         n_q = n_q or len(self.layers)
-        for layer in self.layers[:n_q]:
+        for layer in self.layers[:n_q]:  # type: ignore
             indices = layer.encode(residual)
             quantized = layer.decode(indices)
             residual = residual - quantized
