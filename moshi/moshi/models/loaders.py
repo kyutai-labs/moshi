@@ -16,11 +16,11 @@ from ..quantization import SplitResidualVectorQuantizer
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
-HF_REPO = 'kmhf'
-MIMI_V1 = 'tokenizer-e351c8d8-checkpoint125.safetensors'
-MOSHIKO_V1 = 'moshiko_pt_301e30bf@120.safetensors'
-MOSHIKA_V1 = 'moshika_pt_3d736a96@120.safetensors'
-TEXT_TOKENIZER_V1 = 'tokenizer_spm_32k_3.model'
+HF_REPO = 'kmhf/msh-v0.1'
+MIMI_V0_1 = 'tokenizer-e351c8d8-checkpoint125.safetensors'
+MOSHIKO_V0_1 = 'moshiko_pt_301e30bf@120.safetensors'
+MOSHIKA_V0_1 = 'moshika_pt_3d736a96@120.safetensors'
+TEXT_TOKENIZER_V0_1 = 'tokenizer_spm_32k_3.model'
 
 
 _seanet_kwargs = {

@@ -175,11 +175,11 @@ def main():
     parser.add_argument("--gradio_tunnel_token",
                         help='Provide a custom (secret) token here to keep getting the same URL.')
 
-    parser.add_argument("--tokenizer-name", type=str, default=loaders.TEXT_TOKENIZER_V1,
+    parser.add_argument("--tokenizer-name", type=str, default=loaders.TEXT_TOKENIZER_V0_1,
                         help="Name of the text tokenizer file in the given HF repo, or path to a local file.")
-    parser.add_argument("--moshi-name", type=str, default=loaders.MOSHIKO_V1,
+    parser.add_argument("--moshi-name", type=str, default=loaders.MOSHIKO_V0_1,
                         help="Name of the Moshi checkpoint in the given HF repo, or path to a local file.")
-    parser.add_argument("--mimi-name", type=str, default=loaders.MIMI_V1,
+    parser.add_argument("--mimi-name", type=str, default=loaders.MIMI_V0_1,
                         help="Name of the Mimi checkpoint in the given HF repo, or path to a local file.")
     parser.add_argument("--hf-repo", type=str, default=loaders.HF_REPO,
                         help="HF repo to look into, defaults to Kyutai official one.")
@@ -190,7 +190,7 @@ def main():
 
     setup_tunnel = None
     tunnel_token = ''
-    if args.gradio:
+    if args.gradio_tunnel:
         try:
             from gradio import networking  # type: ignore
         except ImportError:
@@ -198,10 +198,10 @@ def main():
                          "Please install with `pip install gradio`.")
             sys.exit(1)
         setup_tunnel = networking.setup_tunnel
-        if args.gradio_tunnel_secret is None:
+        if args.gradio_tunnel_token is None:
             tunnel_token = secrets.token_urlsafe(32)
         else:
-            tunnel_token = args.gradio_tunnel_secret
+            tunnel_token = args.gradio_tunnel_token
 
     log("info", "loading mimi")
     mimi_path = loaders.resolve_model_checkpoint(args.mimi_name, args.hf_repo, allow_local_file=True)
@@ -243,10 +243,11 @@ def main():
         app.router.add_static(
             "/", path=static_path, follow_symlinks=True, name="static"
         )
+    log("info", f"Access the Web UI directly at http://{args.host}:{args.port}")
     if setup_tunnel is not None:
         tunnel = setup_tunnel('localhost', args.port, tunnel_token, None)
-        log("info", f"Tunnel started listening at {tunnel}.")
-    log("info", f"listening to ws://{args.host}:{args.port}")
+        log("info", f"Tunnel started, if executing on a remote GPU, you can use {tunnel}.")
+        log("info", f"Note that this tunnel goes through the US and you might experience high latency in Europe.")
     web.run_app(app, port=args.port)
 
 
