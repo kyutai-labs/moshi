@@ -76,7 +76,7 @@ class Connection:
                 all_pcm_data = np.concatenate((all_pcm_data, pcm))
             while all_pcm_data.shape[-1] >= self.frame_size:
                 self._output_queue.put(all_pcm_data[: self.frame_size])
-                all_pcm_data = np.array(all_pcm_data[self.frame_size:])
+                all_pcm_data = np.array(all_pcm_data[self.frame_size :])
 
     async def _recv_loop(self) -> None:
         try:
