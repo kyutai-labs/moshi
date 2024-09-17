@@ -1,7 +1,7 @@
 # moshi
 
-![docs badge](https://github.com/kyutai-labs/moshi/workflows/precommit/badge.svg)
-![tests badge](https://github.com/kyutai-labs/moshi/workflows/rust_ci/badge.svg)
+![precommit badge](https://github.com/kyutai-labs/moshi/workflows/precommit/badge.svg)
+![rust ci badge](https://github.com/kyutai-labs/moshi/workflows/rust_ci/badge.svg)
 
  [Moshi][moshi] is a speech-text foundation model and full-duplex spoken dialogue framework.
  It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at 12.5 Hz, and compress
@@ -198,9 +198,11 @@ the MIT license.
 
 If you use either Mimi or Moshi, please cite the following paper,
 
+```
 @article{defossez2024moshi,
     title={Moshi: a speech-text foundation model for real-time dialogue},
     author={Alexandre Défossez and Laurent Mazaré and Manu Orsini and Amélie Royer and Patrick Pérez and Hervé Jégou and Edouard Grave and Neil Zeghidour},
     journal={arXiv:TBC},
     year={2024},
 }
+```

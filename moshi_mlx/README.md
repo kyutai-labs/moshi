@@ -1,4 +1,4 @@
-# Moshi - PyTorch
+# Moshi - MLX
 
 See the [top-level README.md](../README.md) for more information.
 This provides the Rust backend and client implementation.
@@ -45,62 +45,52 @@ width="800px"></p>
 
 ## Requirements
 
-You will need at least Python 3.10. We kept a minimal set of dependencies for the current project.
-It was tested with PyTorch 2.2 or 2.4. If you need a specific CUDA version, please make sure
-to have PyTorch properly installed before installing Moshi.
+You will need at least Python 3.10.
 
 ```bash
-pip install moshi      # moshi PyTorch, from PyPI
-# Or the bleeding edge versions for Moshi
-pip install -e "git+https://git@github.com/kyutai-labs/moshi#egg=moshi&subdirectory=moshi"
+pip install moshi_mlx  # moshi MLX, from PyPI
+# Or the bleeding edge versions for Moshi and Moshi-MLX.
+pip install -e "git+https://git@github.com/kyutai-labs/moshi#egg=moshi_mlx&subdirectory=moshi_mlx"
 ```
-
-While we hope that the present codebase will work on Windows, we do not provide official support for it.
-At the moment, we do not support quantization for the PyTorch version, so you will need a GPU with a significant amount of memory (24GB).
+We have tested the MLX version with MacBook Pro M3.
 
 
 ## Development
 
 If you wish to install from a clone of this repository, maybe to further develop Moshi, you can do the following:
 ```
-# From the current folder (e.g. `moshi/`)
+# From the current folder (e.g. `moshi_mlx/`)
 pip install -e '.[dev]'
 pre-commit install
 ```
 
-## Usage
+## Python (MLX) for local inference on macOS
 
-This package provides a streaming version of the audio tokenizer (Mimi) and the lm model (Moshi).
-
-In order to run in interactive mode, you need to start a server which will
-run the model, you can then use either the web UI or a command line client.
-
-Start the server with:
+You can either compile and install the `rustymimi` extension or install it via
+pip.
 ```bash
-python -m moshi.server [--gradio_tunnel]
+# Install from pip:
+pip install rustymimi==0.1.1
+# Alternatively, if you want to compile the package run:
+maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 ```
 
-And then access the web UI on [localhost:8998](http://localhost:8998). If your GPU is on a distant machine
-with no direct access, `--gradio_tunnel` will create a tunnel with a URL accessible from anywhere.
-Keep in mind that this tunnel goes through the US and can add significant latency (up to 500ms from Europe).
-Alternatively, you might want to use SSH to redirect your connection.
-
-Accessing a server that is not localhost via http may cause issues around using
-the microphone in the web UI (in some browsers this is only allowed using
-https).
-
-A local client is also available, as
+Then the model can be run with:
 ```bash
-python -m moshi.client [--url URL_TO_GRADIO]
+python -m moshi_mlx.local -q 4   # weights quantized to 4 bits
+python -m moshi_mlx.local -q 8   # weights quantized to 8 bits
 ```
-However note, that unlike the web browser, this client is bare bone. It doesn't do any echo cancellation,
+
+This uses a command line interface, which is bare bone. It doesn't do any echo cancellation,
 nor does it try to compensate for a growing lag by skipping frames.
+
+Alternatively you can use `python -m moshi_mlx.local_web` to use
+the web UI, connection is via http on [localhost:8998](http://localhost:8998).
+
 
 ## License
 
 The present code is provided under the MIT license.
-Note that parts of this code is based on [AudioCraft](https://github.com/facebookresearch/audiocraft), released under
-the MIT license.
 
 ## Citation
 

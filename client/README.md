@@ -14,3 +14,20 @@ Frontend for the demo.
 ## Skipping the queue
 To skip the queue for standalone use, once the project is running go to `/?worker_addr={WORKER_ADDR}` where `WORKER_ADDR` is your worker instance address.
 For example : `https://localhost:5173/?worker_addr=0.0.0.0:8088`
+
+## License
+
+The present code is provided under the MIT license.
+
+## Citation
+
+If you use this client as part of your research, please cite the following paper.
+
+```
+@article{defossez2024moshi,
+    title={Moshi: a speech-text foundation model for real-time dialogue},
+    author={Alexandre Défossez and Laurent Mazaré and Manu Orsini and Amélie Royer and Patrick Pérez and Hervé Jégou and Edouard Grave and Neil Zeghidour},
+    journal={arXiv:TBC},
+    year={2024},
+}
+```
