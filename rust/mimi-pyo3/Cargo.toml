@@ -1,15 +1,19 @@
 [package]
 name = "mimi-pyo3"
-version = "0.1.0"
-edition = "2021"
-license = "MIT/Apache-2.0"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
 
 [lib]
-name = "mimi"
+name = "rustymimi"
 crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1"
 numpy = "0.21.0"
 pyo3 = "0.21.0"
-moshi = { path = "../moshi-core" }
+moshi = { path = "../moshi-core", version = "0.2.0" }

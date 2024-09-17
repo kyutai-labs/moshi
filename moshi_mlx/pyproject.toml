@@ -1,0 +1,27 @@
+[project]
+name = "moshi_mlx"
+version = "0.0.1"
+requires-python = ">= 3.10"
+description = "Moshi is moshi, but running on macOS"
+dependencies = [
+    "numpy >= 2.1.0, < 2.2",
+    "safetensors >= 0.4.0, < 0.5",
+    "huggingface-hub >= 0.24, < 0.25",
+    "rustymimi == 0.1.1",
+    "sentencepiece == 0.2",
+    "sounddevice == 0.5",
+    "sphn >= 0.1.4",
+    "mlx >= 0.17.2, < 0.18",
+    "aiohttp>=3.10.5, <3.11",
+]
+authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
+maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
+license = {text = "MIT"}
+
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["moshi_mlx", "moshi_mlx.modules", "moshi_mlx.models", "moshi_mlx.utils"]

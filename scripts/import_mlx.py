@@ -43,7 +43,7 @@ def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:
 
     # Only export the first 8 slices of the depformer (main).
     n_q_main = 8
-    print(f"only exporting the first {n_q_main}/{n_q} depformer layers") 
+    print(f"only exporting the first {n_q_main}/{n_q} depformer layers")
     for idx in range(n_q_main):
         base = f"depformer.slices.{idx}."
         model[base + "linear_in.weight"] = tch_model[f"depformer_in.{idx}.weight"]
@@ -84,9 +84,11 @@ def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('checkpoint', type=str, help="the pytorch checkpoint to import")
-    parser.add_argument('out', type=str, help="the mlx safetensors file to generate")
-    parser.add_argument('-s', '--silent', action='store_true', help="Only prints the checkpoint name")
+    parser.add_argument("checkpoint", type=str, help="the pytorch checkpoint to import")
+    parser.add_argument("out", type=str, help="the mlx safetensors file to generate")
+    parser.add_argument(
+        "-s", "--silent", action="store_true", help="Only prints the checkpoint name"
+    )
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -94,6 +96,7 @@ def main():
     if not out_path.exists():
         import_model(ckpt_path, out_path, silent=args.silent)
     print(out_path)
+
 
 if __name__ == "__main__":
     main()

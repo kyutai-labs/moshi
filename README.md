@@ -1,44 +1,99 @@
-# moshi-inference
+# moshi
 
 There are three separate versions of the moshi inference stack in this repo.
+- The python version using PyTorch is in the `moshi` directory.
+- The python version using MLX is in the `moshi_mlx` directory.
 - The rust version used in production is in the `rust` directory.
-- The python version using PyTorch is in the `msh` directory.
-- The python version using MLX is in the `msh_mlx` directory.
+
+## Python (PyTorch)
+
+The python api can be found in the `moshi` directory. It provides a streaming
+version of the audio tokenizer (mimi) and the lm model (moshi).
+
+In order to run in interactive mode, you need to start a server which will
+run the model, you can then use either the web UI or a command line client.
+
+Start the server with:
+```bash
+PYTHONPATH=moshi python -m moshi.server
+```
+
+And then access the web UI on [localhost:8998](http://localhost:8998).
+
+If the server is running on a remote box, you may want to forward the 8998 port
+via your ssh connection so as to be able to access the web UI locally.
+
+Accessing a server that is not localhost via http may cause issues around using
+the microphone in the web UI (in some browsers this is only allowed using
+https).
+
+## Python (MLX) for local inference on macOS
+
+You can either compile and install the `rustymimi` extension or install it via
+pip.
+```bash
+# Install from pip:
+pip install rustymimi==0.1.1
+# Alternatively, if you want to compile the package run:
+maturin dev -r -m rust/mimi-pyo3/Cargo.toml
+```
+
+Then the model can be run with:
+```bash
+PYTHONPATH=moshi_mlx python -m moshi_mlx.local  \
+    --model ~/tmp/moshiko_mlx_301e30bf@120.q8.safetensors \
+    --mimi ~/tmp/tokenizer-e351c8d8-checkpoint125.safetensors \
+    --quantized 8
+```
+
+This uses a command line interface, alternatively you can use `local_web` to use
+the web UI, connection is via http on [localhost:8998](http://localhost:8998).
 
 ## Rust
 
-The rust inference code uses a client-server infrastructure.
+In order to run the rust inference server, use the following command from within
+the `rust` directory:
 
-In order to run the inference server in standalone mode, run the following steps
-from the `rust` directory.
+```bash
+cargo run --features cuda --bin moshi-backend -r -- --config moshi-backend/config.json standalone
+```
 
-- Generate an ssl certificate (`key.pem` and `cert.pem`).
-```bash
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem
-```
-- Start the server.
-```bash
-cargo run --features cuda --bin web-ui-backend -r -- --config web-ui-backend/config.json standalone
-```
 When using macOS, you can replace `--features cuda` with `--features metal`.
 
 Alternatively you can use `config-q8.json` rather than `config.json` to use the
 quantified q8 model.
 
-Once the server has printed 'standalone worker listening', you can connect to it
-either via the web UI or using the command line interface. Multiple sessions can
-be run one after another without having to restart the server.
+Once the server has printed 'standalone worker listening', you can use the web
+UI. By default the rust version uses https so it will be at
+[localhost:8998](https://localhost:8998).
 
-### Command Line
+You will get some warnings about the site being unsafe. When using chrome you
+can bypass it by selecting "Details" or "Advanced", then "Visit this unsafe
+site" or "Proceed to localhost (unsafe)".
 
-For the CLI, run.
+## Clients
+
+We recommend using the web UI as it provides some echo cancellation that helps
+the overall model quality. Alternatively we provide some command line interfaces
+for the rust and python versions, the protocol is the same as with the web UI so
+there is nothing to change on the server side.
+
+### Rust Command Line
+
+From within the `rust` directory, run the following:
 ```bash
 cargo run --bin moshi-cli -r -- tui --host localhost
 ```
 
+### Python with PyTorch
+
+```bash
+PYTHONPATH=moshi python -m moshi.client
+```
+
 ### WebUI
 
-The web UI can be used as an alternative to the CLI. In order to do so, run the
+The web UI can be built from this repo via the
 following steps (these will require `npm` being installed).
 ```bash
 cd client
@@ -46,104 +101,4 @@ npm install
 npm run build
 ```
 
-Then run the server in the same way mentioned above and from your web browser
-navigate to `https://127.0.0.1:8080/?worker_addr=127.0.0.1:8080`. You will get
-some warnings about the site being unsafe. When using chrome you can bypass it
-by selecting "Details" or "Advanced", then "Visit this unsafe site" or "Proceed
-to localhost (unsafe)".
-
-### Protocol
-
-The connection takes place using a websocket. This handles the message lengths
-for us. The binary protocol for messages is as follows. The protocol uses little
-endian encoding.
-
-Each message starts by a single byte indicating the message type `MT`.
-The format for the rest of the message, aka the payload, depends on `MT`.
-
-```
-- Handshake MT=0. The payload is made of two fields.
-    1. Protocol version (`u32`) - always 0 for now.
-    2. Model version (`u32`).
-- Audio MT=1. The payload is made of a single field.
-  - Binary data for the ogg frames containing opus encoded audio (24kHz, mono).
-- Text MT=2. The payload is made of a single field.
-  - UTF8 encoded string.
-- Control MT=3. The payload is made of a single field. This is not used in full
-  streaming mode.
-  - One byte B describing the control itself.
-    - Start B=0.
-    - EndTurn B=1.
-    - Pause B=2.
-    - Restart B=3.
-- MetaData MT=4. The payload is made of a single field.
-  - UTF8 encoded string with json data.
-- Error MT=5. The payload is made of a single field.
-  - UTF8 encoded string containing the error description.
-- Ping MT=6. No payload, this message type is currently unused.
-```
-Messages with an unknow message types should be discarded.
-
-## Python (PyTorch)
-
-The python api can be found in the `msh` directory. It provides streaming
-version of the audio tokenizer (mimi) and the lm model (moshi).
-
-In order to run in interactive mode, you need to start a server which will
-run the model, and a client that captures the sound from the microphone
-and passes it to the server, get some data back from the server and plays it
-on the speakers.
-
-The client and server do not have to run on the same machine, the protocol used
-to transfer data between the client and the server should be compatible with the
-rust version.
-
-Start the server with:
-```bash
-python server_opus.py \
-    --mimi-weights tokenizer-e351c8d8-checkpoint125.safetensors \
-    --tokenizer tokenizer_spm_32k_3.model \
-    --moshi-weights moshiko_pt_301e30bf@120.safetensors
-```
-
-And then starts the client with:
-```bash
-python client_opus.py
-```
-
-When running on different machine, you can add the command line argument
-`--host 0.0.0.0` to the server so that it accepts remote connections and
-the argument `--host 192.168.0.42` to the client where `192.168.0.42` is
-the ip of the server. The default port is `9998` and can be overriden with
-`--port`.
-
-### Testing
-In order to test the audio tokenizer, you can run the following command.
-
-```bash
-wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
-PYTHONPATH=. python scripts/mimi_test.py --weights tokenizer-e351c8d8-checkpoint125.safetensors
-```
-
-In order to test moshi, run the following.
-```bash
-PYTHONPATH=. python scripts/moshi_test.py \
-    --mimi-weights tokenizer-e351c8d8-checkpoint125.safetensors \
-    --tokenizer tokenizer_spm_32k_3.model \
-    --moshi-weights moshiko_pt_301e30bf@120.safetensors
-```
-
-## Python (MLX) for local inference on macOS
-
-You first have to compile and install the mimi extension.
-```bash
-maturin dev -r -m rust/mimi-pyo3/Cargo.toml
-```
-
-Then the model can be run with:
-```bash
-PYTHONPATH=. python local_mlx.py  \
-    --model ~/tmp/moshiko_mlx_301e30bf@120.q8.safetensors \
-    --mimi ~/tmp/tokenizer-e351c8d8-checkpoint125.safetensors \
-    --quantized 8
-```
+The web UI can then be found in the `client/dist` directory.

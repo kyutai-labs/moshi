@@ -1,0 +1,17 @@
+aiohttp>=3.10.5, <3.11
+blessed==1.20.0
+cffi==1.17.0
+dashing==0.1.0
+huggingface-hub==0.24.6
+mlx==0.17.2
+nodeenv==1.9.1
+numpy==2.1.0
+psutil==6.0.0
+pycparser==2.22
+pyright==1.1.378
+rustymimi==0.1.1
+safetensors=0.4.4
+sentencepiece==0.2.0
+six==1.16.0
+sounddevice==0.5.0
+wcwidth==0.2.13

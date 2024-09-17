@@ -18,7 +18,8 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_map_with_path
 
-import msh_mlx
+import moshi_mlx
+
 
 class Stats:
     send_times: tp.List[float] = []
@@ -40,20 +41,22 @@ class Stats:
         self.recv_times.append(t)
 
 
-def run_audio_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
-    import mimi
+def run_audio_gen(
+    model: moshi_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int
+):
+    import rustymimi
 
-    audio_tokenizer = mimi.Tokenizer(mimi_path)
+    audio_tokenizer = rustymimi.Tokenizer(mimi_path)
 
     model.warmup()
-    gen = msh_mlx.models.LmGen(
+    gen = moshi_mlx.models.LmGen(
         model=model,
         max_steps=steps + 5,
-        text_sampler=msh_mlx.utils.Sampler(),
-        audio_sampler=msh_mlx.utils.Sampler(),
+        text_sampler=moshi_mlx.utils.Sampler(),
+        audio_sampler=moshi_mlx.utils.Sampler(),
         check=False,
     )
-    pcm_data = np.array([[[0.] * 1920]]).astype(np.float32)
+    pcm_data = np.array([[[0.0] * 1920]]).astype(np.float32)
     all_out_pcm = []
     start_time = time.time()
     for _ in range(steps + 1):
@@ -66,7 +69,7 @@ def run_audio_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, step
         if text_token not in (0, 3):
             _text = text_tokenizer.id_to_piece(text_token)
             _text = _text.replace("▁", " ")
-            print(_text, end='', flush=True)
+            print(_text, end="", flush=True)
         if audio_tokens is not None:
             audio_tokens = np.array(audio_tokens[:, :, None]).astype(np.uint32)
             out_pcm = audio_tokenizer.decode_step(audio_tokens)
@@ -76,33 +79,35 @@ def run_audio_gen(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, step
     token_per_second = steps / (time.time() - start_time)
     print(f"steps: {steps}, token per sec: {token_per_second}")
     all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
-    mimi.write_wav("out.wav", all_out_pcm[0, 0], sample_rate=24000)
+    rustymimi.write_wav("out.wav", all_out_pcm[0, 0], sample_rate=24000)
 
-async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int):
-    import mimi
 
-    audio_tokenizer = mimi.StreamTokenizer(mimi_path)
+async def run_audio_gen_stream(
+    model: moshi_mlx.models.Lm, mimi_path: str, text_tokenizer, steps: int
+):
+    import rustymimi
+
+    audio_tokenizer = rustymimi.StreamTokenizer(mimi_path)
     stats = Stats()
 
     model.warmup()
-    gen = msh_mlx.models.LmGen(
+    gen = moshi_mlx.models.LmGen(
         model=model,
         max_steps=steps + 5,
-        text_sampler=msh_mlx.utils.Sampler(),
-        audio_sampler=msh_mlx.utils.Sampler(),
+        text_sampler=moshi_mlx.utils.Sampler(),
+        audio_sampler=moshi_mlx.utils.Sampler(),
         check=False,
     )
     end_queue = queue.Queue()
 
     async def send_loop():
-        pcm_data = np.array([0.] * 1920).astype(np.float32)
+        pcm_data = np.array([0.0] * 1920).astype(np.float32)
         for _ in range(steps):
             await asyncio.sleep(1.0 / 13.0)
             stats.on_send(time.time())
             audio_tokenizer.encode(pcm_data)
         await asyncio.sleep(1.0)
         end_queue.put_nowait(True)
-
 
     async def model_loop():
         while True:
@@ -123,7 +128,7 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
             if text_token not in (0, 3):
                 _text = text_tokenizer.id_to_piece(text_token)
                 _text = _text.replace("▁", " ")
-                print(_text, end='', flush=True)
+                print(_text, end="", flush=True)
             if audio_tokens is not None:
                 audio_tokens = np.array(audio_tokens).astype(np.uint32)
                 audio_tokenizer.decode(audio_tokens)
@@ -143,7 +148,7 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
         token_per_second = steps / (time.time() - start_time)
         print(f"steps: {steps}, token per sec: {token_per_second}")
         all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
-        mimi.write_wav("out.wav", all_out_pcm, sample_rate=24000)
+        rustymimi.write_wav("out.wav", all_out_pcm, sample_rate=24000)
 
     await asyncio.gather(recv_loop(), send_loop(), model_loop())
     # Discard the first times for sending and processing the first slice as this does not
@@ -153,20 +158,26 @@ async def run_audio_gen_stream(model: msh_mlx.models.Lm, mimi_path: str, text_to
         "recv_times": stats.recv_times,
         "model_times": stats.model_times[1:],
     }
-    with open('timings.json', 'w') as json_file:
+    with open("timings.json", "w") as json_file:
         json.dump(stats, json_file)
     model_times = np.array(stats["model_times"])
     model_times = model_times[:, 1] - model_times[:, 0]
-    mean, stdev, min_v, max_v = np.mean(model_times), np.std(model_times), np.min(model_times), np.max(model_times)
-    print(f"model times, mean: {1000 * mean:.2f}ms, std: {1000 * stdev:.2f}ms, min: {1000 * min_v:.2f}ms, max: {1000 * max_v:.2f}ms")
+    mean, stdev, min_v, max_v = (
+        np.mean(model_times),
+        np.std(model_times),
+        np.min(model_times),
+        np.max(model_times),
+    )
+    print(
+        f"model times, mean: {1000 * mean:.2f}ms, std: {1000 * stdev:.2f}ms, min: {1000 * min_v:.2f}ms, max: {1000 * max_v:.2f}ms"
+    )
 
 
-
-def run_text_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
+def run_text_gen(model: moshi_mlx.models.Lm, text_tokenizer, steps: int):
     start_time = 0
     last_text_token = mx.array([[32000]])
-    text_sampler = msh_mlx.utils.Sampler()
-    audio_sampler = msh_mlx.utils.Sampler()
+    text_sampler = moshi_mlx.utils.Sampler()
+    audio_sampler = moshi_mlx.utils.Sampler()
     for i in range(steps + 1):
         if i == 1:
             start_time = time.time()
@@ -181,7 +192,7 @@ def run_text_gen(model: msh_mlx.models.Lm, text_tokenizer, steps: int):
         if text_token not in (0, 3):
             _text = text_tokenizer.id_to_piece(text_token)
             _text = _text.replace("▁", " ")
-            print(_text, end='', flush=True)
+            print(_text, end="", flush=True)
 
         last_text_token = last_text_token[None]
     print()
@@ -208,16 +219,15 @@ def main():
     if tokenizer_file is None:
         tokenizer_file = str(Path.home() / "tmp" / "tokenizer_spm_32k_3.model")
 
-
     print(f"loading text tokenizer {tokenizer_file}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
     mx.random.seed(299792458)
 
-    lm_config = msh_mlx.models.config_v0_1()
+    lm_config = moshi_mlx.models.config_v0_1()
     if args.verbose:
         print(f"model config:\n{lm_config}")
 
-    model = msh_mlx.models.Lm(lm_config)
+    model = moshi_mlx.models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if args.quantized is not None:
         nn.quantize(model, bits=args.quantized)
@@ -248,6 +258,7 @@ def main():
 
     if args.trace_file is not None:
         mx.metal.stop_capture()
+
 
 if __name__ == "__main__":
     main()

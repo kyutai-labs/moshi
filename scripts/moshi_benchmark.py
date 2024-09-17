@@ -3,7 +3,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-import msh
+import moshi
 import sentencepiece
 import torch
 import sphn
@@ -13,7 +13,7 @@ import time
 
 from torch.profiler import profile, ProfilerActivity
 
-SAMPLE_RATE = msh.models.moshi.SAMPLE_RATE
+SAMPLE_RATE = moshi.models.moshi.SAMPLE_RATE
 DEVICE = "cuda:0"
 ENABLE_PROFILING = False
 
@@ -41,16 +41,16 @@ seed_all(42424242)
 
 
 print("loading mimi")
-ec = msh.models.moshi.get_encodec(args.mimi_weights, DEVICE)
+ec = moshi.models.moshi.get_encodec(args.mimi_weights, DEVICE)
 print("mimi loaded")
 text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)
 
 print("loading moshi")
-lm = msh.models.moshi.get_lm(args.moshi_weights, DEVICE)
+lm = moshi.models.moshi.get_lm(args.moshi_weights, DEVICE)
 lm.to(torch.bfloat16)
 print("lm loaded")
 
-lm_gen = msh.models.LMGen(lm)
+lm_gen = moshi.models.LMGen(lm)
 
 
 def cb(step, total):
@@ -72,7 +72,7 @@ def streaming_test(bs):
             be = time.time()
             ev = torch.cuda.Event(enable_timing=True)
             ev.record()
-            tokens = lm_gen.step(codes[:, :, c: c + 1])
+            tokens = lm_gen.step(codes[:, :, c : c + 1])
             if tokens is None:
                 print("Skipping")
                 return
@@ -89,7 +89,9 @@ def streaming_test(bs):
         dg = ev.elapsed_time(evb)
         torch.cuda.synchronize()
         dt = time.time() - start_time
-        print(f"step time: {1000 * dt:.2f}ms, lm step: {1000 * dt_step:.2f}, gpu step {dg:.2f}")
+        print(
+            f"step time: {1000 * dt:.2f}ms, lm step: {1000 * dt_step:.2f}, gpu step {dg:.2f}"
+        )
         text_token = text_tokens[0].item()
         if text_token not in (0, 3):
             _text = text_tokenizer.id_to_piece(text_token)
