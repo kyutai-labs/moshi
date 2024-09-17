@@ -5,67 +5,29 @@
 import argparse
 import asyncio
 from dataclasses import dataclass
-from pathlib import Path
 import random
+import os
+from pathlib import Path
 import tarfile
 import time
+import secrets
+import sys
 
-import os
+import aiohttp
+from aiohttp import web
+from huggingface_hub import hf_hub_download
 import numpy as np
 import sentencepiece
 import sphn
 import torch
-import aiohttp
-from aiohttp import web
-
-from huggingface_hub import hf_hub_download
-
-from .models import moshi_, EncodecModel, LMGen
-
-SAMPLE_RATE = moshi_.SAMPLE_RATE
-DEVICE = "cuda:0"
-ENABLE_PROFILING = False
 
 
-def colorize(text, color):
-    code = f"\033[{color}m"
-    restore = "\033[0m"
-    return "".join([code, text, restore])
+from .client_utils import make_log
+from .models import loaders, MimiModel, LMModel, LMGen
 
 
 def log(level: str, msg: str):
-    if level == "warning":
-        prefix = colorize("[Warn]", "1;31")
-    elif level == "info":
-        prefix = colorize("[Info]", "1;34")
-    elif level == "error":
-        prefix = colorize("[Err ]", "1;31")
-    else:
-        raise ValueError(f"Unknown level {level}")
-    print(prefix + " " + msg)
-
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--host", default="localhost", type=str)
-parser.add_argument("--port", default=8998, type=int)
-parser.add_argument("--static", type=str)
-parser.add_argument("--tokenizer", type=str)
-parser.add_argument("--moshi-weights", type=str)
-parser.add_argument("--mimi-weights", type=str)
-parser.add_argument("--hf-repo", type=str, default="kmhf/msh-v0.1")
-
-args = parser.parse_args()
-
-if args.tokenizer is None:
-    args.tokenizer = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
-if args.moshi_weights is None:
-    args.moshi_weights = hf_hub_download(
-        args.hf_repo, "moshiko_pt_301e30bf@120.safetensors"
-    )
-if args.mimi_weights is None:
-    args.mimi_weights = hf_hub_download(
-        args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors"
-    )
+    print(make_log(level, msg))
 
 
 def seed_all(seed):
@@ -79,43 +41,35 @@ def seed_all(seed):
     torch.backends.cudnn.benchmark = False
 
 
-seed_all(42424242)
-
-
 @dataclass
 class ServerState:
-    ec: EncodecModel
+    mimi: MimiModel
     text_tokenizer: sentencepiece.SentencePieceProcessor
     lm_gen: LMGen
     lock: asyncio.Lock
 
-    def __init__(self):
-        log("info", "loading mimi")
-        self.ec = moshi_.get_encodec(args.mimi_weights, DEVICE)
-        log("info", "mimi loaded")
-        self.text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)
-        log("info", "loading moshi")
-        lm = moshi_.get_lm(args.moshi_weights, DEVICE)
+    def __init__(self, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
+                 lm: LMModel, device: str | torch.device):
+        self.mimi = mimi
+        self.text_tokenizer = text_tokenizer
         self.lm_gen = LMGen(lm)
 
-        self.frame_size = int(self.ec.sample_rate / self.ec.frame_rate)
+        self.device = device
+        self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
         self.lock = asyncio.Lock()
 
-        self.ec.streaming_forever(1)
+        self.mimi.streaming_forever(1)
         self.lm_gen.streaming_forever(1)
-        log("info", "lm loaded")
 
     def warmup(self):
         for chunk in range(4):
-            chunk = torch.zeros(
-                1, 1, self.frame_size, dtype=torch.float32, device=DEVICE
-            )
-            codes = self.ec.encode(chunk)
+            chunk = torch.zeros(1, 1, self.frame_size, dtype=torch.float32, device=self.device)
+            codes = self.mimi.encode(chunk)
             for c in range(codes.shape[-1]):
-                tokens = self.lm_gen.step(codes[:, :, c : c + 1])
+                tokens = self.lm_gen.step(codes[:, :, c: c + 1])
                 if tokens is None:
                     continue
-                _ = self.ec.decode(tokens[:, 1:])
+                _ = self.mimi.decode(tokens[:, 1:])
         torch.cuda.synchronize()
 
     async def handle_chat(self, request):
@@ -168,21 +122,21 @@ class ServerState:
                 while all_pcm_data.shape[-1] >= self.frame_size:
                     be = time.time()
                     chunk = all_pcm_data[: self.frame_size]
-                    all_pcm_data = all_pcm_data[self.frame_size :]
+                    all_pcm_data = all_pcm_data[self.frame_size:]
                     chunk = torch.from_numpy(chunk)
-                    chunk = chunk.to(device=DEVICE)[None, None]
-                    codes = self.ec.encode(chunk)
+                    chunk = chunk.to(device=self.device)[None, None]
+                    codes = self.mimi.encode(chunk)
                     for c in range(codes.shape[-1]):
-                        tokens = self.lm_gen.step(codes[:, :, c : c + 1])
+                        tokens = self.lm_gen.step(codes[:, :, c: c + 1])
                         if tokens is None:
                             continue
                         assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
-                        main_pcm = self.ec.decode(tokens[:, 1:])
+                        main_pcm = self.mimi.decode(tokens[:, 1:])
                         main_pcm = main_pcm.cpu()
                         opus_writer.append_pcm(main_pcm[0, 0].numpy())
                         text_token = tokens[0, 0, 0].item()
                         if text_token not in (0, 3):
-                            _text = self.text_tokenizer.id_to_piece(text_token)
+                            _text = self.text_tokenizer.id_to_piece(text_token)  # type: ignore
                             _text = _text.replace("▁", " ")
                             msg = b"\x02" + bytes(_text, encoding="utf8")
                             log("info", f"text token '{_text}'")
@@ -201,9 +155,9 @@ class ServerState:
         log("info", "accepted connection")
         close = False
         async with self.lock:
-            opus_writer = sphn.OpusStreamWriter(self.ec.sample_rate)
-            opus_reader = sphn.OpusStreamReader(self.ec.sample_rate)
-            self.ec.reset_streaming()
+            opus_writer = sphn.OpusStreamWriter(self.mimi.sample_rate)
+            opus_reader = sphn.OpusStreamReader(self.mimi.sample_rate)
+            self.mimi.reset_streaming()
             self.lm_gen.reset_streaming()
             # Send the handshake.
             await ws.send_bytes(b"\x00")
@@ -213,14 +167,62 @@ class ServerState:
 
 
 def main():
-    state = ServerState()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="localhost", type=str)
+    parser.add_argument("--port", default=8998, type=int)
+    parser.add_argument("--static", type=str)
+    parser.add_argument("--gradio_tunnel", action='store_true', help='Activate a gradio tunnel.')
+    parser.add_argument("--gradio_tunnel_token",
+                        help='Provide a custom (secret) token here to keep getting the same URL.')
+
+    parser.add_argument("--tokenizer-name", type=str, default="tokenizer_spm_32k_3.model",
+                        help="Name of the text tokenizer file in the given HF repo, or path to a local file.")
+    parser.add_argument("--moshi-name", type=str, default="moshiko",
+                        help="Name of the Moshi checkpoint in the given HF repo, or path to a local file.")
+    parser.add_argument("--mimi-name", type=str, default="mimi",
+                        help="Name of the Mimi checkpoint in the given HF repo, or path to a local file.")
+    parser.add_argument("--hf-repo", type=str, default=loaders.HF_REPO,
+                        help="HF repo to look into, defaults to Kyutai official one.")
+    parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
+
+    args = parser.parse_args()
+    seed_all(42424242)
+
+    setup_tunnel = None
+    tunnel_token = ''
+    if args.gradio:
+        try:
+            from gradio import networking  # type: ignore
+        except ImportError:
+            log("error", "Cannot find gradio which is required to activate a tunnel. "
+                         "Please install with `pip install gradio`.")
+            sys.exit(1)
+        setup_tunnel = networking.setup_tunnel
+        if args.gradio_tunnel_secret is None:
+            tunnel_token = secrets.token_urlsafe(32)
+        else:
+            tunnel_token = args.gradio_tunnel_secret
+
+    log("info", "loading mimi")
+    mimi_path = loaders.resolve_model_checkpoint(args.mimi_name, args.hf_repo, allow_local_file=True)
+    mimi = loaders.get_mimi(mimi_path, args.device)
+    log("info", "mimi loaded")
+
+    tokenizer_path = loaders.resolve_model_checkpoint(args.tokenizer_name, args.hf_repo, allow_local_file=True)
+    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_path)  # type: ignore
+    log("info", "loading moshi")
+
+    moshi_path = loaders.resolve_model_checkpoint(args.moshi_name, args.hf_repo, allow_local_file=True)
+    lm = loaders.get_moshi_lm(moshi_path, args.device)
+
+    state = ServerState(mimi, text_tokenizer, lm, args.device)
     log("info", "warming up the model")
     state.warmup()
     app = web.Application()
     app.router.add_get("/api/chat", state.handle_chat)
     static_path: None | str = None
     if args.static is None:
-        log("info", f"retrieving the static content")
+        log("info", "retrieving the static content")
         dist_tgz = hf_hub_download(args.hf_repo, "dist.tgz")
         dist_tgz = Path(dist_tgz)
         dist = dist_tgz.parent / "dist"
@@ -232,7 +234,6 @@ def main():
         # When set to the "none" string, we don't serve any static content.
         static_path = args.static
     if static_path is not None:
-
         async def handle_root(_):
             return web.FileResponse(os.path.join(static_path, "index.html"))
 
@@ -241,6 +242,9 @@ def main():
         app.router.add_static(
             "/", path=static_path, follow_symlinks=True, name="static"
         )
+    if setup_tunnel is not None:
+        tunnel = setup_tunnel('localhost', args.port, tunnel_token, None)
+        log("info", f"Tunnel started listening at {tunnel}.")
     log("info", f"listening to ws://{args.host}:{args.port}")
     web.run_app(app, port=args.port)
 
