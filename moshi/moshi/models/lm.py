@@ -372,8 +372,9 @@ class LMGen(StreamingModule[_LMGenState]):
             dtype=torch.long,
         )
 
-        graphed_main = CUDAGraphed(lm_model.forward_text)
-        graphed_depth = CUDAGraphed(self.depformer_step)
+        disable = lm_model.device.type != 'cuda'
+        graphed_main = CUDAGraphed(lm_model.forward_text, disable=disable)
+        graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
 
         return _LMGenState(cache, initial, graphed_main, graphed_depth)
 

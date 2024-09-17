@@ -18,6 +18,8 @@ maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 license = {text = "MIT"}
 dynamic = ["version"]
 
+[tool.setuptools.dynamic]
+version = {attr = "moshi.__version__"}
 
 [build-system]
 requires = ["setuptools"]
