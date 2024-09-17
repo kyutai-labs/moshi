@@ -19,14 +19,8 @@ jobs:
         rust: [stable]
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
+      - uses: ./.github/actions/rust_build
       - name: check
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install libasound2-dev
           cargo check
