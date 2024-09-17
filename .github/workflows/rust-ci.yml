@@ -27,7 +27,7 @@ jobs:
       - name: clippy
         shell: bash
         run: |
-          clippy -- -D warnings
+          cargo clippy -- -D warnings
       - name: fmt
         shell: bash
         run: |
