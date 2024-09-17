@@ -3,10 +3,10 @@
 # LICENSE file in the root directory of this source tree.
 """Retrieves the pretrained models for Moshi and Mimi."""
 from pathlib import Path
-import typing as tp
 
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_model
+import sentencepiece
 import torch
 
 from .compression import MimiModel
@@ -17,12 +17,11 @@ from ..quantization import SplitResidualVectorQuantizer
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
 HF_REPO = 'kmhf'
+MIMI_V1 = 'tokenizer-e351c8d8-checkpoint125.safetensors'
+MOSHIKO_V1 = 'moshiko_pt_301e30bf@120.safetensors'
+MOSHIKA_V1 = 'moshika_pt_3d736a96@120.safetensors'
+TEXT_TOKENIZER_V1 = 'tokenizer_spm_32k_3.model'
 
-_MODEL_REGISTRY = {
-    'mimi': 'tokenizer-e351c8d8-checkpoint125.safetensors',
-    'moshiko': 'moshiko_pt_301e30bf@120.safetensors',
-    'moshika': 'moshika_pt_3d736a96@120.safetensors',
-}
 
 _seanet_kwargs = {
     "channels": 1,
@@ -106,20 +105,21 @@ def _is_safetensors(path: Path | str) -> bool:
 
 
 def resolve_model_checkpoint(name: str, hf_repo: str = HF_REPO, allow_local_file: bool = False) -> Path:
-    """Load a model checkpoint from HF,
-    potentially resolving `name` if it is a known alias (mimi, moshiko, moshika).
+    """Load a model checkpoint from HF.
     If `allow_local_file` is True, then if a file `name` exists, it will be used instead.
     """
-    if name in _MODEL_REGISTRY:
-        filename = _MODEL_REGISTRY[name]
-    elif allow_local_file and Path(name).exists():
+    if allow_local_file and Path(name).exists():
         return Path(name)
     else:
         filename = name
     return Path(hf_hub_download(hf_repo, filename))
 
 
-def get_mimi(filename: tp.Union[str, Path],
+def get_text_tokenizer(filename: str | Path) -> sentencepiece.SentencePieceProcessor:
+    return sentencepiece.SentencePieceProcessor(str(filename))  # type: ignore
+
+
+def get_mimi(filename: str | Path,
              device: torch.device | str = 'cpu') -> MimiModel:
     """Return a pretrained Mimi model."""
     encoder = SEANetEncoder(**_seanet_kwargs)
@@ -156,7 +156,7 @@ def get_mimi(filename: tp.Union[str, Path],
     return model
 
 
-def get_moshi_lm(filename: tp.Union[str, Path],
+def get_moshi_lm(filename: str | Path,
                  device: torch.device | str = 'cpu') -> LMModel:
     dtype = torch.bfloat16
     model = LMModel(
