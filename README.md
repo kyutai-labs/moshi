@@ -1,4 +1,4 @@
-# moshi
+# Moshi: a speech-text fundation model for real time dialogue
 
 ![precommit badge](https://github.com/kyutai-labs/moshi/workflows/precommit/badge.svg)
 ![rust ci badge](https://github.com/kyutai-labs/moshi/workflows/rust_ci/badge.svg)
@@ -62,8 +62,8 @@ directories. You can install the PyTorch and MLX clients with the following:
 pip install moshi      # moshi PyTorch, from PyPI
 pip install moshi_mlx  # moshi MLX, from PyPI
 # Or the bleeding edge versions for Moshi and Moshi-MLX.
-pip install -e "git+https://git@github.com/moshi.git#egg=moshi&subdirectory=moshi"
-pip install -e "git+https://git@github.com/moshi.git#egg=moshi_mlx&subdirectory=moshi_mlx"
+pip install -e "git+https://git@github.com/kyutai-labs/moshi.git#egg=moshi&subdirectory=moshi"
+pip install -e "git+https://git@github.com/kyutai-labs/moshi.git#egg=moshi_mlx&subdirectory=moshi_mlx"
 ```
 
 While we hope that the present codebase will work on Windows, we do not provide official support for it.
