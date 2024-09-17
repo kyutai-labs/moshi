@@ -22,7 +22,7 @@ import mlx.core as mx
 import mlx.nn as nn
 
 import rustymimi
-import moshi_mlx
+from moshi_mlx import models, utils
 
 import huggingface_hub
 
@@ -122,8 +122,8 @@ def model_server(client_to_server, server_to_client, args):
     log("info", f"[SERVER] loading text tokenizer {tokenizer_file}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)  # type: ignore
     mx.random.seed(299792458)
-    lm_config = moshi_mlx.models.config_v0_1()
-    model = moshi_mlx.models.Lm(lm_config)
+    lm_config = models.config_v0_1()
+    model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if args.quantized is not None:
         group_size = 32 if args.quantized == 4 else 64
@@ -135,11 +135,11 @@ def model_server(client_to_server, server_to_client, args):
 
     model.warmup()
     log("info", "[SERVER] model warmed up")
-    gen = moshi_mlx.models.LmGen(
+    gen = models.LmGen(
         model=model,
         max_steps=steps + 5,
-        text_sampler=moshi_mlx.utils.Sampler(),
-        audio_sampler=moshi_mlx.utils.Sampler(),
+        text_sampler=utils.Sampler(),
+        audio_sampler=utils.Sampler(),
         check=False,
     )
 
@@ -330,7 +330,7 @@ def web_server(client_to_server, server_to_client, args):
             log("info", f"serving static content from {static_path}")
             app.router.add_get("/", handle_root)
             app.router.add_static("/", path=static_path, name="static")
-        log("info", f"listening to ws://{args.host}:{args.port}")
+        log("info", f"listening to http://{args.host}:{args.port}")
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, args.host, args.port)
@@ -350,7 +350,7 @@ def main():
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--model", type=str)
     parser.add_argument("--mimi", type=str)
-    parser.add_argument("--quantized", type=int)
+    parser.add_argument("-q", "--quantized", type=int)
     parser.add_argument("--steps", default=2500, type=int)
     parser.add_argument("--hf-repo", type=str, default="kmhf/msh-v0.1")
     parser.add_argument("--static", type=str)
