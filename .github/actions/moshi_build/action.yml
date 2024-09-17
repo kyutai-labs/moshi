@@ -13,8 +13,8 @@ runs:
         profile: minimal
         toolchain: ${{ inputs.toolchain }}
         override: true
-      - name: Set up cargo cache
-    - uses: actions/cache@v3
+    - name: cargo cache
+      uses: actions/cache@v3
       with:
         path: |
           ~/.cargo/bin/
