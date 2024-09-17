@@ -27,6 +27,6 @@ jobs:
       - name: check
         shell: bash
         run: |
-          apt-get update
-          apt-get install libasound2-dev
+          sudo apt-get update
+          sudo apt-get install libasound2-dev
           cargo check
