@@ -24,7 +24,7 @@ of 160ms (80ms for the frame size of Mimi + 80ms of acoustic delay), with a prac
     for improved accuracy. A small depth transformer models inter codebook dependencies for a given step."
 width="800px"></p>
 
-Mimi is builds on previous neural audio codecs such as [SoundStream](https://arxiv.org/abs/2107.03312)
+Mimi builds on previous neural audio codecs such as [SoundStream](https://arxiv.org/abs/2107.03312)
 and [EnCodec](https://github.com/facebookresearch/encodec), adding a Transformer both in the encoder and decoder,
 and adapting the strides to match an overall frame rate of 12.5 Hz. This allows to get closer to the
 average frame rate of text tokens (~3-4 Hz), and limit the number of auto-regressive step in Moshi.
