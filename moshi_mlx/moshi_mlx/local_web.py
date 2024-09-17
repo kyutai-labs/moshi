@@ -17,6 +17,7 @@ import typing as tp
 import sphn
 import aiohttp
 from aiohttp import web
+import webbrowser
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -334,6 +335,10 @@ def web_server(client_to_server, server_to_client, args):
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, args.host, args.port)
+
+        log("info", f"opening browser at http://{args.host}:{args.port}")
+        webbrowser.open(f"http://{args.host}:{args.port}")
+
         await asyncio.gather(
             recv_loop(), send_loop(), recv_loop2(), send_loop2(), site.start()
         )
