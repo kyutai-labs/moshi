@@ -23,10 +23,6 @@ dynamic = ["version"]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["moshi", "moshi.utils", "moshi.modules", "moshi.models", "moshi.quantization"]
-
-
 [project.optional-dependencies]
 dev = [
     "pyright",
