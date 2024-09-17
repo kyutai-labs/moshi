@@ -1,8 +1,8 @@
 repos:
-	- repo: https://github.com/pycqa/flake8
-	  rev: '7.1.1'  # pick a git hash / tag to point to
-		hooks:
-		- id: flake8
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.1
+    hooks:
+    - id: flake8
 
   - repo: https://github.com/RobertCraigie/pyright-python
     rev: v1.1.380
