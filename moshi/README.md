@@ -59,15 +59,6 @@ While we hope that the present codebase will work on Windows, we do not provide 
 At the moment, we do not support quantization for the PyTorch version, so you will need a GPU with a significant amount of memory (24GB).
 
 
-## Development
-
-If you wish to install from a clone of this repository, maybe to further develop Moshi, you can do the following:
-```
-# From the current folder (e.g. `moshi/`)
-pip install -e '.[dev]'
-pre-commit install
-```
-
 ## Usage
 
 This package provides a streaming version of the audio tokenizer (Mimi) and the lm model (Moshi).
@@ -95,6 +86,28 @@ python -m moshi.client [--url URL_TO_GRADIO]
 ```
 However note, that unlike the web browser, this client is bare bone. It doesn't do any echo cancellation,
 nor does it try to compensate for a growing lag by skipping frames.
+
+## Development
+
+If you wish to install from a clone of this repository, maybe to further develop Moshi, you can do the following:
+```bash
+# From the current folder (e.g. `moshi/`)
+pip install -e '.[dev]'
+pre-commit install
+```
+
+Once locally installed, Mimi can be tested with the following command, from **the root** of the repository,
+```bash
+wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
+python scripts/mimi_test.py
+
+```
+
+Similary, Moshi can be tested (with a GPU) with
+```bash
+python scripts/moshi_benchmark.py
+```
+
 
 ## License
 
