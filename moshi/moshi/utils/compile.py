@@ -23,7 +23,7 @@ _compile_disabled: bool = False
 
 @contextmanager
 def no_compile():
-    """Disable torch.compile locally."""
+    """Disable torch.compile locally. Now Pytorch 2.4 provides a function to do that."""
     global _compile_disabled
 
     prev_disabled = _compile_disabled
