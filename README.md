@@ -26,7 +26,7 @@ width="800px"></p>
 
 Mimi builds on previous neural audio codecs such as [SoundStream](https://arxiv.org/abs/2107.03312)
 and [EnCodec](https://github.com/facebookresearch/encodec), adding a Transformer both in the encoder and decoder,
-and adapting the strides to match an overall frame rate of 12.5 Hz. This allows to get closer to the
+and adapting the strides to match an overall frame rate of 12.5 Hz. This allows Mimi to get closer to the
 average frame rate of text tokens (~3-4 Hz), and limit the number of auto-regressive step in Moshi.
 Similarly to SpeechTokenizer, Mimi uses a distillation loss so that the first codebook tokens match
 a self-supervised representation from [WavLM](https://arxiv.org/abs/2110.13900). Interestingly, while
