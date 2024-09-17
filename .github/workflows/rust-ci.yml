@@ -26,6 +26,6 @@ jobs:
           echo $PWD
           ls
       - uses: actions-rs/cargo@v1
+        working-directory: ./rust
         with:
           command: check
-        working-directory: ./rust
