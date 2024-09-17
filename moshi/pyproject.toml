@@ -3,7 +3,7 @@ name = "moshi"
 requires-python = ">= 3.10"
 description = "Moshi is moshi"
 dependencies = [
-    "numpy >= 2.1.0, < 2.2",
+    "numpy >= 1.26, < 2.2",
     "safetensors >= 0.4.0, < 0.5",
     "huggingface-hub >= 0.24, < 0.25",
     "einops == 0.7",

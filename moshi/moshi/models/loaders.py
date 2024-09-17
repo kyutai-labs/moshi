@@ -104,7 +104,7 @@ def _is_safetensors(path: Path | str) -> bool:
     return Path(path).suffix in (".safetensors", ".sft", ".sfts")
 
 
-def resolve_model_checkpoint(name: str, hf_repo: str = HF_REPO, allow_local_file: bool = False) -> Path:
+def resolve_model_checkpoint(name: str, hf_repo: str = HF_REPO, allow_local_file: bool = True) -> Path:
     """Load a model checkpoint from HF.
     If `allow_local_file` is True, then if a file `name` exists, it will be used instead.
     """
