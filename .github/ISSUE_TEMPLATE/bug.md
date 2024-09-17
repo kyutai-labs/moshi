@@ -18,11 +18,11 @@ labels: bug, triage
 
 **Please fill this part, failure to do so will lead to your issue being directly closed.**
 
-- Backend impacted (Torch, MLX, or Rust):
+- Backend impacted (PyTorch, MLX, Rust, or Other):
 - Operating system (OSX, Windows, Linux):
 - Operating system version:
 
-If the backend impacted is Torch:
+If the backend impacted is PyTorch:
 - Python version:
 - PyTorch version:
 - CUDA version (run `python -c 'import torch;  print(torch.version.cuda)'`):
