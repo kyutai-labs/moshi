@@ -4,7 +4,7 @@
 ![rust ci badge](https://github.com/kyutai-labs/moshi/workflows/rust_ci/badge.svg)
 
  [Moshi][moshi] is a speech-text foundation model and full-duplex spoken dialogue framework.
- It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at 12.5 Hz, and compress
+ It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at 12.5 Hz, and compresses
  audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size),
  yet performs better than existing, non-streaming, codec like
  [SpeechTokenizer](https://github.com/ZhangXInFD/SpeechTokenizer) (50 Hz, 4 kbps), or [SemantiCodec](https://github.com/haoheliu/SemantiCodec-inference) (50 Hz, 1kbps).
