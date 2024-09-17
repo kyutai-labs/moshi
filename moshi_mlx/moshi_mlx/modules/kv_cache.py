@@ -4,7 +4,7 @@
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple
+from typing import Any
 
 import mlx.core as mx
 
@@ -24,7 +24,7 @@ class KVCache:
         self.offset = 0
         self.step = 256
 
-    def update_and_fetch(self, keys, values) -> Tuple[mx.array, mx.array]:
+    def update_and_fetch(self, keys, values) -> tuple[mx.array, mx.array]:
         prev = self.offset
         if self.keys is None or (prev + keys.shape[2]) > self.keys.shape[2]:
             B = keys.shape[0]
@@ -34,6 +34,7 @@ class KVCache:
             new_k = mx.zeros(k_shape, keys.dtype)
             new_v = mx.zeros(v_shape, values.dtype)
             if self.keys is not None:
+                assert self.values is not None
                 if prev % self.step != 0:
                     self.keys = self.keys[..., :prev, :]
                     self.values = self.values[..., :prev, :]
@@ -44,6 +45,7 @@ class KVCache:
 
         self.offset += keys.shape[2]
         self.keys[..., prev : self.offset, :] = keys
+        assert self.values is not None
         self.values[..., prev : self.offset, :] = values
         return self.keys[..., : self.offset, :], self.values[..., : self.offset, :]
 
@@ -83,7 +85,7 @@ class RotatingKVCache:
             to_cat.append(append)
         return mx.concatenate(to_cat, axis=2)
 
-    def update_and_fetch(self, keys, values) -> Tuple[mx.array, mx.array]:
+    def update_and_fetch(self, keys, values) -> tuple[mx.array, mx.array]:
         prev = self.offset
         B, _, S = keys.shape[:3]
 
@@ -114,6 +116,7 @@ class RotatingKVCache:
             new_k = mx.zeros(k_shape, keys.dtype)
             new_v = mx.zeros(v_shape, values.dtype)
             if self.keys is not None:
+                assert self.values is not None
                 self.keys = mx.concatenate([self.keys, new_k], axis=2)
                 self.values = mx.concatenate([self.values, new_v], axis=2)
             else:
@@ -133,6 +136,7 @@ class RotatingKVCache:
 
         # Assign
         self.keys[..., self._idx : self._idx + 1, :] = keys
+        assert self.values is not None
         self.values[..., self._idx : self._idx + 1, :] = values
         self.offset += 1
         self._idx += 1
@@ -171,7 +175,7 @@ def create_additive_causal_mask(N: int, offset: int = 0):
     return mask * -1e9
 
 
-def create_attention_mask(h: mx.array, cache: Optional[Any] = None):
+def create_attention_mask(h: mx.array, cache: Any | None = None):
     T = h.shape[1]
     if T > 1:
         if cache is not None and cache[0] is not None:

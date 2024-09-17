@@ -26,6 +26,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["moshi", "moshi.utils", "moshi.modules", "moshi.models", "moshi.quantization"]
 
+[tool.setuptools.dynamic]
+version = {attr = "moshi.__version__"}
 
 [project.optional-dependencies]
 dev = [

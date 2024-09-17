@@ -120,7 +120,7 @@ def model_server(client_to_server, server_to_client, args):
     steps = args.steps
 
     log("info", f"[SERVER] loading text tokenizer {tokenizer_file}")
-    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
+    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)  # type: ignore
     mx.random.seed(299792458)
     lm_config = moshi_mlx.models.config_v0_1()
     model = moshi_mlx.models.Lm(lm_config)
@@ -153,7 +153,7 @@ def model_server(client_to_server, server_to_client, args):
             text_token = text_token[0].item()
             audio_tokens = gen.last_audio_tokens()
             if text_token not in (0, 3):
-                _text = text_tokenizer.id_to_piece(text_token)
+                _text = text_tokenizer.id_to_piece(text_token)  # type: ignore
                 _text = _text.replace("▁", " ")
                 server_to_client.put_nowait((1, _text))
             if audio_tokens is not None:
@@ -172,7 +172,7 @@ def web_server(client_to_server, server_to_client, args):
     input_queue = queue.Queue()
     output_queue = queue.Queue()
     text_queue = queue.Queue()
-    audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)
+    audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)  # type: ignore
     start = server_to_client.get()
     log("info", f"[CLIENT] received '{start}' from server, starting...")
 
@@ -311,7 +311,7 @@ def web_server(client_to_server, server_to_client, args):
         app.router.add_get("/api/chat", handle_chat)
         static_path: None | str = None
         if args.static is None:
-            log("info", f"retrieving the static content")
+            log("info", "retrieving the static content")
             dist_tgz = hf_hub_download(args.hf_repo, "dist.tgz")
             dist_tgz = Path(dist_tgz)
             dist = dist_tgz.parent / "dist"
@@ -370,7 +370,6 @@ def main():
     # Start the processes
     p1.start()
     p2.start()
-    events = []
 
     try:
         while p1.is_alive() and p2.is_alive():

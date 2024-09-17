@@ -12,4 +12,15 @@ repos:
       language: system
       entry: bash -c 'cd moshi && pyright'
       pass_filenames: false
+    - id: flake8-moshi_mlx
+      name: flake8 on moshi_mlx package
+      language: system
+      entry: bash -c 'cd moshi_mlx && flake8'
+      pass_filenames: false
+    hooks:
+    - id: pyright-moshi_mlx
+      name: pyrgith on moshi_mlx package
+      language: system
+      entry: bash -c 'cd moshi_mlx && pyright'
+      pass_filenames: false
 

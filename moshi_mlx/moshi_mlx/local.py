@@ -99,7 +99,7 @@ def server(printer_q, client_to_server, server_to_client, args):
         printer_q.put_nowait((PrinterType.INFO, s))
 
     log(f"[SERVER] loading text tokenizer {tokenizer_file}")
-    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
+    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)  # type: ignore
     mx.random.seed(299792458)
     lm_config = moshi_mlx.models.config_v0_1()
     model = moshi_mlx.models.Lm(lm_config)
@@ -137,7 +137,7 @@ def server(printer_q, client_to_server, server_to_client, args):
             text_token = text_token[0].item()
             audio_tokens = gen.last_audio_tokens()
             if text_token not in (0, 3):
-                _text = text_tokenizer.id_to_piece(text_token)
+                _text = text_tokenizer.id_to_piece(text_token)  # type: ignore
                 _text = _text.replace("▁", " ")
                 printer_q.put_nowait((PrinterType.TOKEN, _text))
             else:
@@ -158,7 +158,7 @@ def client(printer_q, client_to_server, server_to_client, args):
         )
     input_queue = queue.Queue()
     output_queue = queue.Queue()
-    audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)
+    audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)  # type: ignore
     start = server_to_client.get()
     printer_q.put_nowait(
         (PrinterType.INFO, f"[CLIENT] received '{start}' from server, starting...")

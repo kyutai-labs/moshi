@@ -3,7 +3,6 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 from .kv_cache import KVCache, RotatingKVCache
 
 import mlx.core as mx
@@ -19,7 +18,7 @@ class TransformerConfig:
     norm_first: bool
     bias_ff: bool
     bias_attn: bool
-    layer_scale: Optional[float]
+    layer_scale: float | None
     positional_embedding: str
     use_conv_block: bool
     cross_attention: bool
@@ -75,7 +74,7 @@ class Attention(nn.Module):
         self,
         xs: mx.array,
         cache: KVCache | RotatingKVCache,
-        mask: Optional[mx.array] = None,
+        mask: mx.array | None = None,
     ) -> mx.array:
         assert self.cfg.kv_repeat == 1, "only kv_repeat==1 is supported"
 
@@ -181,7 +180,7 @@ class Transformer(nn.Module):
     def __call__(
         self,
         xs: mx.array,
-        cache: List[KVCache] | List[RotatingKVCache],
+        cache: list[KVCache] | list[RotatingKVCache],
     ) -> mx.array:
         for layer, c in zip(self.layers, cache):
             xs = layer(xs, cache=c)
