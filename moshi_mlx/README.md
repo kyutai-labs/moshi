@@ -104,3 +104,5 @@ If you use either Mimi or Moshi, please cite the following paper,
     year={2024},
 }
 ```
+
+[moshi]: https://arxiv.org/
