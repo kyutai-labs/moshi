@@ -247,7 +247,7 @@ def main():
     if setup_tunnel is not None:
         tunnel = setup_tunnel('localhost', args.port, tunnel_token, None)
         log("info", f"Tunnel started, if executing on a remote GPU, you can use {tunnel}.")
-        log("info", f"Note that this tunnel goes through the US and you might experience high latency in Europe.")
+        log("info", "Note that this tunnel goes through the US and you might experience high latency in Europe.")
     web.run_app(app, port=args.port)
 
 
