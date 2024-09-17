@@ -175,11 +175,11 @@ def main():
     parser.add_argument("--gradio_tunnel_token",
                         help='Provide a custom (secret) token here to keep getting the same URL.')
 
-    parser.add_argument("--tokenizer-name", type=str, default="tokenizer_spm_32k_3.model",
+    parser.add_argument("--tokenizer-name", type=str, default=loaders.TEXT_TOKENIZER_V1,
                         help="Name of the text tokenizer file in the given HF repo, or path to a local file.")
-    parser.add_argument("--moshi-name", type=str, default="moshiko",
+    parser.add_argument("--moshi-name", type=str, default=loaders.MOSHIKO_V1,
                         help="Name of the Moshi checkpoint in the given HF repo, or path to a local file.")
-    parser.add_argument("--mimi-name", type=str, default="mimi",
+    parser.add_argument("--mimi-name", type=str, default=loaders.MIMI_V1,
                         help="Name of the Mimi checkpoint in the given HF repo, or path to a local file.")
     parser.add_argument("--hf-repo", type=str, default=loaders.HF_REPO,
                         help="HF repo to look into, defaults to Kyutai official one.")
@@ -209,11 +209,12 @@ def main():
     log("info", "mimi loaded")
 
     tokenizer_path = loaders.resolve_model_checkpoint(args.tokenizer_name, args.hf_repo, allow_local_file=True)
-    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_path)  # type: ignore
-    log("info", "loading moshi")
+    text_tokenizer = loaders.get_text_tokenizer(tokenizer_path)
 
+    log("info", "loading moshi")
     moshi_path = loaders.resolve_model_checkpoint(args.moshi_name, args.hf_repo, allow_local_file=True)
     lm = loaders.get_moshi_lm(moshi_path, args.device)
+    log("info", "moshi loaded")
 
     state = ServerState(mimi, text_tokenizer, lm, args.device)
     log("info", "warming up the model")
