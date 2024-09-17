@@ -47,7 +47,7 @@ jobs:
       - uses: ./.github/actions/rust_build
         with:
           target: test
-      - name: check
+      - name: test
         shell: bash
         run: |
           cargo test
