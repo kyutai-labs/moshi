@@ -1,31 +1,27 @@
-name: rust_build
-description: 'Setup rust env'
-inputs:
-  os:
-    default: ubuntu-latest
-  toolchain:
-    default: stable
+name: moshi_build
+description: 'Build env.'
 runs:
   using: "composite"
   steps:
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: ${{ inputs.toolchain }}
-        override: true
-    - name: cargo cache
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          rust/target/
-        key: ${{ inputs.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: ${{ runner.os }}-cargo-
-    - name: install deps
-      shell: bash
-      run: |
-        sudo apt-get update
-        sudo apt-get install libasound2-dev
+  - uses: actions/setup-python@v2
+    with:
+      python-version: '3.10'
+  - uses: actions/cache@v3
+    id: cache
+    with:
+      path: env
+      key: env-${{ hashFiles('moshi/pyproject.toml') }}
+  - name: Install dependencies
+    if: steps.cache.outputs.cache-hit != 'true'
+    shell: bash
+    run: |
+      python3 -m venv env
+      .  env/bin/activate
+      python -m pip install --upgrade pip
+      pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu
+      pip install -e './moshi[dev]'
+  - name: Setup env
+    shell: bash
+    run: |
+      .  env/bin/activate
+      pre-commit install
