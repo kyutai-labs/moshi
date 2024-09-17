@@ -482,8 +482,8 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
                 context=context,
                 rope=rope,
                 weights_per_step=weights_per_step,
-                **attn_kwargs,
-                **factory_kwargs,
+                **attn_kwargs,  # type: ignore
+                **factory_kwargs,  # type: ignore
             )  # type: ignore
             self.norm1 = create_norm_fn(norm, d_model, **factory_kwargs)
         self.norm2 = create_norm_fn(norm, d_model, **factory_kwargs)
@@ -539,8 +539,8 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
             self.layer_scale_1 = nn.Identity()
             self.layer_scale_2 = nn.Identity()
         else:
-            self.layer_scale_1 = LayerScale(d_model, layer_scale, **factory_kwargs)
-            self.layer_scale_2 = LayerScale(d_model, layer_scale, **factory_kwargs)
+            self.layer_scale_1 = LayerScale(d_model, layer_scale, **factory_kwargs)  # type: ignore
+            self.layer_scale_2 = LayerScale(d_model, layer_scale, **factory_kwargs)  # type: ignore
 
     def _init_streaming_state(self, batch_size: int) -> _LayerState:
         return _LayerState(offset_cpu=0)

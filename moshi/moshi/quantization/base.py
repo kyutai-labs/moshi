@@ -68,7 +68,7 @@ class BaseQuantizer(nn.Module):
         raise NotImplementedError()
 
     @property
-    def semantic_quantizer(self):
+    def semantic_quantizer(self) -> 'BaseQuantizer':
         """This returns the quantizer that models the first level of the hierarchy (typically semantic).
 
         In this case, it's the quantizer itself.
@@ -76,7 +76,7 @@ class BaseQuantizer(nn.Module):
         return self
 
     @property
-    def acoustic_quantizer(self):
+    def acoustic_quantizer(self) -> 'BaseQuantizer':
         """This returns the quantizer that models the higher levels of the hierarchy (typically acoustic).
 
         In this case, it's the quantizer itself.
