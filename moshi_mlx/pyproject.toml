@@ -23,9 +23,6 @@ dynamic = ["version"]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["moshi_mlx", "moshi_mlx.modules", "moshi_mlx.models", "moshi_mlx.utils"]
-
 [tool.setuptools.dynamic]
 version = {attr = "moshi_mlx.__version__"}
 

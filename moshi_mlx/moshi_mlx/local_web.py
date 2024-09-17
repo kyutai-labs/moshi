@@ -352,7 +352,7 @@ def main():
     parser.add_argument("--mimi", type=str)
     parser.add_argument("--quantized", type=int)
     parser.add_argument("--steps", default=2500, type=int)
-    parser.add_argument("--hf-repo", type=str, default="")
+    parser.add_argument("--hf-repo", type=str, default="kmhf/msh-v0.1")
     parser.add_argument("--static", type=str)
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
