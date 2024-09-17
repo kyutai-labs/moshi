@@ -243,7 +243,8 @@ def main():
             "/", path=static_path, follow_symlinks=True, name="static"
         )
     if setup_tunnel is not None:
-        setup_tunnel('localhost', args.port, tunnel_token, None)
+        tunnel = setup_tunnel('localhost', args.port, tunnel_token, None)
+        log("info", f"Tunnel started listening at {tunnel}.")
     log("info", f"listening to ws://{args.host}:{args.port}")
     web.run_app(app, port=args.port)
 

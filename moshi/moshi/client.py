@@ -8,10 +8,10 @@ import asyncio
 import queue
 import sys
 
+import aiohttp
 import numpy as np
 import sphn
 import sounddevice as sd
-import aiohttp
 
 from .client_utils import AnyPrinter, Printer, RawPrinter
 
@@ -142,7 +142,27 @@ class Connection:
 
 
 async def run(printer: AnyPrinter, args):
-    uri = f"ws://{args.host}:{args.port}/api/chat"
+    if args.url is None:
+        proto = "ws"
+        if args.https:
+            proto += "s"
+        uri = f"{proto}://{args.host}:{args.port}/api/chat"
+    else:
+        proto = "wss"
+        if '://' in args.url:
+            proto, without_proto = args.url.split('://', 1)
+            if proto in ['ws', 'http']:
+                proto = "ws"
+            elif proto in ['wss', 'https']:
+                proto = "wss"
+            else:
+                printer.log("error", "The provided URL {args.url} seems to contain a protocol but it is unknown.")
+                sys.exit(1)
+        else:
+            without_proto = args.url
+        uri = f"{proto}://{without_proto}/api/chat"
+
+    printer.log("info", "Connecting to {uri}.")
     async with aiohttp.ClientSession() as session:
         async with session.ws_connect(uri) as ws:
             printer.log("info", "connected!")
@@ -157,7 +177,7 @@ def main():
     parser.add_argument("--port", default=8998, type=int, help="Port to connect to.")
     parser.add_argument("--https", action='store_true',
                         help="Set this flag for using a https connection.")
-    parser.add_argument("--url", type=str, 'Provide '
+    parser.add_argument("--url", type=str, help='Provides directly a URL, e.g. to a gradio tunnel.')
     args = parser.parse_args()
     printer: AnyPrinter
 
