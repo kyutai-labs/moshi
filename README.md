@@ -163,7 +163,7 @@ cargo run --bin moshi-cli -r -- tui --host localhost
 ### Python with PyTorch
 
 ```bash
-PYTHONPATH=moshi python -m moshi.client
+python -m moshi.client
 ```
 
 ### WebUI
