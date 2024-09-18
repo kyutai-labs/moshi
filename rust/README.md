@@ -1,12 +1,25 @@
 # moshi - rust
 
 See the [top-level README.md](../README.md) for more information.
-This provides the Rust backend and client implementation.
 
+This provides the Rust backend (both Mimi and Moshi) and client implementation.
+The Mimi implementation is available through Python bindings, through the  `rustymimi` package.
 
 ## Requirements
 
 You will need a recent version of the [Rust toolchain](https://rustup.rs/).
+
+## Rust based Mimi with Python bindings
+
+First, a standalone rust based implementation of Mimi is provided, along with Python bindings.
+This is the one used by `moshi_mlx`. It is automatically installed with `moshi_mlx`, but you
+can install it separately as
+```bash
+# Install from pip:
+pip install rustymimi==0.1.1
+# Alternatively, if you want to compile the package run from the root of the repo.
+maturin dev -r -m rust/mimi-pyo3/Cargo.toml
+```
 
 ## Rust server
 
@@ -47,16 +60,3 @@ cargo run --bin moshi-cli -r -- tui --host localhost
 ## License
 
 The present code is provided under the Apache license.
-
-## Citation
-
-If you use either Mimi or Moshi, please cite the following paper.
-
-```
-@article{defossez2024moshi,
-    title={Moshi: a speech-text foundation model for real-time dialogue},
-    author={Alexandre Défossez and Laurent Mazaré and Manu Orsini and Amélie Royer and Patrick Pérez and Hervé Jégou and Edouard Grave and Neil Zeghidour},
-    journal={arXiv:TBC},
-    year={2024},
-}
-```

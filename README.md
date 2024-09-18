@@ -112,16 +112,7 @@ nor does it try to compensate for a growing lag by skipping frames.
 
 ## Python (MLX) for local inference on macOS
 
-You can either compile and install the `rustymimi` extension or install it via
-pip.
-```bash
-# Install from pip:
-pip install rustymimi==0.1.1
-# Alternatively, if you want to compile the package run:
-maturin dev -r -m rust/mimi-pyo3/Cargo.toml
-```
-
-Then the model can be run with:
+Once you have installed `moshi_mlx`, you can run
 ```bash
 python -m moshi_mlx.local -q 4   # weights quantized to 4 bits
 python -m moshi_mlx.local -q 8   # weights quantized to 8 bits

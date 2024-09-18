@@ -6,7 +6,7 @@ See the [top-level README.md][main_repo] for more information on Moshi.
 It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at 12.5 Hz, and compress
 audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size), yet performs better than existing, non-streaming, codec.
 
-This is the MLX implementation for Moshi.
+This is the MLX implementation for Moshi. For Mimi, this uses our Rust based implementation through the Python binding provided in `rustymimi`, available in the [rust/](https://github.com/kyutai-labs/moshi/tree/main/rust) folder of our main repository.
 
 ## Requirements
 
@@ -20,16 +20,8 @@ pip install -e "git+https://git@github.com/kyutai-labs/moshi#egg=moshi_mlx&subdi
 We have tested the MLX version with MacBook Pro M3.
 
 
-## Python (MLX) for local inference on macOS
+## Usage
 
-You can either compile and install the `rustymimi` extension or install it via
-pip.
-```bash
-# Install from pip:
-pip install rustymimi==0.1.1
-# Alternatively, if you want to compile the package run from the root of the repo.
-maturin dev -r -m rust/mimi-pyo3/Cargo.toml
-```
 
 Then the model can be run with:
 ```bash
@@ -43,14 +35,6 @@ nor does it try to compensate for a growing lag by skipping frames.
 Alternatively you can use `python -m moshi_mlx.local_web` to use
 the web UI, connection is via http on [localhost:8998](http://localhost:8998).
 
-## Development
-
-If you wish to install from a clone of this repository, maybe to further develop Moshi, you can do the following:
-```bash
-# From the current folder (e.g. `moshi/`)
-pip install -e '.[dev]'
-pre-commit install
-```
 
 ## License
 
