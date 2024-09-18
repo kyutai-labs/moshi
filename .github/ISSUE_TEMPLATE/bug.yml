@@ -1,0 +1,79 @@
+name: Bug Report
+description: You found a bug.
+labels: ["bug", "triage"]
+body:
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend impacted
+      description: Which backend is concerned with your bug report?
+      options:
+        - The PyTorch implementation
+        - The MLX implementation
+        - The Rust implementation
+        - Other / All
+      default: 0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      description: What is your operating system?
+      options:
+        - Linux
+        - Mac OS X
+        - Windows (unsupported)
+      default: 0
+    validations:
+      required: true
+  - type: dropdown
+    id: hardware
+    attributes:
+      label: Hardware
+      description: What hardware are you using?
+      options:
+        - CPU
+        - GPU with CUDA
+        - Metal with MLX
+      default: 0
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Provide a detailed description of your bug.
+      placeholder: 
+      value: 
+    validations:
+      required: true
+  - type: textarea
+    id: more_info
+    attributes:
+      label: Extra information
+      description: Please provide any other relevant information, such as log extracts, code etc.
+      placeholder: 
+      value: 
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Please provide any other relevant information, such as log extracts, code etc.
+      placeholder: 
+      value: |
+          Fill in the following information on your system.
+          - Operating system version:
+
+          If the backend impacted is PyTorch:
+          - Python version:
+          - PyTorch version:
+          - CUDA version (run `python -c 'import torch;  print(torch.version.cuda)'`):
+          - GPU model and memory:
+            
+          If the backend is MLX:
+          - Mac model:
+    validations:
+      required: true

@@ -3,8 +3,8 @@
 See the [top-level README.md][main_repo] for more information on Moshi.
 
 [Moshi][moshi] is a speech-text foundation model and full-duplex spoken dialogue framework.
-It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at 12.5 Hz, and compress
-audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size), yet performs better than existing, non-streaming, codec.
+It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at 12.5 Hz, and compresses
+24 kHz audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size), yet performs better than existing, non-streaming, codec.
 
 This is the PyTorch implementation for Moshi and Mimi.
 
@@ -40,12 +40,13 @@ python -m moshi.server [--gradio-tunnel]
 And then access the web UI on [localhost:8998](http://localhost:8998). If your GPU is on a distant machine
 with no direct access, `--gradio-tunnel` will create a tunnel with a URL accessible from anywhere.
 Keep in mind that this tunnel goes through the US and can add significant latency (up to 500ms from Europe).
-You can use `--gradio-tunnel-token` to set a fixed secret and reuse the same address over time.
+You can use `--gradio-tunnel-token` to set a fixed secret token and reuse the same address over time.
 Alternatively, you might want to use SSH to redirect your connection.
 
 You can use `--hf-repo` to select a different pretrained model, by setting the proper Hugging Face repository.
+See [the model list](https://github.com/kyutai-labs/moshi?tab=readme-ov-file#models) for a reference of the available models.
 
-Accessing a server that is not localhost via http may cause issues around using
+Accessing a server that is not localhost via http may cause issues with using
 the microphone in the web UI (in some browsers this is only allowed using
 https).
 
@@ -53,11 +54,11 @@ A local client is also available, as
 ```bash
 python -m moshi.client [--url URL_TO_GRADIO]
 ```
-However note, that unlike the web browser, this client is bare bone. It doesn't do any echo cancellation,
+However note, that unlike the web browser, this client is barebone. It does not perform any echo cancellation,
 nor does it try to compensate for a growing lag by skipping frames.
 
 
-## API - Mimi
+## API
 
 You can use programmatically the Mimi/Moshi as follows:
 ```python
@@ -68,7 +69,7 @@ from moshi.models import loaders
 
 mimi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MIMI_NAME)
 mimi = loaders.get_mimi(mimi_weight, device='cpu')
-mimi.set_num_codebooks(8)  # up to 32.
+mimi.set_num_codebooks(8)  # up to 32 for mimi, but limited to 8 for moshi.
 
 wav = torch.randn(1, 1, 24000 * 10)  # should be [B, C=1, T]
 with torch.no_grad():
@@ -111,7 +112,7 @@ pre-commit install
 Once locally installed, Mimi can be tested with the following command, from **the root** of the repository,
 ```bash
 wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
-python scripts/mimi_test.py
+python scripts/mimi_streaming_test.py
 
 ```
 
@@ -141,5 +142,5 @@ If you use either Mimi or Moshi, please cite the following paper,
 }
 ```
 
-[moshi]: https://arxiv.org/
+[moshi]: https://kyutai.org/Moshi.pdf
 [main_repo]: https://github.com/kyutai-labs/moshi

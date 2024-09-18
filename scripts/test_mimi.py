@@ -5,8 +5,6 @@
 import argparse
 import numpy as np
 import time
-from pathlib import Path
-import sentencepiece
 
 import rustymimi
 
@@ -18,7 +16,7 @@ def main():
     args = parser.parse_args()
 
     steps = args.steps
-    model = mimi.Tokenizer(str(args.model))
+    model = rustymimi.Tokenizer(str(args.model))
     print(model)
 
     start_time = 0
