@@ -1,11 +1,11 @@
-# Moshi: a speech-text fundation model for real time dialogue
+# Moshi: a speech-text foundation model for real time dialogue
 
 ![precommit badge](https://github.com/kyutai-labs/moshi/workflows/precommit/badge.svg)
 ![rust ci badge](https://github.com/kyutai-labs/moshi/workflows/Rust%20CI/badge.svg)
 
  [Moshi][moshi] is a speech-text foundation model and **full-duplex** spoken dialogue framework.
- It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at 12.5 Hz, and compresses
- audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size),
+ It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi processes 24 kHz audio, down to a 12.5 Hz representation
+ with a bandwidth of 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size),
  yet performs better than existing, non-streaming, codec like
  [SpeechTokenizer](https://github.com/ZhangXInFD/SpeechTokenizer) (50 Hz, 4 kbps), or [SemantiCodec](https://github.com/haoheliu/SemantiCodec-inference) (50 Hz, 1kbps).
 
