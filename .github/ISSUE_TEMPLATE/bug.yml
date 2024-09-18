@@ -57,7 +57,7 @@ body:
   - type: textarea
     id: env
     attributes:
-      label: 
+      label: Environment
       description: Please provide any other relevant information, such as log extracts, code etc.
       placeholder: 
       value: |
