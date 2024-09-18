@@ -11,8 +11,8 @@
 
  Moshi models **two streams of audio**: one corresponds to Moshi, and one to the user.
  At inference, the stream from the user is taken from the audio input,
-and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech, its **inner monologue**,
-which greatly improves the quality of its generation. A small depth transformer models inter codebook dependencies for a given time step,
+and the one for Moshi is sampled from the model's output. Along these two audio streams, Moshi predicts text tokens corresponding to its own speech, its **inner monologue**,
+which greatly improves the quality of its generation. A small Depth Transformer models inter codebook dependencies for a given time step,
 while a large, 7B parameter Transformer models the temporal dependencies. Moshi achieves a theoretical latency
 of 160ms (80ms for the frame size of Mimi + 80ms of acoustic delay), with a practical overall latency as low as 200ms.
 [Talk to Moshi](https://moshi.chat) now on our live demo.
