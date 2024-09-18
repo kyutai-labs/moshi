@@ -79,17 +79,17 @@ def server(printer_q, client_to_server, server_to_client, args):
     if model_file is None:
         if args.quantized == 8:
             model_file = hf_hub_download(
-                args.hf_repo, "moshiko_mlx_301e30bf@120.q8.safetensors"
+                args.hf_repo, "model.q8.safetensors"
             )
         elif args.quantized == 4:
             model_file = hf_hub_download(
-                args.hf_repo, "moshiko_mlx_301e30bf@120.q4.safetensors"
+                args.hf_repo, "model.q4.safetensors"
             )
         elif args.quantized is not None:
             raise ValueError(f"Invalid quantized value: {args.quantized}")
         else:
             model_file = hf_hub_download(
-                args.hf_repo, "moshiko_mlx_301e30bf@120.safetensors"
+                args.hf_repo, "model.safetensors"
             )
     if tokenizer_file is None:
         tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
@@ -257,7 +257,7 @@ def main(printer: AnyPrinter):
     parser.add_argument("--mimi", type=str)
     parser.add_argument("-q", "--quantized", type=int)
     parser.add_argument("--steps", default=2500, type=int)
-    parser.add_argument("--hf-repo", type=str, default="kmhf/msh-v0.1")
+    parser.add_argument("--hf-repo", type=str, default="kmhf/moshiko-mlx-bf16")
 
     args = parser.parse_args()
 

@@ -104,17 +104,17 @@ def model_server(client_to_server, server_to_client, args):
     if model_file is None:
         if args.quantized == 8:
             model_file = hf_hub_download(
-                args.hf_repo, "moshiko_mlx_301e30bf@120.q8.safetensors"
+                args.hf_repo, "model.q8.safetensors"
             )
         elif args.quantized == 4:
             model_file = hf_hub_download(
-                args.hf_repo, "moshiko_mlx_301e30bf@120.q4.safetensors"
+                args.hf_repo, "model.q4.safetensors"
             )
         elif args.quantized is not None:
             raise ValueError(f"Invalid quantized value: {args.quantized}")
         else:
             model_file = hf_hub_download(
-                args.hf_repo, "moshiko_mlx_301e30bf@120.safetensors"
+                args.hf_repo, "model.safetensors"
             )
     if tokenizer_file is None:
         tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
