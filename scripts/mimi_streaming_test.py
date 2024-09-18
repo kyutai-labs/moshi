@@ -44,7 +44,8 @@ mimi = loaders.get_mimi(
 print("mimi loaded")
 
 
-def mimi_streaming_test(mimi, pcm_chunk_size=1920, max_duration_sec=10.0):
+def mimi_streaming_test(mimi, max_duration_sec=10.0):
+    pcm_chunk_size = int(mimi.sample_rate / mimi.frame_rate)
     # wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
     sample_pcm, sample_sr = sphn.read("bria.mp3")
     sample_rate = mimi.sample_rate

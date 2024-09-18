@@ -175,11 +175,11 @@ def main():
     parser.add_argument("--gradio_tunnel_token",
                         help='Provide a custom (secret) token here to keep getting the same URL.')
 
-    parser.add_argument("--tokenizer-name", type=str, default=loaders.TEXT_TOKENIZER_V0_1,
+    parser.add_argument("--tokenizer", type=str, default=loaders.TEXT_TOKENIZER_V0_1,
                         help="Name of the text tokenizer file in the given HF repo, or path to a local file.")
-    parser.add_argument("--moshi-name", type=str, default=loaders.MOSHIKO_V0_1,
+    parser.add_argument("--moshi-weight", type=str, default=loaders.MOSHIKO_V0_1,
                         help="Name of the Moshi checkpoint in the given HF repo, or path to a local file.")
-    parser.add_argument("--mimi-name", type=str, default=loaders.MIMI_V0_1,
+    parser.add_argument("--mimi-weight", type=str, default=loaders.MIMI_V0_1,
                         help="Name of the Mimi checkpoint in the given HF repo, or path to a local file.")
     parser.add_argument("--hf-repo", type=str, default=loaders.HF_REPO,
                         help="HF repo to look into, defaults to Kyutai official one.")
@@ -204,15 +204,15 @@ def main():
             tunnel_token = args.gradio_tunnel_token
 
     log("info", "loading mimi")
-    mimi_path = loaders.resolve_model_checkpoint(args.mimi_name, args.hf_repo, allow_local_file=True)
+    mimi_path = loaders.resolve_model_checkpoint(args.mimi_weight, args.hf_repo)
     mimi = loaders.get_mimi(mimi_path, args.device)
     log("info", "mimi loaded")
 
-    tokenizer_path = loaders.resolve_model_checkpoint(args.tokenizer_name, args.hf_repo, allow_local_file=True)
+    tokenizer_path = loaders.resolve_model_checkpoint(args.tokenizer, args.hf_repo)
     text_tokenizer = loaders.get_text_tokenizer(tokenizer_path)
 
     log("info", "loading moshi")
-    moshi_path = loaders.resolve_model_checkpoint(args.moshi_name, args.hf_repo, allow_local_file=True)
+    moshi_path = loaders.resolve_model_checkpoint(args.moshi_weight, args.hf_repo)
     lm = loaders.get_moshi_lm(moshi_path, args.device)
     log("info", "moshi loaded")
 
