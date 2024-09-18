@@ -1,0 +1,17 @@
+name: precommit
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main, refacto ]
+
+jobs:
+  run_precommit:
+    name: Run precommit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: ./.github/actions/moshi_build
+      - run: |
+          . env/bin/activate
+          bash .git/hooks/pre-commit

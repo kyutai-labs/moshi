@@ -1,0 +1,24 @@
+repos:
+  - repo: local
+    hooks:
+    - id: flake8-moshi
+      name: flake8 on moshi package
+      language: system
+      entry: bash -c 'cd moshi && flake8'
+      pass_filenames: false
+    - id: pyright-moshi
+      name: pyright on moshi package
+      language: system
+      entry: bash -c 'cd moshi && pyright'
+      pass_filenames: false
+    - id: flake8-moshi_mlx
+      name: flake8 on moshi_mlx package
+      language: system
+      entry: bash -c 'cd moshi_mlx && flake8'
+      pass_filenames: false
+    - id: pyright-moshi_mlx
+      name: pyright on moshi_mlx package
+      language: system
+      entry: bash -c 'cd moshi_mlx && pyright'
+      pass_filenames: false
+

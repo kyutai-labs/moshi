@@ -3,7 +3,6 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -27,7 +26,7 @@ class LmConfig:
     text_out_vocab_size: int
     audio_vocab_size: int
     audio_codebooks: int
-    audio_delays: List[int]
+    audio_delays: list[int]
 
     @property
     def audio_eos_token(self) -> int:
@@ -62,7 +61,7 @@ class DepFormer(nn.Module):
     def __init__(self, cfg: LmConfig):
         super().__init__()
 
-        self.slices: List[DepFormerSlice] = []
+        self.slices: list[DepFormerSlice] = []
         for slice_idx in range(cfg.depformer.num_slices):
             in_vs = cfg.text_in_vocab_size if slice_idx == 0 else cfg.audio_vocab_size
             slice = DepFormerSlice(
@@ -144,11 +143,11 @@ class Lm(nn.Module):
     def sample(
         self,
         text_token_ids: mx.array,
-        audio_token_ids: List[mx.array],
+        audio_token_ids: list[mx.array],
         step_idx: int,
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
-    ) -> Tuple[mx.array, mx.array]:
+    ) -> tuple[mx.array, mx.array]:
         xs = self.text_emb(text_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             xs = xs + emb(token_ids)

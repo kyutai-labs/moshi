@@ -25,6 +25,9 @@ version = {attr = "moshi.__version__"}
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+version = {attr = "moshi.__version__"}
+
 [project.optional-dependencies]
 dev = [
     "pyright",

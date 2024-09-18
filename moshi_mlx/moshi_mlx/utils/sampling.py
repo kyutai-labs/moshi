@@ -3,7 +3,6 @@
 
 from dataclasses import dataclass
 from functools import partial
-from typing import List, Optional, Tuple, Dict
 
 import mlx.core as mx
 
@@ -39,7 +38,7 @@ def min_p_sampling(
         raise ValueError(
             f"`min_tokens_to_keep` has to be a positive integer, but is {min_tokens_to_keep}"
         )
-    # reference implementation: https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L531-L605
+    # reference implementation: https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L531-L605  # noqa
 
     # Softmax probabilities
     probs = mx.softmax(logits * (1 / temperature), axis=-1)
@@ -78,7 +77,7 @@ def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.arr
     Returns:
         token selected based on the top-p criterion.
     """
-    # referenced implementation from https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L449-L460
+    # referenced implementation from https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L449-L460  # noqa
     probs = mx.softmax(logits * (1 / temperature), axis=-1)
 
     # sort probs in ascending order
@@ -111,9 +110,9 @@ class Sampler:
     top_p: float = 0.95
     min_p: float = 0.0
     min_tokens_to_keep: int = 1
-    logit_bias: Optional[Dict[int, float]] = None
+    logit_bias: dict[int, float] | None = None
 
-    def __call__(self, logits: mx.array) -> Tuple[mx.array, float]:
+    def __call__(self, logits: mx.array) -> tuple[mx.array, mx.array]:
         if self.logit_bias:
             indices = mx.array(list(self.logit_bias.keys()))
             values = mx.array(list(self.logit_bias.values()))

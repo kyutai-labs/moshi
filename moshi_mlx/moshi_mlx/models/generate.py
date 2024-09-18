@@ -69,13 +69,13 @@ class LmGen:
                 audio_token = self.gen_sequence[:, cb_idx + 1, gen_idx][None]
             else:
                 audio_token = mx.array([[self.audio_padding_token]])
-            if (audio_token == self.ungenerated_token).any():
+            if (audio_token == self.ungenerated_token).any():  # type: ignore
                 raise ValueError(
                     f"ungenerated value in audio tokens cb: {cb_idx} step: {self.step_idx}"
                 )
             assert audio_token.shape == (1, 1), "invalid audio-tokens shape"
             audio_tokens.append(audio_token)
-        if (text_tokens == self.ungenerated_token).any():
+        if (text_tokens == self.ungenerated_token).any():  # type: ignore
             raise ValueError(f"ungenerated value in text tokens {self.step_idx}")
         assert text_tokens.shape == (1, 1), "invalid text-tokens shape"
         text_tokens, audio_tokens = self.model.sample(
@@ -101,8 +101,8 @@ class LmGen:
         if gen_idx < 0:
             return None
         tokens = self.gen_sequence[:, 1 : 1 + self.main_codebooks, gen_idx]
-        if (tokens == self.audio_padding_token).any():
+        if (tokens == self.audio_padding_token).any():  # type: ignore
             return None
-        if (tokens == self.ungenerated_token).any():
+        if (tokens == self.ungenerated_token).any():  # type: ignore
             raise ValueError(f"ungenerated value in last-audio tokens {self.step_idx}")
         return tokens

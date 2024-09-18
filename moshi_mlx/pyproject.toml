@@ -1,6 +1,5 @@
 [project]
 name = "moshi_mlx"
-version = "0.0.1"
 requires-python = ">= 3.10"
 description = "Moshi is moshi, but running on macOS"
 dependencies = [
@@ -17,11 +16,19 @@ dependencies = [
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 license = {text = "MIT"}
+dynamic = ["version"]
 
 
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["moshi_mlx", "moshi_mlx.modules", "moshi_mlx.models", "moshi_mlx.utils"]
+[tool.setuptools.dynamic]
+version = {attr = "moshi_mlx.__version__"}
+
+[project.optional-dependencies]
+dev = [
+    "pyright",
+    "flake8",
+    "pre-commit",
+]

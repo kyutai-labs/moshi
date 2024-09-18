@@ -20,7 +20,7 @@ import mlx.nn as nn
 
 from .client_utils import AnyPrinter, Printer, RawPrinter
 import rustymimi
-import moshi_mlx
+from moshi_mlx import models, utils
 
 import huggingface_hub
 
@@ -99,10 +99,10 @@ def server(printer_q, client_to_server, server_to_client, args):
         printer_q.put_nowait((PrinterType.INFO, s))
 
     log(f"[SERVER] loading text tokenizer {tokenizer_file}")
-    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
+    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)  # type: ignore
     mx.random.seed(299792458)
-    lm_config = moshi_mlx.models.config_v0_1()
-    model = moshi_mlx.models.Lm(lm_config)
+    lm_config = models.config_v0_1()
+    model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if args.quantized is not None:
         group_size = 32 if args.quantized == 4 else 64
@@ -114,11 +114,11 @@ def server(printer_q, client_to_server, server_to_client, args):
 
     model.warmup()
     log("[SERVER] model warmed up")
-    gen = moshi_mlx.models.LmGen(
+    gen = models.LmGen(
         model=model,
         max_steps=steps + 5,
-        text_sampler=moshi_mlx.utils.Sampler(),
-        audio_sampler=moshi_mlx.utils.Sampler(),
+        text_sampler=utils.Sampler(),
+        audio_sampler=utils.Sampler(),
         check=False,
     )
 
@@ -137,7 +137,7 @@ def server(printer_q, client_to_server, server_to_client, args):
             text_token = text_token[0].item()
             audio_tokens = gen.last_audio_tokens()
             if text_token not in (0, 3):
-                _text = text_tokenizer.id_to_piece(text_token)
+                _text = text_tokenizer.id_to_piece(text_token)  # type: ignore
                 _text = _text.replace("▁", " ")
                 printer_q.put_nowait((PrinterType.TOKEN, _text))
             else:
@@ -158,7 +158,7 @@ def client(printer_q, client_to_server, server_to_client, args):
         )
     input_queue = queue.Queue()
     output_queue = queue.Queue()
-    audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)
+    audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)  # type: ignore
     start = server_to_client.get()
     printer_q.put_nowait(
         (PrinterType.INFO, f"[CLIENT] received '{start}' from server, starting...")
@@ -255,9 +255,9 @@ def main(printer: AnyPrinter):
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--model", type=str)
     parser.add_argument("--mimi", type=str)
-    parser.add_argument("--quantized", type=int)
+    parser.add_argument("-q", "--quantized", type=int)
     parser.add_argument("--steps", default=2500, type=int)
-    parser.add_argument("--hf-repo", type=str, default="")
+    parser.add_argument("--hf-repo", type=str, default="kmhf/msh-v0.1")
 
     args = parser.parse_args()
 

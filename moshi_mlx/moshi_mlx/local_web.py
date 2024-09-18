@@ -23,7 +23,7 @@ import mlx.core as mx
 import mlx.nn as nn
 
 import rustymimi
-import moshi_mlx
+from moshi_mlx import models, utils
 
 import huggingface_hub
 
@@ -121,10 +121,10 @@ def model_server(client_to_server, server_to_client, args):
     steps = args.steps
 
     log("info", f"[SERVER] loading text tokenizer {tokenizer_file}")
-    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)
+    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)  # type: ignore
     mx.random.seed(299792458)
-    lm_config = moshi_mlx.models.config_v0_1()
-    model = moshi_mlx.models.Lm(lm_config)
+    lm_config = models.config_v0_1()
+    model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if args.quantized is not None:
         group_size = 32 if args.quantized == 4 else 64
@@ -136,11 +136,11 @@ def model_server(client_to_server, server_to_client, args):
 
     model.warmup()
     log("info", "[SERVER] model warmed up")
-    gen = moshi_mlx.models.LmGen(
+    gen = models.LmGen(
         model=model,
         max_steps=steps + 5,
-        text_sampler=moshi_mlx.utils.Sampler(),
-        audio_sampler=moshi_mlx.utils.Sampler(),
+        text_sampler=utils.Sampler(),
+        audio_sampler=utils.Sampler(),
         check=False,
     )
 
@@ -154,7 +154,7 @@ def model_server(client_to_server, server_to_client, args):
             text_token = text_token[0].item()
             audio_tokens = gen.last_audio_tokens()
             if text_token not in (0, 3):
-                _text = text_tokenizer.id_to_piece(text_token)
+                _text = text_tokenizer.id_to_piece(text_token)  # type: ignore
                 _text = _text.replace("▁", " ")
                 server_to_client.put_nowait((1, _text))
             if audio_tokens is not None:
@@ -173,7 +173,7 @@ def web_server(client_to_server, server_to_client, args):
     input_queue = queue.Queue()
     output_queue = queue.Queue()
     text_queue = queue.Queue()
-    audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)
+    audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)  # type: ignore
     start = server_to_client.get()
     log("info", f"[CLIENT] received '{start}' from server, starting...")
 
@@ -312,7 +312,7 @@ def web_server(client_to_server, server_to_client, args):
         app.router.add_get("/api/chat", handle_chat)
         static_path: None | str = None
         if args.static is None:
-            log("info", f"retrieving the static content")
+            log("info", "retrieving the static content")
             dist_tgz = hf_hub_download(args.hf_repo, "dist.tgz")
             dist_tgz = Path(dist_tgz)
             dist = dist_tgz.parent / "dist"
@@ -331,7 +331,7 @@ def web_server(client_to_server, server_to_client, args):
             log("info", f"serving static content from {static_path}")
             app.router.add_get("/", handle_root)
             app.router.add_static("/", path=static_path, name="static")
-        log("info", f"listening to ws://{args.host}:{args.port}")
+        log("info", f"listening to http://{args.host}:{args.port}")
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, args.host, args.port)
@@ -356,9 +356,9 @@ def main():
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--model", type=str)
     parser.add_argument("--mimi", type=str)
-    parser.add_argument("--quantized", type=int)
+    parser.add_argument("-q", "--quantized", type=int)
     parser.add_argument("--steps", default=2500, type=int)
-    parser.add_argument("--hf-repo", type=str, default="")
+    parser.add_argument("--hf-repo", type=str, default="kmhf/msh-v0.1")
     parser.add_argument("--static", type=str)
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
@@ -377,7 +377,6 @@ def main():
     # Start the processes
     p1.start()
     p2.start()
-    events = []
 
     try:
         while p1.is_alive() and p2.is_alive():
