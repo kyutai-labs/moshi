@@ -65,7 +65,7 @@ of the HuggingFace repo with each model. Mimi is bundled in each of those, and a
 - Moshiko for PyTorch (bf16): [kmhf/moshiko-pytorch-bf16](https://huggingface.co/kmhf/moshiko-pytorch-bf16).
 - Moshika for MLX (int4, int8, bf16): [kmhf/moshiko-mlx-q4](https://huggingface.co/kmhf/moshika-mlx-q4), [kmhf/moshiko-mlx-q8](https://huggingface.co/kmhf/moshika-mlx-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshika-mlx-bf16).
 - Moshiko for MLX (int4, int8, bf16): [kmhf/moshiko-mlx-q4](https://huggingface.co/kmhf/moshiko-mlx-q4), [kmhf/moshiko-mlx-q8](https://huggingface.co/kmhf/moshiko-mlx-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshiko-mlx-bf16).
-- Moshiko for Rust/Candle (int8, bf16): [kmhf/moshika-candle-q8](https://huggingface.co/kmhf/moshika-candle-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshika-candle-bf16).
+- Moshika for Rust/Candle (int8, bf16): [kmhf/moshika-candle-q8](https://huggingface.co/kmhf/moshika-candle-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshika-candle-bf16).
 - Moshiko for Rust/Candle (int8, bf16): [kmhf/moshiko-candle-q8](https://huggingface.co/kmhf/moshiko-candle-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshiko-candle-bf16).
 
 All models are released under the CC-BY 4.0 license.
@@ -190,9 +190,14 @@ site" or "Proceed to localhost (unsafe)".
 ## Clients
 
 We recommend using the web UI as it provides additional echo cancellation that helps
-the overall model quality. Alternatively, we provide command line interfaces
+the overall model quality. Note that most command will directly serve this UI
+in the provided URL, and there is in general nothing more to do.
+
+Alternatively, we provide command line interfaces
 for the Rust and Python versions, the protocol is the same as with the web UI so
 there is nothing to change on the server side.
+
+For reference, here is the list of clients for Moshi.
 
 ### Rust Command Line
 
