@@ -68,6 +68,8 @@ of the HuggingFace repo with each model. Mimi is bundled in each of those, and a
 - Moshiko for Rust/Candle (int8, bf16): [kmhf/moshika-candle-q8](https://huggingface.co/kmhf/moshika-candle-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshika-candle-bf16).
 - Moshiko for Rust/Candle (int8, bf16): [kmhf/moshiko-candle-q8](https://huggingface.co/kmhf/moshiko-candle-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshiko-candle-bf16).
 
+All models are released under the CC-BY 4.0 license.
+
 ## Requirements
 
 You will need at least Python 3.10. For specific requirements, please check the individual backends
