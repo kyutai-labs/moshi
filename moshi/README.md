@@ -1,46 +1,12 @@
 # Moshi - PyTorch
 
-See the [top-level README.md](../README.md) for more information.
-This provides the Rust backend and client implementation.
+See the [top-level README.md][main_repo] for more information on Moshi.
 
 [Moshi][moshi] is a speech-text foundation model and full-duplex spoken dialogue framework.
 It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at 12.5 Hz, and compress
-audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size),
-yet performs better than existing, non-streaming, codec like
-[SpeechTokenizer](https://github.com/ZhangXInFD/SpeechTokenizer) (50 Hz, 4 kbps), or [SemantiCodec](https://github.com/haoheliu/SemantiCodec-inference) (50 Hz, 1kbps).
+audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size), yet performs better than existing, non-streaming, codec.
 
-Moshi models **two streams of audio**: one corresponds to Moshi, and one to the user.
-At inference, the one from the user is taken from the audio input,
-and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech
-which greatly improves the quality of its generation. A small depth transformer models inter codebook dependencies for a given step,
-while a large, 7B parameters, Transformer models the temporal dependencies. Moshi achieves a theoretical latency
-of 160ms (80ms for the frame size of Mimi + 80ms of acoustic delay), with a practical overall latency as low as 200ms.
-[Talk to Moshi](https://moshi.chat) now on our live demo.
-
-<p align="center">
-<img src="./moshi.png" alt="Schema representing the structure Moshi. Moshi models two streams of audio:
-    one corresponds to Moshi, and one to the user. At inference, the one from the user is taken from the audio input,
-    and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech
-    for improved accuracy. A small depth transformer models inter codebook dependencies for a given step."
-width="800px"></p>
-
-Mimi is builds on previous neural audio codecs such as [SoundStream](https://arxiv.org/abs/2107.03312)
-and [EnCodec](https://github.com/facebookresearch/encodec), adding a Transformer both in the encoder and decoder,
-and adapting the strides to match an overall frame rate of 12.5 Hz. This allows to get closer to the
-average frame rate of text tokens (~3-4 Hz), and limit the number of auto-regressive step in Moshi.
-Similarly to SpeechTokenizer, Mimi uses a distillation loss so that the first codebook tokens match
-a self-supervised representation from [WavLM](https://arxiv.org/abs/2110.13900). Interestingly, while
-Mimi is fully causal and streaming, it learns to match sufficiently well the non causal representation from WavLM,
-without introducing any delays. Finally, and similary to [EBEN](https://arxiv.org/pdf/2210.14090), Mimi
-uses only an adversarial training loss, along with feature matching, showing strong improvements in terms of subjective quality
-despite its low bitrate.
-
-<p align="center">
-<img src="./mimi.png" alt="Schema representing the structure Moshi. Moshi models two streams of audio:
-    one corresponds to Moshi, and one to the user. At inference, the one from the user is taken from the audio input,
-    and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech
-    for improved accuracy. A small depth transformer models inter codebook dependencies for a given step."
-width="800px"></p>
+This is the PyTorch implementation for Moshi and Mimi.
 
 
 ## Requirements

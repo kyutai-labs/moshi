@@ -3,5 +3,3 @@ include *.md
 include *.cfg
 include requirements.txt
 include moshi_mlx/py.typed
-include mimi.png
-include moshi.png
