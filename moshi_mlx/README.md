@@ -3,8 +3,8 @@
 See the [top-level README.md][main_repo] for more information on Moshi.
 
 [Moshi][moshi] is a speech-text foundation model and full-duplex spoken dialogue framework.
-It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at 12.5 Hz, and compress
-audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size), yet performs better than existing, non-streaming, codec.
+It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at a framerate of 12.5 Hz, and compress
+24 kHz audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size), yet performs better than existing, non-streaming, codec.
 
 This is the MLX implementation for Moshi. For Mimi, this uses our Rust based implementation through the Python binding provided in `rustymimi`, available in the [rust/](https://github.com/kyutai-labs/moshi/tree/main/rust) folder of our main repository.
 
@@ -18,6 +18,9 @@ pip install moshi_mlx  # moshi MLX, from PyPI
 pip install -e "git+https://git@github.com/kyutai-labs/moshi#egg=moshi_mlx&subdirectory=moshi_mlx"
 ```
 We have tested the MLX version with MacBook Pro M3.
+
+If you get an error when installing `moshi_mlx` or `rustymimi` (which `moshi_mlx` depends on),
+you might need to install the [Rust toolchain](https://rustup.rs/) to install `rustymimi` from sources.
 
 
 ## Usage
@@ -61,5 +64,5 @@ If you use either Mimi or Moshi, please cite the following paper,
 }
 ```
 
-[moshi]: https://arxiv.org/
+[moshi]: https://kyutai.org/Moshi.pdf
 [main_repo]: https://github.com/kyutai-labs/moshi

@@ -36,7 +36,7 @@ subjective quality despite its low bitrate.
 
 <p align="center">
 <img src="./mimi.png" alt="Schema representing the structure of Mimi, our proposed neural codec. Mimi contains a Transformer
-in both its encoder and decoded, and achieves a frame rate closer to that of text tokens. This allows us to reduce 
+in both its encoder and decoded, and achieves a frame rate closer to that of text tokens. This allows us to reduce
 the number of auto-regressive steps taken by Moshi, thus reducing the latency of the model."
 width="800px"></p>
 
@@ -71,6 +71,8 @@ of the HuggingFace repo with each model. Mimi is bundled in each of those, and a
 - Moshiko for Rust/Candle (int8, bf16): [kmhf/moshika-candle-q8](https://huggingface.co/kmhf/moshika-candle-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshika-candle-bf16).
 - Moshiko for Rust/Candle (int8, bf16): [kmhf/moshiko-candle-q8](https://huggingface.co/kmhf/moshiko-candle-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshiko-candle-bf16).
 
+All models are released under the CC-BY 4.0 license.
+
 ## Requirements
 
 You will need at least Python 3.10. For specific requirements, please check the individual backends
@@ -85,6 +87,9 @@ pip install -e "git+https://git@github.com/kyutai-labs/moshi.git#egg=moshi_mlx&s
 
 pip install rustymimi  # mimi, rust implementation with Python bindings from PyPI
 ```
+
+If you get an error when installing `moshi_mlx` or `rustymimi` (which `moshi_mlx` depends on),
+you might need to install the [Rust toolchain](https://rustup.rs/) to install `rustymimi` from sources.
 
 While we hope that the present codebase will work on Windows, we do not provide official support for it.
 We have tested the MLX version on a MacBook Pro M3. At the moment, we do not support quantization
@@ -111,7 +116,7 @@ maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 
 ## Python (PyTorch)
 
-The Pytorch based API can be found in the `moshi` directory. It provides a streaming
+The PyTorch based API can be found in the `moshi` directory. It provides a streaming
 version of the audio tokenizer (mimi) and the lm model (moshi).
 
 In order to run in interactive mode, you need to start a server which will
@@ -130,7 +135,7 @@ Alternatively, you might want to use SSH to redirect your connection.
 
 You can use `--hf-repo` to select a different pretrained model, by setting the proper Hugging Face repository.
 
-Accessing a server that is not localhost via http may cause issues with using 
+Accessing a server that is not localhost via http may cause issues with using
 the microphone in the web UI (in some browsers this is only allowed using
 https).
 
@@ -238,4 +243,4 @@ If you use either Mimi or Moshi, please cite the following paper,
 }
 ```
 
-[moshi]: https://arxiv.org/
+[moshi]: https://kyutai.org/Moshi.pdf
