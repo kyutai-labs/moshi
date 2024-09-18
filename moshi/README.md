@@ -68,7 +68,7 @@ from moshi.models import loaders
 
 mimi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MIMI_NAME)
 mimi = loaders.get_mimi(mimi_weight, device='cpu')
-mimi.set_num_codebooks(8)  # up to 32.
+mimi.set_num_codebooks(8)  # up to 32 for mimi, but limited to 8 for moshi.
 
 wav = torch.randn(1, 1, 24000 * 10)  # should be [B, C=1, T]
 with torch.no_grad():
