@@ -1,6 +1,6 @@
 {
   "instance_name": "foo",
-  "hf_repo": "kmhf/moshiko-candle-q8",
+  "hf_repo": "kyutai/moshiko-candle-q8",
   "lm_model_file": "$HOME/tmp/model.q8.gguf",
   "text_tokenizer_file": "$HOME/tmp/tokenizer_spm_32k_3.model",
   "log_dir": "$HOME/tmp/moshi-logs",

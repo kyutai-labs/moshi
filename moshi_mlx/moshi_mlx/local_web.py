@@ -314,7 +314,7 @@ def web_server(client_to_server, server_to_client, args):
         static_path: None | str = None
         if args.static is None:
             log("info", "retrieving the static content")
-            dist_tgz = hf_hub_download('kmhf/moshi-artifacts', "dist.tgz")
+            dist_tgz = hf_hub_download('kyutai/moshi-artifacts', "dist.tgz")
             dist_tgz = Path(dist_tgz)
             dist = dist_tgz.parent / "dist"
             if not dist.exists():
@@ -368,11 +368,11 @@ def main():
     args = parser.parse_args()
     if args.hf_repo is None:
         if args.quantized == 8:
-            args.hf_repo = 'kmhf/moshiko-mlx-q8'
+            args.hf_repo = 'kyutai/moshiko-mlx-q8'
         elif args.quantized == 4:
-            args.hf_repo = 'kmhf/moshiko-mlx-q4'
+            args.hf_repo = 'kyutai/moshiko-mlx-q4'
         elif args.quantized is None:
-            args.hf_repo = 'kmhf/moshiko-mlx-bf16'
+            args.hf_repo = 'kyutai/moshiko-mlx-bf16'
         else:
             print(f"Invalid value for quantized {args.quantized}")
             sys.exit(1)

@@ -31,8 +31,8 @@ Once you have installed `moshi_mlx`, you can run
 python -m moshi_mlx.local -q 4   # weights quantized to 4 bits
 python -m moshi_mlx.local -q 8   # weights quantized to 8 bits
 # And using a different pretrained model:
-python -m moshi_mlx.local -q 4 --hf-repo kmhf/moshika-mlx-q4
-python -m moshi_mlx.local -q 8 --hf-repo kmhf/moshika-mlx-q8
+python -m moshi_mlx.local -q 4 --hf-repo kyutai/moshika-mlx-q4
+python -m moshi_mlx.local -q 8 --hf-repo kyutai/moshika-mlx-q8
 # be careful to always match the `-q` and `--hf-repo` flag.
 ```
 

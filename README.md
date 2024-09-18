@@ -64,12 +64,12 @@ We release three models:
 Depending on the backend, the file format and quantization available will vary. Here is the list
 of the HuggingFace repo with each model. Mimi is bundled in each of those, and always use the same checkpoint format.
 
-- Moshika for PyTorch (bf16): [kmhf/moshika-pytorch-bf16](https://huggingface.co/kmhf/moshika-pytorch-bf16).
-- Moshiko for PyTorch (bf16): [kmhf/moshiko-pytorch-bf16](https://huggingface.co/kmhf/moshiko-pytorch-bf16).
-- Moshika for MLX (int4, int8, bf16): [kmhf/moshiko-mlx-q4](https://huggingface.co/kmhf/moshika-mlx-q4), [kmhf/moshiko-mlx-q8](https://huggingface.co/kmhf/moshika-mlx-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshika-mlx-bf16).
-- Moshiko for MLX (int4, int8, bf16): [kmhf/moshiko-mlx-q4](https://huggingface.co/kmhf/moshiko-mlx-q4), [kmhf/moshiko-mlx-q8](https://huggingface.co/kmhf/moshiko-mlx-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshiko-mlx-bf16).
-- Moshika for Rust/Candle (int8, bf16): [kmhf/moshika-candle-q8](https://huggingface.co/kmhf/moshika-candle-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshika-candle-bf16).
-- Moshiko for Rust/Candle (int8, bf16): [kmhf/moshiko-candle-q8](https://huggingface.co/kmhf/moshiko-candle-q8),  [kmhf/moshiko-mlx-bf16](https://huggingface.co/kmhf/moshiko-candle-bf16).
+- Moshika for PyTorch (bf16): [kyutai/moshika-pytorch-bf16](https://huggingface.co/kyutai/moshika-pytorch-bf16).
+- Moshiko for PyTorch (bf16): [kyutai/moshiko-pytorch-bf16](https://huggingface.co/kyutai/moshiko-pytorch-bf16).
+- Moshika for MLX (int4, int8, bf16): [kyutai/moshiko-mlx-q4](https://huggingface.co/kyutai/moshika-mlx-q4), [kyutai/moshiko-mlx-q8](https://huggingface.co/kyutai/moshika-mlx-q8),  [kyutai/moshiko-mlx-bf16](https://huggingface.co/kyutai/moshika-mlx-bf16).
+- Moshiko for MLX (int4, int8, bf16): [kyutai/moshiko-mlx-q4](https://huggingface.co/kyutai/moshiko-mlx-q4), [kyutai/moshiko-mlx-q8](https://huggingface.co/kyutai/moshiko-mlx-q8),  [kyutai/moshiko-mlx-bf16](https://huggingface.co/kyutai/moshiko-mlx-bf16).
+- Moshika for Rust/Candle (int8, bf16): [kyutai/moshika-candle-q8](https://huggingface.co/kyutai/moshika-candle-q8),  [kyutai/moshiko-mlx-bf16](https://huggingface.co/kyutai/moshika-candle-bf16).
+- Moshiko for Rust/Candle (int8, bf16): [kyutai/moshiko-candle-q8](https://huggingface.co/kyutai/moshiko-candle-q8),  [kyutai/moshiko-mlx-bf16](https://huggingface.co/kyutai/moshiko-candle-bf16).
 
 All models are released under the CC-BY 4.0 license.
 
@@ -124,7 +124,7 @@ run the model, you can then use either the web UI or a command line client.
 
 Start the server with:
 ```bash
-python -m moshi.server [--gradio-tunnel] [--hf-repo kmhf/moshika-pytorch-bf16]
+python -m moshi.server [--gradio-tunnel] [--hf-repo kyutai/moshika-pytorch-bf16]
 ```
 
 And then access the web UI on [localhost:8998](http://localhost:8998). If your GPU is on a distant machine
@@ -156,8 +156,8 @@ Once you have installed `moshi_mlx`, you can run
 python -m moshi_mlx.local -q 4   # weights quantized to 4 bits
 python -m moshi_mlx.local -q 8   # weights quantized to 8 bits
 # And using a different pretrained model:
-python -m moshi_mlx.local -q 4 --hf-repo kmhf/moshika-mlx-q4
-python -m moshi_mlx.local -q 8 --hf-repo kmhf/moshika-mlx-q8
+python -m moshi_mlx.local -q 4 --hf-repo kyutai/moshika-mlx-q4
+python -m moshi_mlx.local -q 8 --hf-repo kyutai/moshika-mlx-q8
 # be careful to always match the `-q` and `--hf-repo` flag.
 ```
 

@@ -263,11 +263,11 @@ def main(printer: AnyPrinter):
 
     if args.hf_repo is None:
         if args.quantized == 8:
-            args.hf_repo = 'kmhf/moshiko-mlx-q8'
+            args.hf_repo = 'kyutai/moshiko-mlx-q8'
         elif args.quantized == 4:
-            args.hf_repo = 'kmhf/moshiko-mlx-q4'
+            args.hf_repo = 'kyutai/moshiko-mlx-q4'
         elif args.quantized is None:
-            args.hf_repo = 'kmhf/moshiko-mlx-bf16'
+            args.hf_repo = 'kyutai/moshiko-mlx-bf16'
         else:
             print(f"Invalid value for quantized {args.quantized}")
             sys.exit(1)
