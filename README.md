@@ -7,15 +7,17 @@
  It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi processes 24 kHz audio, down to a 12.5 Hz representation
  with a bandwidth of 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size),
  yet performs better than existing, non-streaming, codec like
- [SpeechTokenizer](https://github.com/ZhangXInFD/SpeechTokenizer) (50 Hz, 4 kbps), or [SemantiCodec](https://github.com/haoheliu/SemantiCodec-inference) (50 Hz, 1kbps).
+ [SpeechTokenizer](https://github.com/ZhangXInFD/SpeechTokenizer) (50 Hz, 4kbps), or [SemantiCodec](https://github.com/haoheliu/SemantiCodec-inference) (50 Hz, 1.3kbps).
 
  Moshi models **two streams of audio**: one corresponds to Moshi, and the other one to the user.
  At inference, the stream from the user is taken from the audio input,
 and the one for Moshi is sampled from the model's output. Along these two audio streams, Moshi predicts text tokens corresponding to its own speech, its **inner monologue**,
 which greatly improves the quality of its generation. A small Depth Transformer models inter codebook dependencies for a given step,
-while a large, 7B parameter Transformer models the temporal dependencies. Moshi achieves a theoretical latency
-of 160ms (80ms for the frame size of Mimi + 80ms of acoustic delay), with a practical overall latency as low as 200ms.
+while a large, 7B parameter Temporal Transformer models the temporal dependencies. Moshi achieves a theoretical latency
+of 160ms (80ms for the frame size of Mimi + 80ms of acoustic delay), with a practical overall latency as low as 200ms on an L4 GPU.
+
 [Talk to Moshi](https://moshi.chat) now on our live demo.
+
 
 <p align="center">
 <img src="./moshi.png" alt="Schema representing the structure of Moshi. Moshi models two streams of audio:
@@ -25,18 +27,19 @@ width="650px"></p>
 Mimi builds on previous neural audio codecs such as [SoundStream](https://arxiv.org/abs/2107.03312)
 and [EnCodec](https://github.com/facebookresearch/encodec), adding a Transformer both in the encoder and decoder,
 and adapting the strides to match an overall frame rate of 12.5 Hz. This allows Mimi to get closer to the
-average frame rate of text tokens (~3-4 Hz), and limit the number of auto-regressive steps in Moshi.
+average frame rate of text tokens (~3-4 Hz), and limit the number of autoregressive steps in Moshi.
 Similarly to SpeechTokenizer, Mimi uses a distillation loss so that the first codebook tokens match
-a self-supervised representation from [WavLM](https://arxiv.org/abs/2110.13900). Interestingly, while
-Mimi is fully causal and streaming, it learns to match sufficiently well the non causal representation from WavLM,
-without introducing any delays. Finally, and similarly to [EBEN](https://arxiv.org/pdf/2210.14090), Mimi
-uses **only an adversarial training loss**, along with feature matching, showing strong improvements in terms of subjective quality despite its low bitrate.
+a self-supervised representation from [WavLM](https://arxiv.org/abs/2110.13900), which allows modeling semantic and acoustic information with a single model. Interestingly, while Mimi is fully causal and streaming, it learns to match sufficiently well the non-causal
+representation from WavLM, without introducing any delays. Finally, and similarly to [EBEN](https://arxiv.org/pdf/2210.14090),
+Mimi uses **only an adversarial training loss**, along with feature matching, showing strong improvements in terms of
+subjective quality despite its low bitrate.
 
 <p align="center">
 <img src="./mimi.png" alt="Schema representing the structure of Mimi, our proposed neural codec. Mimi contains a Transformer
 in both its encoder and decoded, and achieves a frame rate closer to that of text tokens. This allows us to reduce
 the number of auto-regressive steps taken by Moshi, thus reducing the latency of the model."
 width="800px"></p>
+
 
 
 ## Organisation of the repository
