@@ -9,7 +9,8 @@ However, we certainly welcome them for bug fixes.
 1. Fork the repo and create your branch from `main`.
 2. If you have changed APIs, update the documentation accordingly.
 3. Ensure pre-commit hooks pass properly, in particular the linting and typing.
-4. Accept the Contributor License Agreement (see after).
+4. When changing the Rust code, run `cargo check`, `cargo clippy`, `cargo test`.
+5. Accept the Contributor License Agreement (see after).
 
 Note that in general, we will not accept refactoring of the code.
 
