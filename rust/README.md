@@ -8,6 +8,8 @@ The Mimi implementation is available through Python bindings, through the  `rust
 ## Requirements
 
 You will need a recent version of the [Rust toolchain](https://rustup.rs/).
+To compile GPU support, you will also need the [CUDA](https://developer.nvidia.com/cuda-toolkit) properly installed for your GPU, in particular with `nvcc`.
+
 
 ## Rust based Mimi with Python bindings
 
@@ -16,7 +18,7 @@ This is the one used by `moshi_mlx`. It is automatically installed with `moshi_m
 can install it separately as
 ```bash
 # Install from pip:
-pip install rustymimi==0.1.1
+pip install rustymimi
 # Alternatively, if you want to compile the package run from the root of the repo.
 maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 ```
@@ -33,7 +35,8 @@ cargo run --features cuda --bin moshi-backend -r -- --config moshi-backend/confi
 When using macOS, you can replace `--features cuda` with `--features metal`.
 
 Alternatively you can use `config-q8.json` rather than `config.json` to use the
-quantified q8 model.
+quantified q8 model. You can select a different pretrained model, e.g. Moshika,
+by changing the `"hf_repo"` key in either file.
 
 Once the server has printed 'standalone worker listening', you can use the web
 UI. By default the rust version uses https so it will be at

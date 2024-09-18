@@ -171,8 +171,8 @@ def main():
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
     parser.add_argument("--static", type=str)
-    parser.add_argument("--gradio_tunnel", action='store_true', help='Activate a gradio tunnel.')
-    parser.add_argument("--gradio_tunnel_token",
+    parser.add_argument("--gradio-tunnel", action='store_true', help='Activate a gradio tunnel.')
+    parser.add_argument("--gradio-tunnel-token",
                         help='Provide a custom (secret) token here to keep getting the same URL.')
 
     parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
@@ -213,7 +213,7 @@ def main():
 
     log("info", "loading moshi")
     if args.moshi_weight is None:
-        args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MODEL_NAME)
+        args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
     lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
     log("info", "moshi loaded")
 
