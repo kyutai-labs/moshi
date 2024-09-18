@@ -10,7 +10,7 @@
  [SpeechTokenizer](https://github.com/ZhangXInFD/SpeechTokenizer) (50 Hz, 4 kbps), or [SemantiCodec](https://github.com/haoheliu/SemantiCodec-inference) (50 Hz, 1kbps).
 
  Moshi models **two streams of audio**: one corresponds to Moshi, and one to the user.
- During inference, the stream from the user is taken from the audio input,
+ At inference, the stream from the user is taken from the audio input,
 and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech, its **inner monologue**,
 which greatly improves the quality of its generation. A small depth transformer models inter codebook dependencies for a given time step,
 while a large, 7B parameter Transformer models the temporal dependencies. Moshi achieves a theoretical latency
