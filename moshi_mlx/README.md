@@ -29,11 +29,11 @@ python -m moshi_mlx.local -q 4   # weights quantized to 4 bits
 python -m moshi_mlx.local -q 8   # weights quantized to 8 bits
 ```
 
-This uses a command line interface, which is bare bone. It doesn't do any echo cancellation,
+This uses a command line interface, which is barebone. It does not perform any echo cancellation,
 nor does it try to compensate for a growing lag by skipping frames.
 
 Alternatively you can use `python -m moshi_mlx.local_web` to use
-the web UI, connection is via http on [localhost:8998](http://localhost:8998).
+the web UI, the connection is via http, at [localhost:8998](http://localhost:8998).
 
 
 ## License
