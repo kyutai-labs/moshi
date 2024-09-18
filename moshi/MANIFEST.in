@@ -1,0 +1,5 @@
+include LICENSE*
+include *.md
+include *.cfg
+include requirements.txt
+include moshi/py.typed

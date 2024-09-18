@@ -6,19 +6,23 @@ repos:
       language: system
       entry: bash -c 'cd moshi && flake8'
       pass_filenames: false
+      always_run: true
     - id: pyright-moshi
       name: pyright on moshi package
       language: system
-      entry: bash -c 'cd moshi && pyright'
+      entry: scripts/run_ci_when_installed.sh moshi 'cd moshi && pyright'
       pass_filenames: false
+      always_run: true
     - id: flake8-moshi_mlx
       name: flake8 on moshi_mlx package
       language: system
       entry: bash -c 'cd moshi_mlx && flake8'
       pass_filenames: false
+      always_run: true
     - id: pyright-moshi_mlx
       name: pyright on moshi_mlx package
       language: system
-      entry: bash -c 'cd moshi_mlx && pyright'
+      entry: scripts/run_ci_when_installed.sh moshi_mlx 'cd moshi_mlx && pyright'
       pass_filenames: false
+      always_run: true
 
