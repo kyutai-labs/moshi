@@ -1,7 +1,16 @@
-name: Question Form
+name: Question
 description: You have a question about Moshi/Mimi, this codebase.
 labels: ["question", "triage"]
 body:
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Due diligence
+      description: Have you searched the existing issues / Google / asked ChatGPT?
+      options:
+        - label: I have done my due diligence in trying to find the answer myself.
+          required: true
+
   - type: dropdown
     id: backend
     attributes:
@@ -25,12 +34,3 @@ body:
       value: 
     validations:
       required: true
-  - type: checkboxes
-    id: terms
-    attributes:
-      label: Due diligence
-      description: Have you searched the existing issues / Google / asked ChatGPT?
-      options:
-        - label: I have done my due diligence in trying to find the answer myself.
-          required: true
-
