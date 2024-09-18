@@ -23,7 +23,7 @@ _compile_disabled: bool = False
 
 @contextmanager
 def no_compile():
-    """Disable torch.compile locally."""
+    """Disable torch.compile locally. Now Pytorch 2.4 provides a function to do that."""
     global _compile_disabled
 
     prev_disabled = _compile_disabled
@@ -194,11 +194,14 @@ class CUDAGraphed:
             be top level args, not nested in structures (tuples, dicts, etc). Keyword
             arguments are NOT supported for simplicity.
         warmup_steps: how many call to make normally before CUDA Graphing. In particular, this
-            allows torch.compiled functions to get properly compiled."""
+            allows torch.compiled functions to get properly compiled.
+        disabled: if True, just call the func directly, useful to quickly deactivate on CPU.
+    """
 
-    def __init__(self, func: tp.Callable, warmup_steps: int = 1):
+    def __init__(self, func: tp.Callable, warmup_steps: int = 1, disable: bool = False):
         self.func = func
         self.warmup_steps = warmup_steps
+        self.disable = disable
         self._graph: cuda.CUDAGraph | None = None
         self._output: tuple | None = None
         self._args: tuple | None = None
@@ -214,7 +217,7 @@ class CUDAGraphed:
     def __call__(self, *args, **kwargs) -> tp.Any:
         if kwargs:
             raise RuntimeError("Named arguments not supported for now.")
-        if not _is_cuda_graph_enabled() or in_cuda_graph():
+        if self.disable or not _is_cuda_graph_enabled() or in_cuda_graph():
             return self.func(*args, **kwargs)
 
         def _clone_tensors(args: tuple) -> tuple:

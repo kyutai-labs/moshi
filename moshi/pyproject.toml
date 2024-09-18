@@ -1,10 +1,9 @@
 [project]
 name = "moshi"
-version = "0.0.1"
 requires-python = ">= 3.10"
 description = "Moshi is moshi"
 dependencies = [
-    "numpy >= 2.1.0, < 2.2",
+    "numpy >= 1.26, < 2.2",
     "safetensors >= 0.4.0, < 0.5",
     "huggingface-hub >= 0.24, < 0.25",
     "einops == 0.7",
@@ -17,11 +16,18 @@ dependencies = [
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 license = {text = "MIT"}
+dynamic = ["version"]
 
+[tool.setuptools.dynamic]
+version = {attr = "moshi.__version__"}
 
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["moshi", "moshi.utils", "moshi.modules", "moshi.models", "moshi.quantization"]
+[project.optional-dependencies]
+dev = [
+    "pyright",
+    "flake8",
+    "pre-commit",
+]
