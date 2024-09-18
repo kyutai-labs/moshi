@@ -12,6 +12,7 @@ body:
         - The MLX implementation
         - The Rust implementation
         - Other / All
+      default: 0
     validations:
       required: true
   - type: dropdown
@@ -22,6 +23,7 @@ body:
         - Linux
         - Mac OS X
         - Windows (unsupported)
+      default: 0
     validations:
       required: true
   - type: dropdown
@@ -32,6 +34,7 @@ body:
         - CPU
         - GPU with CUDA
         - Metal with MLX
+      default: 0
     validations:
       required: true
   - type: textarea

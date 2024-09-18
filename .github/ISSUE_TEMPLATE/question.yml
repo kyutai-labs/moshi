@@ -22,6 +22,7 @@ body:
         - The MLX implementation
         - The Rust implementation
         - Other / All
+      default: 0
     validations:
       required: true
   - type: textarea
