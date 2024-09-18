@@ -142,5 +142,5 @@ If you use either Mimi or Moshi, please cite the following paper,
 }
 ```
 
-[moshi]: https://arxiv.org/
+[moshi]: https://kyutai.org/Moshi.pdf
 [main_repo]: https://github.com/kyutai-labs/moshi

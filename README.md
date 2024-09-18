@@ -29,12 +29,12 @@ average frame rate of text tokens (~3-4 Hz), and limit the number of auto-regres
 Similarly to SpeechTokenizer, Mimi uses a distillation loss so that the first codebook tokens match
 a self-supervised representation from [WavLM](https://arxiv.org/abs/2110.13900). Interestingly, while
 Mimi is fully causal and streaming, it learns to match sufficiently well the non causal representation from WavLM,
-without introducing any delays. Finally, and similary to [EBEN](https://arxiv.org/pdf/2210.14090), Mimi
+without introducing any delays. Finally, and similarly to [EBEN](https://arxiv.org/pdf/2210.14090), Mimi
 uses **only an adversarial training loss**, along with feature matching, showing strong improvements in terms of subjective quality despite its low bitrate.
 
 <p align="center">
 <img src="./mimi.png" alt="Schema representing the structure of Mimi, our proposed neural codec. Mimi contains a Transformer
-in both its encoder and decoded, and achieves a frame rate closer to that of text tokens. This allows us to reduce 
+in both its encoder and decoded, and achieves a frame rate closer to that of text tokens. This allows us to reduce
 the number of auto-regressive steps taken by Moshi, thus reducing the latency of the model."
 width="800px"></p>
 
@@ -83,6 +83,9 @@ pip install -e "git+https://git@github.com/kyutai-labs/moshi.git#egg=moshi_mlx&s
 pip install rustymimi  # mimi, rust implementation with Python bindings from PyPI
 ```
 
+If you get an error when installing `moshi_mlx` or `rustymimi` (which `moshi_mlx` depends on),
+you might need to install the [Rust toolchain](https://rustup.rs/) to install `rustymimi` from sources.
+
 While we hope that the present codebase will work on Windows, we do not provide official support for it.
 We have tested the MLX version on a MacBook Pro M3. At the moment, we do not support quantization
 for the PyTorch version, so you will need a GPU with a significant amount of memory (24GB).
@@ -108,7 +111,7 @@ maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 
 ## Python (PyTorch)
 
-The Pytorch based API can be found in the `moshi` directory. It provides a streaming
+The PyTorch based API can be found in the `moshi` directory. It provides a streaming
 version of the audio tokenizer (mimi) and the lm model (moshi).
 
 In order to run in interactive mode, you need to start a server which will
@@ -127,7 +130,7 @@ Alternatively, you might want to use SSH to redirect your connection.
 
 You can use `--hf-repo` to select a different pretrained model, by setting the proper Hugging Face repository.
 
-Accessing a server that is not localhost via http may cause issues with using 
+Accessing a server that is not localhost via http may cause issues with using
 the microphone in the web UI (in some browsers this is only allowed using
 https).
 
@@ -235,4 +238,4 @@ If you use either Mimi or Moshi, please cite the following paper,
 }
 ```
 
-[moshi]: https://arxiv.org/
+[moshi]: https://kyutai.org/Moshi.pdf

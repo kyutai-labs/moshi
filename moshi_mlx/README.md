@@ -19,6 +19,9 @@ pip install -e "git+https://git@github.com/kyutai-labs/moshi#egg=moshi_mlx&subdi
 ```
 We have tested the MLX version with MacBook Pro M3.
 
+If you get an error when installing `moshi_mlx` or `rustymimi` (which `moshi_mlx` depends on),
+you might need to install the [Rust toolchain](https://rustup.rs/) to install `rustymimi` from sources.
+
 
 ## Usage
 
@@ -61,5 +64,5 @@ If you use either Mimi or Moshi, please cite the following paper,
 }
 ```
 
-[moshi]: https://arxiv.org/
+[moshi]: https://kyutai.org/Moshi.pdf
 [main_repo]: https://github.com/kyutai-labs/moshi
