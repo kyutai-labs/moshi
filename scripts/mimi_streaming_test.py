@@ -16,7 +16,7 @@ from moshi.models import loaders
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--mimi-weights", type=str)
+parser.add_argument("--mimi-weight", type=str)
 parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO)
 parser.add_argument("--device", type=str,
                     default='cuda' if torch.cuda.device_count() else 'cpu')
