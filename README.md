@@ -113,7 +113,7 @@ maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 ## Python (PyTorch)
 
 The Pytorch based API can be found in the `moshi` directory. It provides a streaming
-version of the audio tokenizer (mimi) and the audio language model (moshi).
+version of the audio tokenizer (mimi) and the language model (moshi).
 
 In order to run in interactive mode, you need to start a server which will
 run the model, you can then use either the web UI or a command line client.
