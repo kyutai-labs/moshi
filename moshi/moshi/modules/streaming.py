@@ -67,18 +67,20 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
         self._streaming_propagate = streaming_propagate
 
     def _apply_named_streaming(self, fn: tp.Any):
-        def _handle_module(prefix: str, module: nn.Module):
+        def _handle_module(prefix: str, module: nn.Module, recurse: bool = True):
             propagate = True
             if isinstance(module, StreamingModule):
                 if module._streaming_propagate:
                     fn(prefix, module)
                 else:
                     propagate = False
+            if not recurse:
+                return
             if propagate:
                 for name, child in module.named_children():
                     _handle_module(prefix + "." + name, child)
 
-        _handle_module("", self)
+        _handle_module("", self, recurse=False)
         for name, child in self.named_children():
             _handle_module(name, child)
 
