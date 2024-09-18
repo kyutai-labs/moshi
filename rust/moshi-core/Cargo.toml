@@ -7,7 +7,7 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 license.workspace = true
-readme = "README.md"
+readme = "../README.md"
 
 [dependencies]
 candle = { workspace = true }
