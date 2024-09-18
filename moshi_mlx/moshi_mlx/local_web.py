@@ -111,6 +111,10 @@ def model_server(client_to_server, server_to_client, args):
             model_file = hf_hub_download(
                 args.hf_repo, "model.q4.safetensors"
             )
+        elif args.quantized == 2:
+            model_file = hf_hub_download(
+                args.hf_repo, "model.q2.safetensors"
+            )
         elif args.quantized is not None:
             raise ValueError(f"Invalid quantized value: {args.quantized}")
         else:
@@ -357,7 +361,7 @@ def main():
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--moshi-weight", type=str)
     parser.add_argument("--mimi-weight", type=str)
-    parser.add_argument("-q", "--quantized", type=int, choices=[4, 8])
+    parser.add_argument("-q", "--quantized", type=int, choices=[2, 4, 8])
     parser.add_argument("--steps", default=2500, type=int)
     parser.add_argument("--hf-repo", type=str)
     parser.add_argument("--static", type=str)
@@ -371,6 +375,8 @@ def main():
             args.hf_repo = 'kyutai/moshiko-mlx-q8'
         elif args.quantized == 4:
             args.hf_repo = 'kyutai/moshiko-mlx-q4'
+        elif args.quantized == 2:
+            args.hf_repo = 'Isaak-Carter/moshiko-mlx-q2'
         elif args.quantized is None:
             args.hf_repo = 'kyutai/moshiko-mlx-bf16'
         else:
