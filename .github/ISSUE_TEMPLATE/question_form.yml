@@ -1,4 +1,4 @@
-name: Question
+name: Question Form
 description: You have a question about Moshi/Mimi, this codebase.
 labels: ["question", "triage"]
 body:
