@@ -44,6 +44,7 @@ You can use `--gradio-tunnel-token` to set a fixed secret token and reuse the sa
 Alternatively, you might want to use SSH to redirect your connection.
 
 You can use `--hf-repo` to select a different pretrained model, by setting the proper Hugging Face repository.
+See [the model list](https://github.com/kyutai-labs/moshi?tab=readme-ov-file#models) for a reference of the available models.
 
 Accessing a server that is not localhost via http may cause issues with using
 the microphone in the web UI (in some browsers this is only allowed using
@@ -57,7 +58,7 @@ However note, that unlike the web browser, this client is barebone. It does not 
 nor does it try to compensate for a growing lag by skipping frames.
 
 
-## API - Mimi
+## API
 
 You can use programmatically the Mimi/Moshi as follows:
 ```python
