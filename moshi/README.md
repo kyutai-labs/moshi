@@ -111,7 +111,7 @@ pre-commit install
 Once locally installed, Mimi can be tested with the following command, from **the root** of the repository,
 ```bash
 wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
-python scripts/mimi_test.py
+python scripts/mimi_streaming_test.py
 
 ```
 
