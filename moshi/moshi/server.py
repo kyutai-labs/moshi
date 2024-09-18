@@ -225,7 +225,7 @@ def main():
     static_path: None | str = None
     if args.static is None:
         log("info", "retrieving the static content")
-        dist_tgz = hf_hub_download("kmhf/moshi-artifacts", "dist.tgz")
+        dist_tgz = hf_hub_download("kyutai/moshi-artifacts", "dist.tgz")
         dist_tgz = Path(dist_tgz)
         dist = dist_tgz.parent / "dist"
         if not dist.exists():
