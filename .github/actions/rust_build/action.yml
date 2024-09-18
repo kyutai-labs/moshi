@@ -24,7 +24,7 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           rust/target/
-        key: ${{ inputs.os }}-cargo-${{ inputs.target }}-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ inputs.os }}-cargo-${{ inputs.target }}-${{ hashFiles('**/Cargo.toml') }}
         restore-keys: ${{ inputs.os }}-cargo-
     - name: install deps
       shell: bash
