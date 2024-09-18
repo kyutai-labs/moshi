@@ -3,7 +3,7 @@
 ![precommit badge](https://github.com/kyutai-labs/moshi/workflows/precommit/badge.svg)
 ![rust ci badge](https://github.com/kyutai-labs/moshi/workflows/Rust%20CI/badge.svg)
 
- [Moshi][moshi] is a speech-text foundation model and full-duplex spoken dialogue framework.
+ [Moshi][moshi] is a speech-text foundation model and **full-duplex** spoken dialogue framework.
  It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at 12.5 Hz, and compresses
  audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size),
  yet performs better than existing, non-streaming, codec like
@@ -11,7 +11,7 @@
 
  Moshi models **two streams of audio**: one corresponds to Moshi, and one to the user.
  At inference, the stream from the user is taken from the audio input,
-and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech
+and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech, its **inner monologue**,
 which greatly improves the quality of its generation. A small depth transformer models inter codebook dependencies for a given step,
 while a large, 7B parameter Transformer models the temporal dependencies. Moshi achieves a theoretical latency
 of 160ms (80ms for the frame size of Mimi + 80ms of acoustic delay), with a practical overall latency as low as 200ms.
@@ -22,7 +22,7 @@ of 160ms (80ms for the frame size of Mimi + 80ms of acoustic delay), with a prac
     one corresponds to Moshi, and one to the user. At inference, the one from the user is taken from the audio input,
     and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech
     for improved accuracy. A small depth transformer models inter codebook dependencies for a given step."
-width="800px"></p>
+width="650px"></p>
 
 Mimi builds on previous neural audio codecs such as [SoundStream](https://arxiv.org/abs/2107.03312)
 and [EnCodec](https://github.com/facebookresearch/encodec), adding a Transformer both in the encoder and decoder,
@@ -32,7 +32,7 @@ Similarly to SpeechTokenizer, Mimi uses a distillation loss so that the first co
 a self-supervised representation from [WavLM](https://arxiv.org/abs/2110.13900). Interestingly, while
 Mimi is fully causal and streaming, it learns to match sufficiently well the non causal representation from WavLM,
 without introducing any delays. Finally, and similary to [EBEN](https://arxiv.org/pdf/2210.14090), Mimi
-uses only an adversarial training loss, along with feature matching, showing strong improvements in terms of subjective quality
+uses **only an adversarial training loss**, along with feature matching, showing strong improvements in terms of subjective quality
 despite its low bitrate.
 
 <p align="center">
@@ -54,7 +54,7 @@ Finally, the code for the live demo is provided in the [`client/`](client/) dire
 
 ## Requirements
 
-You will need at least Python 3.10. For the rust backend, you will need a recent version of
+You will need at least Python 3.10. For using the rust backend, you will need a recent version of
 the [Rust toolchain](https://rustup.rs/). For specific requirements, please check the individual backends
 directories. You can install the PyTorch and MLX clients with the following:
 
