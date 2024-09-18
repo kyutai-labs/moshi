@@ -47,7 +47,8 @@ If you use either Mimi or Moshi, please cite the following paper,
 ```
 @article{defossez2024moshi,
     title={Moshi: a speech-text foundation model for real-time dialogue},
-    author={Alexandre Défossez and Laurent Mazaré and Manu Orsini and Amélie Royer and Patrick Pérez and Hervé Jégou and Edouard Grave and Neil Zeghidour},
+    author={Alexandre Défossez and Laurent Mazaré and Manu Orsini and Amélie Royer and 
+            Patrick Pérez and Hervé Jégou and Edouard Grave and Neil Zeghidour},
     journal={arXiv:TBC},
     year={2024},
 }

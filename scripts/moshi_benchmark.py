@@ -6,6 +6,7 @@ import argparse
 import random
 import time
 
+from huggingface_hub import hf_hub_download
 import numpy as np
 import sentencepiece
 import sphn
@@ -43,15 +44,20 @@ def seed_all(seed):
 
 seed_all(42424242)
 
-tokenizer_path = loaders.resolve_model_checkpoint(args.tokenizer, args.hf_repo)
-text_tokenizer = loaders.get_text_tokenizer(tokenizer_path)
+if args.tokenizer is None:
+    args.tokenizer = hf_hub_download(args.hf_repo, loaders.TEXT_TOKENIZER_NAME)
+text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)  # type: ignore
 
 print("loading mimi")
-mimi_path = loaders.resolve_model_checkpoint(args.mimi_weight, args.hf_repo)
-mimi = loaders.get_mimi(mimi_path, args.device)
+if args.mimi_weight is None:
+    args.mimi_weight = hf_hub_download(args.hf_repo, loaders.MIMI_NAME)
+mimi = loaders.get_mimi(args.mimi_weight, args.device)
 print("mimi loaded")
 
 print("loading moshi")
+if args.moshi_weight is None:
+    args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
+lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
 moshi_path = loaders.resolve_model_checkpoint(args.moshi_weight, args.hf_repo)
 lm = loaders.get_moshi_lm(moshi_path, args.device)
 lm_gen = LMGen(lm)

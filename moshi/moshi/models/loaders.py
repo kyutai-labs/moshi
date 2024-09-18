@@ -4,9 +4,7 @@
 """Retrieves the pretrained models for Moshi and Mimi."""
 from pathlib import Path
 
-from huggingface_hub import hf_hub_download
 from safetensors.torch import load_model
-import sentencepiece
 import torch
 
 from .compression import MimiModel
@@ -16,11 +14,11 @@ from ..quantization import SplitResidualVectorQuantizer
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
-HF_REPO = 'kmhf/msh-v0.1'
-MIMI_V0_1 = 'tokenizer-e351c8d8-checkpoint125.safetensors'
-MOSHIKO_V0_1 = 'moshiko_pt_301e30bf@120.safetensors'
-MOSHIKA_V0_1 = 'moshika_pt_3d736a96@120.safetensors'
-TEXT_TOKENIZER_V0_1 = 'tokenizer_spm_32k_3.model'
+
+TEXT_TOKENIZER_NAME = 'tokenizer_spm_32k_3.model'
+MOSHI_NAME = 'model.safetensors'
+MIMI_NAME = 'tokenizer-e351c8d8-checkpoint125.safetensors'
+DEFAULT_REPO = 'kmhf/moshiko-pytorch-bf16'
 
 
 _seanet_kwargs = {
@@ -102,21 +100,6 @@ _lm_kwargs = {
 
 def _is_safetensors(path: Path | str) -> bool:
     return Path(path).suffix in (".safetensors", ".sft", ".sfts")
-
-
-def resolve_model_checkpoint(name: str, hf_repo: str = HF_REPO, allow_local_file: bool = True) -> Path:
-    """Load a model checkpoint from HF.
-    If `allow_local_file` is True, then if a file `name` exists, it will be used instead.
-    """
-    if allow_local_file and Path(name).exists():
-        return Path(name)
-    else:
-        filename = name
-    return Path(hf_hub_download(hf_repo, filename))
-
-
-def get_text_tokenizer(filename: str | Path) -> sentencepiece.SentencePieceProcessor:
-    return sentencepiece.SentencePieceProcessor(str(filename))  # type: ignore
 
 
 def get_mimi(filename: str | Path,

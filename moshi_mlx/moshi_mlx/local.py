@@ -6,17 +6,17 @@ import argparse
 import asyncio
 import json
 import queue
+import multiprocessing
 import sys
 import time
-import numpy as np
-import multiprocessing
-import sentencepiece
-import sounddevice as sd
-from enum import Enum
 import typing as tp
+from enum import Enum
 
+import numpy as np
 import mlx.core as mx
 import mlx.nn as nn
+import sentencepiece
+import sounddevice as sd
 
 from .client_utils import AnyPrinter, Printer, RawPrinter
 import rustymimi
@@ -74,22 +74,22 @@ def full_warmup(audio_tokenizer, client_to_server, server_to_client):
 
 
 def server(printer_q, client_to_server, server_to_client, args):
-    model_file = args.model
+    model_file = args.moshi_weight
     tokenizer_file = args.tokenizer
     if model_file is None:
         if args.quantized == 8:
             model_file = hf_hub_download(
-                args.hf_repo, "moshiko_mlx_301e30bf@120.q8.safetensors"
+                args.hf_repo, "model.q8.safetensors"
             )
         elif args.quantized == 4:
             model_file = hf_hub_download(
-                args.hf_repo, "moshiko_mlx_301e30bf@120.q4.safetensors"
+                args.hf_repo, "model.q4.safetensors"
             )
         elif args.quantized is not None:
             raise ValueError(f"Invalid quantized value: {args.quantized}")
         else:
             model_file = hf_hub_download(
-                args.hf_repo, "moshiko_mlx_301e30bf@120.safetensors"
+                args.hf_repo, "model.safetensors"
             )
     if tokenizer_file is None:
         tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
@@ -151,7 +151,7 @@ def server(printer_q, client_to_server, server_to_client, args):
 
 
 def client(printer_q, client_to_server, server_to_client, args):
-    mimi_file = args.mimi
+    mimi_file = args.mimi_weight
     if mimi_file is None:
         mimi_file = hf_hub_download(
             args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors"
@@ -253,13 +253,24 @@ def client(printer_q, client_to_server, server_to_client, args):
 def main(printer: AnyPrinter):
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokenizer", type=str)
-    parser.add_argument("--model", type=str)
-    parser.add_argument("--mimi", type=str)
-    parser.add_argument("-q", "--quantized", type=int)
+    parser.add_argument("--moshi-weight", type=str)
+    parser.add_argument("--mimi-weight", type=str)
+    parser.add_argument("-q", "--quantized", type=int, choices=[4, 8])
     parser.add_argument("--steps", default=2500, type=int)
-    parser.add_argument("--hf-repo", type=str, default="kmhf/msh-v0.1")
+    parser.add_argument("--hf-repo", type=str, default=None)
 
     args = parser.parse_args()
+
+    if args.hf_repo is None:
+        if args.quantized == 8:
+            args.hf_repo = 'kmhf/moshiko-mlx-q8'
+        elif args.quantized == 4:
+            args.hf_repo = 'kmhf/moshiko-mlx-q4'
+        elif args.quantized is None:
+            args.hf_repo = 'kmhf/moshiko-mlx-bf16'
+        else:
+            print(f"Invalid value for quantized {args.quantized}")
+            sys.exit(1)
 
     client_to_server = multiprocessing.Queue()
     server_to_client = multiprocessing.Queue()

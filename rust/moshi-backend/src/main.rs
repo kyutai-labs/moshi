@@ -126,7 +126,7 @@ async fn main() -> Result<()> {
             if !std::path::PathBuf::from(&config.static_dir).exists() {
                 use hf_hub::api::tokio::Api;
                 let api = Api::new()?;
-                let repo = api.model(config.stream.hf_repo.clone());
+                let repo = api.model("kmhf/moshi-artifacts".to_string());
                 let dist_tgz = repo.get("dist.tgz").await?;
                 if let Some(parent) = dist_tgz.parent() {
                     let dist = parent.join("dist");

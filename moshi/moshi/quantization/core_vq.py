@@ -120,8 +120,8 @@ class EuclideanCodebook(nn.Module):
         self.register_buffer("_initialized", torch.tensor([False], dtype=torch.float))
         self.register_buffer("cluster_usage", torch.ones(codebook_size))
         self.register_buffer("embedding_sum", embedding)
+        self.register_buffer("_embedding", None, persistent=False)
         self._cached_initialized = False
-        self._embedding = None
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs) -> None:
         # Mapping old names to new names
@@ -142,9 +142,11 @@ class EuclideanCodebook(nn.Module):
     @property
     def embedding(self) -> torch.Tensor:
         if self._embedding is None:
-            self._embedding = (
+            embedding = (
                 self.embedding_sum / self.cluster_usage.clamp(min=self.epsilon)[:, None]
             )
+            self.register_buffer("_embedding", embedding, persistent=False)
+            return embedding
         return self._embedding
 
     def _broadcast_buffers(self) -> None:

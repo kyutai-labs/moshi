@@ -6,6 +6,7 @@ import argparse
 import random
 import time
 
+from huggingface_hub import hf_hub_download
 import numpy as np
 import sphn
 import torch
@@ -15,8 +16,8 @@ from moshi.models import loaders
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--weights", type=str, default=loaders.MIMI_V0_1)
-parser.add_argument("--hf-repo", type=str, default=loaders.HF_REPO)
+parser.add_argument("--mimi-weight", type=str)
+parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO)
 parser.add_argument("--device", type=str,
                     default='cuda' if torch.cuda.device_count() else 'cpu')
 parser.add_argument("--profile", action='store_true')
@@ -38,9 +39,9 @@ seed_all(42424242)
 
 
 print("loading mimi")
-mimi = loaders.get_mimi(
-    loaders.resolve_model_checkpoint(args.weights, args.hf_repo),
-    args.device)
+if args.mimi_weight is None:
+    args.mimi_weight = hf_hub_download(args.hf_repo, loaders.MIMI_NAME)
+mimi = loaders.get_mimi(args.mimi_weight, args.device)
 print("mimi loaded")
 
 

@@ -171,18 +171,16 @@ def main():
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
     parser.add_argument("--static", type=str)
-    parser.add_argument("--gradio_tunnel", action='store_true', help='Activate a gradio tunnel.')
-    parser.add_argument("--gradio_tunnel_token",
+    parser.add_argument("--gradio-tunnel", action='store_true', help='Activate a gradio tunnel.')
+    parser.add_argument("--gradio-tunnel-token",
                         help='Provide a custom (secret) token here to keep getting the same URL.')
 
-    parser.add_argument("--tokenizer", type=str, default=loaders.TEXT_TOKENIZER_V0_1,
-                        help="Name of the text tokenizer file in the given HF repo, or path to a local file.")
-    parser.add_argument("--moshi-weight", type=str, default=loaders.MOSHIKO_V0_1,
-                        help="Name of the Moshi checkpoint in the given HF repo, or path to a local file.")
-    parser.add_argument("--mimi-weight", type=str, default=loaders.MIMI_V0_1,
-                        help="Name of the Mimi checkpoint in the given HF repo, or path to a local file.")
-    parser.add_argument("--hf-repo", type=str, default=loaders.HF_REPO,
-                        help="HF repo to look into, defaults to Kyutai official one.")
+    parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
+    parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
+    parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
+    parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO,
+                        help="HF repo to look into, defaults Moshiko. "
+                             "Use this to select a different pre-trained model.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
 
     args = parser.parse_args()
@@ -204,16 +202,19 @@ def main():
             tunnel_token = args.gradio_tunnel_token
 
     log("info", "loading mimi")
-    mimi_path = loaders.resolve_model_checkpoint(args.mimi_weight, args.hf_repo)
-    mimi = loaders.get_mimi(mimi_path, args.device)
+    if args.mimi_weight is None:
+        args.mimi_weight = hf_hub_download(args.hf_repo, loaders.MIMI_NAME)
+    mimi = loaders.get_mimi(args.mimi_weight, args.device)
     log("info", "mimi loaded")
 
-    tokenizer_path = loaders.resolve_model_checkpoint(args.tokenizer, args.hf_repo)
-    text_tokenizer = loaders.get_text_tokenizer(tokenizer_path)
+    if args.tokenizer is None:
+        args.tokenizer = hf_hub_download(args.hf_repo, loaders.TEXT_TOKENIZER_NAME)
+    text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)  # type: ignore
 
     log("info", "loading moshi")
-    moshi_path = loaders.resolve_model_checkpoint(args.moshi_weight, args.hf_repo)
-    lm = loaders.get_moshi_lm(moshi_path, args.device)
+    if args.moshi_weight is None:
+        args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
+    lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
     log("info", "moshi loaded")
 
     state = ServerState(mimi, text_tokenizer, lm, args.device)
@@ -224,7 +225,7 @@ def main():
     static_path: None | str = None
     if args.static is None:
         log("info", "retrieving the static content")
-        dist_tgz = hf_hub_download(args.hf_repo, "dist.tgz")
+        dist_tgz = hf_hub_download("kmhf/moshi-artifacts", "dist.tgz")
         dist_tgz = Path(dist_tgz)
         dist = dist_tgz.parent / "dist"
         if not dist.exists():
