@@ -234,6 +234,8 @@ The web client code is provided under the MIT license.
 Note that parts of this code is based on [AudioCraft](https://github.com/facebookresearch/audiocraft), released under
 the MIT license.
 
+The weights for the models are released under the CC-BY 4.0 license.
+
 ## Citation
 
 If you use either Mimi or Moshi, please cite the following paper,
