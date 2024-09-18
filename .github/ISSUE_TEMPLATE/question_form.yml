@@ -1,0 +1,36 @@
+name: Question
+description: You have a question about Moshi/Mimi, this codebase.
+labels: ["question", "triage"]
+body:
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Topic
+      description: What is your question about?
+      options:
+        - The paper
+        - The PyTorch implementation
+        - The MLX implementation
+        - The Rust implementation
+        - Other / All
+      default: 0
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What is your question?
+      placeholder: Your question.
+      value: 
+    validations:
+      required: true
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Due diligence
+      description: Have you searched the existing issues / Google / asked ChatGPT?
+      options:
+        - label: I have done my due diligence in trying to find the answer myself.
+          required: true
+
