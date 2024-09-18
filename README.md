@@ -10,9 +10,9 @@
  [SpeechTokenizer](https://github.com/ZhangXInFD/SpeechTokenizer) (50 Hz, 4 kbps), or [SemantiCodec](https://github.com/haoheliu/SemantiCodec-inference) (50 Hz, 1kbps).
 
  Moshi models **two streams of audio**: one corresponds to Moshi, and one to the user.
- At inference, the stream from the user is taken from the audio input,
+ During inference, the stream from the user is taken from the audio input,
 and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech, its **inner monologue**,
-which greatly improves the quality of its generation. A small depth transformer models inter codebook dependencies for a given step,
+which greatly improves the quality of its generation. A small depth transformer models inter codebook dependencies for a given time step,
 while a large, 7B parameter Transformer models the temporal dependencies. Moshi achieves a theoretical latency
 of 160ms (80ms for the frame size of Mimi + 80ms of acoustic delay), with a practical overall latency as low as 200ms.
 [Talk to Moshi](https://moshi.chat) now on our live demo.
@@ -113,7 +113,7 @@ maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 ## Python (PyTorch)
 
 The Pytorch based API can be found in the `moshi` directory. It provides a streaming
-version of the audio tokenizer (mimi) and the lm model (moshi).
+version of the audio tokenizer (mimi) and the audio language model (moshi).
 
 In order to run in interactive mode, you need to start a server which will
 run the model, you can then use either the web UI or a command line client.
