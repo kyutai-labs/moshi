@@ -14,3 +14,7 @@ Frontend for the demo.
 ## Skipping the queue
 To skip the queue for standalone use, once the project is running go to `/?worker_addr={WORKER_ADDR}` where `WORKER_ADDR` is your worker instance address.
 For example : `https://localhost:5173/?worker_addr=0.0.0.0:8088`
+
+## License
+
+The present code is provided under the MIT license.
