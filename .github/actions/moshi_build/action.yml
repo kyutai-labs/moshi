@@ -23,5 +23,7 @@ runs:
   - name: Setup env
     shell: bash
     run: |
+      ls
+      ls env
       .  env/bin/activate
       pre-commit install
