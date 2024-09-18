@@ -1,5 +1,9 @@
 # moshi - rust
 
+[![Latest version](https://img.shields.io/crates/v/moshi.svg)](https://crates.io/crates/moshi)
+[![Documentation](https://docs.rs/moshi/badge.svg)](https://docs.rs/moshi)
+![License](https://img.shields.io/crates/l/moshi.svg)
+
 See the [top-level README.md](../README.md) for more information.
 
 This provides the Rust backend (both Mimi and Moshi) and client implementation.
