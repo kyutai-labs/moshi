@@ -171,8 +171,8 @@ def main():
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
     parser.add_argument("--static", type=str)
-    parser.add_argument("--gradio_tunnel", action='store_true', help='Activate a gradio tunnel.')
-    parser.add_argument("--gradio_tunnel_token",
+    parser.add_argument("--gradio-tunnel", action='store_true', help='Activate a gradio tunnel.')
+    parser.add_argument("--gradio-tunnel-token",
                         help='Provide a custom (secret) token here to keep getting the same URL.')
 
     parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")

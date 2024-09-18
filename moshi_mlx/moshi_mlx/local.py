@@ -6,17 +6,17 @@ import argparse
 import asyncio
 import json
 import queue
+import multiprocessing
 import sys
 import time
-import numpy as np
-import multiprocessing
-import sentencepiece
-import sounddevice as sd
-from enum import Enum
 import typing as tp
+from enum import Enum
 
+import numpy as np
 import mlx.core as mx
 import mlx.nn as nn
+import sentencepiece
+import sounddevice as sd
 
 from .client_utils import AnyPrinter, Printer, RawPrinter
 import rustymimi
