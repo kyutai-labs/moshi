@@ -149,9 +149,6 @@ export const Conversation:FC<ConversationProps> = ({
 
 
   useEffect(() => {
-    if(!workerAuthId) {
-      return;
-    }
     start();
     return () => {
       stop();
