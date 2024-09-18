@@ -22,7 +22,6 @@ body:
         - The MLX implementation
         - The Rust implementation
         - Other / All
-      default: 0
     validations:
       required: true
   - type: textarea
@@ -30,7 +29,7 @@ body:
     attributes:
       label: Question
       description: What is your question?
-      placeholder: Your question.
+      placeholder: Your question. Please make sure this is directly related to our codebase. We will not provide support for installing PyTorch, CUDA, Rust etc.
       value: 
     validations:
       required: true
