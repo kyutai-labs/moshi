@@ -16,7 +16,7 @@ SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
 
 TEXT_TOKENIZER_NAME = 'tokenizer_spm_32k_3.model'
-MODEL_NAME = 'model.safetensors'
+MOSHI_NAME = 'model.safetensors'
 MIMI_NAME = 'tokenizer-e351c8d8-checkpoint125.safetensors'
 DEFAULT_REPO = 'kmhf/moshiko-pytorch-bf16'
 

@@ -112,7 +112,7 @@ maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 
 ## Python (PyTorch)
 
-The python api can be found in the `moshi` directory. It provides a streaming
+The Pytorch based API can be found in the `moshi` directory. It provides a streaming
 version of the audio tokenizer (mimi) and the lm model (moshi).
 
 In order to run in interactive mode, you need to start a server which will
@@ -120,13 +120,16 @@ run the model, you can then use either the web UI or a command line client.
 
 Start the server with:
 ```bash
-python -m moshi.server [--gradio_tunnel]
+python -m moshi.server [--gradio-tunnel] [--hf-repo kmhf/moshika-pytorch-bf16]
 ```
 
 And then access the web UI on [localhost:8998](http://localhost:8998). If your GPU is on a distant machine
-with no direct access, `--gradio_tunnel` will create a tunnel with a URL accessible from anywhere.
+with no direct access, `--gradio-tunnel` will create a tunnel with a URL accessible from anywhere.
 Keep in mind that this tunnel goes through the US and can add significant latency (up to 500ms from Europe).
+You can use `--gradio-tunnel-token` to set a fixed secret and reuse the same address over time.
 Alternatively, you might want to use SSH to redirect your connection.
+
+You can use `--hf-repo` to select a different pretrained model, by setting the proper Hugging Face repository.
 
 Accessing a server that is not localhost via http may cause issues around using
 the microphone in the web UI (in some browsers this is only allowed using
@@ -139,12 +142,19 @@ python -m moshi.client [--url URL_TO_GRADIO]
 However note, that unlike the web browser, this client is bare bone. It doesn't do any echo cancellation,
 nor does it try to compensate for a growing lag by skipping frames.
 
+For more information, in particular on how to use the API directly, please
+checkout [moshi/README.md](moshi/README.md).
+
 ## Python (MLX) for local inference on macOS
 
 Once you have installed `moshi_mlx`, you can run
 ```bash
 python -m moshi_mlx.local -q 4   # weights quantized to 4 bits
 python -m moshi_mlx.local -q 8   # weights quantized to 8 bits
+# And using a different pretrained model:
+python -m moshi_mlx.local -q 4 --hf-repo kmhf/moshika-mlx-q4
+python -m moshi_mlx.local -q 8 --hf-repo kmhf/moshika-mlx-q8
+# be careful to always match the `-q` and `--hf-repo` flag.
 ```
 
 This uses a command line interface, which is bare bone. It doesn't do any echo cancellation,
@@ -165,7 +175,8 @@ cargo run --features cuda --bin moshi-backend -r -- --config moshi-backend/confi
 When using macOS, you can replace `--features cuda` with `--features metal`.
 
 Alternatively you can use `config-q8.json` rather than `config.json` to use the
-quantified q8 model.
+quantified q8 model. You can select a different pretrained model, e.g. Moshika,
+by changing the `"hf_repo"` key in either file.
 
 Once the server has printed 'standalone worker listening', you can use the web
 UI. By default the rust version uses https so it will be at

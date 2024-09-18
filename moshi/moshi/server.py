@@ -213,7 +213,7 @@ def main():
 
     log("info", "loading moshi")
     if args.moshi_weight is None:
-        args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MODEL_NAME)
+        args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
     lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
     log("info", "moshi loaded")
 

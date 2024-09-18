@@ -35,7 +35,8 @@ cargo run --features cuda --bin moshi-backend -r -- --config moshi-backend/confi
 When using macOS, you can replace `--features cuda` with `--features metal`.
 
 Alternatively you can use `config-q8.json` rather than `config.json` to use the
-quantified q8 model.
+quantified q8 model. You can select a different pretrained model, e.g. Moshika,
+by changing the `"hf_repo"` key in either file.
 
 Once the server has printed 'standalone worker listening', you can use the web
 UI. By default the rust version uses https so it will be at
