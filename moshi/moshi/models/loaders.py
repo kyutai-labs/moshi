@@ -16,7 +16,7 @@ from ..quantization import SplitResidualVectorQuantizer
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
-HF_REPO = 'kmhf/msh-v0.1'
+HF_REPO = 'kmhf/moshi-v0.1'
 MIMI_V0_1 = 'tokenizer-e351c8d8-checkpoint125.safetensors'
 MOSHIKO_V0_1 = 'moshiko_pt_301e30bf@120.safetensors'
 MOSHIKA_V0_1 = 'moshika_pt_3d736a96@120.safetensors'
