@@ -3,20 +3,23 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-import moshi
-import time
-import torch
-import sphn
-from torch.profiler import profile, ProfilerActivity
-import numpy as np
 import random
+import time
 
-SAMPLE_RATE = moshi.models.moshi.SAMPLE_RATE
-DEVICE = "cuda:0"
-ENABLE_PROFILING = False
+import numpy as np
+import sphn
+import torch
+from torch.profiler import profile, ProfilerActivity
+
+from moshi.models import loaders
+
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--weights", type=str)
+parser.add_argument("--weights", type=str, default=loaders.MIMI_V0_1)
+parser.add_argument("--hf-repo", type=str, default=loaders.HF_REPO)
+parser.add_argument("--device", type=str,
+                    default='cuda' if torch.cuda.device_count() else 'cpu')
+parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
 
 
@@ -35,23 +38,27 @@ seed_all(42424242)
 
 
 print("loading mimi")
-ec = moshi.models.moshi.get_encodec(args.weights, DEVICE)
+mimi = loaders.get_mimi(
+    loaders.resolve_model_checkpoint(args.weights, args.hf_repo),
+    args.device)
 print("mimi loaded")
 
 
-def encodec_streaming_test(ec, pcm_chunk_size=1920, max_duration_sec=10.0):
+def mimi_streaming_test(mimi, max_duration_sec=10.0):
+    pcm_chunk_size = int(mimi.sample_rate / mimi.frame_rate)
     # wget https://github.com/metavoiceio/metavoice-src/raw/main/assets/bria.mp3
     sample_pcm, sample_sr = sphn.read("bria.mp3")
+    sample_rate = mimi.sample_rate
     print("loaded pcm", sample_pcm.shape, sample_sr)
     sample_pcm = sphn.resample(
-        sample_pcm, src_sample_rate=sample_sr, dst_sample_rate=SAMPLE_RATE
+        sample_pcm, src_sample_rate=sample_sr, dst_sample_rate=sample_rate
     )
-    sample_pcm = torch.tensor(sample_pcm, device=DEVICE)
-    max_duration_len = int(SAMPLE_RATE * max_duration_sec)
+    sample_pcm = torch.tensor(sample_pcm, device=args.device)
+    max_duration_len = int(sample_rate * max_duration_sec)
     if sample_pcm.shape[-1] > max_duration_len:
         sample_pcm = sample_pcm[..., :max_duration_len]
     print("resampled pcm", sample_pcm.shape, sample_sr)
-    sample_pcm = sample_pcm[None].to(device=DEVICE)
+    sample_pcm = sample_pcm[None].to(device=args.device)
 
     print("streaming encoding...")
     start_time = time.time()
@@ -61,34 +68,34 @@ def encodec_streaming_test(ec, pcm_chunk_size=1920, max_duration_sec=10.0):
         for start_idx in range(0, sample_pcm.shape[-1], pcm_chunk_size):
             end_idx = min(sample_pcm.shape[-1], start_idx + pcm_chunk_size)
             chunk = sample_pcm[..., start_idx:end_idx]
-            codes, _scale = ec.encode(chunk)
+            codes = mimi.encode(chunk)
             if codes.shape[-1]:
                 print(start_idx, codes.shape, end="\r")
                 all_codes.append(codes)
 
-    if ENABLE_PROFILING:
+    if args.profile:
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
             run_loop()
         prof.export_chrome_trace("trace.json")
     else:
         run_loop()
-    all_codes = torch.cat(all_codes, dim=-1)
-    print(f"codes {all_codes.shape} generated in {time.time() - start_time:.2f}s")
+    all_codes_th = torch.cat(all_codes, dim=-1)
+    print(f"codes {all_codes_th.shape} generated in {time.time() - start_time:.2f}s")
     print("streaming decoding...")
     all_pcms = []
-    with ec.streaming():
-        for i in range(all_codes.shape[-1]):
-            codes = all_codes[..., i : i + 1]
-            pcm = ec.decode(codes, scale=None)
+    with mimi.streaming(1):
+        for i in range(all_codes_th.shape[-1]):
+            codes = all_codes_th[..., i : i + 1]
+            pcm = mimi.decode(codes)
             print(i, pcm.shape, end="\r")
             all_pcms.append(pcm)
     all_pcms = torch.cat(all_pcms, dim=-1)
     print("pcm", all_pcms.shape, all_pcms.dtype)
-    sphn.write_wav("streaming_out.wav", all_pcms[0, 0].cpu().numpy(), SAMPLE_RATE)
-    pcm = ec.decode(all_codes, scale=None)
+    sphn.write_wav("streaming_out.wav", all_pcms[0, 0].cpu().numpy(), sample_rate)
+    pcm = mimi.decode(all_codes_th)
     print("pcm", pcm.shape, pcm.dtype)
-    sphn.write_wav.write_wav("roundtrip_out.wav", pcm[0, 0].cpu().numpy(), SAMPLE_RATE)
+    sphn.write_wav("roundtrip_out.wav", pcm[0, 0].cpu().numpy(), sample_rate)
 
 
 with torch.no_grad():
-    encodec_streaming_test(ec)
+    mimi_streaming_test(mimi)

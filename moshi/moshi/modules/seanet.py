@@ -159,8 +159,7 @@ class SEANetEncoder(StreamingContainer):
         self.n_blocks = len(self.ratios) + 2  # first and last conv + residual blocks
         self.disable_norm_outer_blocks = disable_norm_outer_blocks
         assert (
-            self.disable_norm_outer_blocks >= 0
-            and self.disable_norm_outer_blocks <= self.n_blocks
+            self.disable_norm_outer_blocks >= 0 and self.disable_norm_outer_blocks <= self.n_blocks
         ), (
             "Number of blocks for which to disable norm is invalid."
             "It should be lower or equal to the actual number of blocks in the network and greater or equal to 0."
@@ -307,8 +306,7 @@ class SEANetDecoder(StreamingContainer):
         self.n_blocks = len(self.ratios) + 2  # first and last conv + residual blocks
         self.disable_norm_outer_blocks = disable_norm_outer_blocks
         assert (
-            self.disable_norm_outer_blocks >= 0
-            and self.disable_norm_outer_blocks <= self.n_blocks
+            self.disable_norm_outer_blocks >= 0 and self.disable_norm_outer_blocks <= self.n_blocks
         ), (
             "Number of blocks for which to disable norm is invalid."
             "It should be lower or equal to the actual number of blocks in the network and greater or equal to 0."

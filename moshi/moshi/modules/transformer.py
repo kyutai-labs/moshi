@@ -9,6 +9,7 @@ Optimized for inference.
 See `StreamingTransformer` for more information.
 """
 
+from contextlib import ExitStack
 from dataclasses import dataclass
 import typing as tp
 
@@ -17,6 +18,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from ..utils.compile import no_compile
 from .gating import make_gating
 from .rope import RotaryEmbedding
 from .streaming import StreamingModule, StreamingContainer
@@ -240,10 +242,7 @@ class RingKVCache:
     def complete(self, k: torch.Tensor, v: torch.Tensor) -> KVCacheResult:
         assert k.shape[:-1] == v.shape[:-1], (k.shape, v.shape)
         B, H, T, D = k.shape
-        indexes = (
-            torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype)
-            + self.end_offset
-        )
+        indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype) + self.end_offset
         indexes = indexes % self.capacity
         self.cache[0].index_copy_(2, indexes, k)
         self.cache[1].index_copy_(2, indexes, v)
@@ -485,8 +484,8 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
                 context=context,
                 rope=rope,
                 weights_per_step=weights_per_step,
-                **attn_kwargs,
-                **factory_kwargs,
+                **attn_kwargs,  # type: ignore
+                **factory_kwargs,  # type: ignore
             )  # type: ignore
             self.norm1 = create_norm_fn(norm, d_model, **factory_kwargs)
         self.norm2 = create_norm_fn(norm, d_model, **factory_kwargs)
@@ -542,8 +541,8 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
             self.layer_scale_1 = nn.Identity()
             self.layer_scale_2 = nn.Identity()
         else:
-            self.layer_scale_1 = LayerScale(d_model, layer_scale, **factory_kwargs)
-            self.layer_scale_2 = LayerScale(d_model, layer_scale, **factory_kwargs)
+            self.layer_scale_1 = LayerScale(d_model, layer_scale, **factory_kwargs)  # type: ignore
+            self.layer_scale_2 = LayerScale(d_model, layer_scale, **factory_kwargs)  # type: ignore
 
     def _init_streaming_state(self, batch_size: int) -> _LayerState:
         return _LayerState(offset_cpu=0)
@@ -582,12 +581,15 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         return x_orig + self.layer_scale_1(update)
 
     def forward(self, x: torch.Tensor):
-        x = self._sa_block(x)
-        x = self._ff_block(x)
-        state = self._streaming_state
-        if state:
-            state.offset_cpu += x.shape[1]
-        return x
+        with ExitStack() as stack:
+            if x.device.type != 'cuda':
+                stack.enter_context(no_compile())
+            x = self._sa_block(x)
+            x = self._ff_block(x)
+            state = self._streaming_state
+            if state:
+                state.offset_cpu += x.shape[1]
+            return x
 
 
 @dataclass

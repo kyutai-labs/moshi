@@ -2,13 +2,15 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+# Part of this file is adapted from encodec.py in https://github.com/facebookresearch/audiocraft
+# released under the following license.
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-"""Compression models or wrapper around existing models.
-Also defines the main interface that a model must follow to be usable as an audio tokenizer.
+"""Compression models or wrapper around existing models. In particular, provides the implementation
+for Mimi. Also defines the main interface that a model must follow to be usable as an audio tokenizer.
 """
 
 from abc import abstractmethod
@@ -19,7 +21,6 @@ import typing as tp
 
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 
 from ..quantization import (
@@ -46,12 +47,12 @@ class CompressionModel(StreamingModule[State]):
 
     @abstractmethod
     def encode(self, x: torch.Tensor) -> torch.Tensor:
-        """See `EncodecModel.encode`."""
+        """See `MimiModel.encode`."""
         ...
 
     @abstractmethod
     def decode(self, codes: torch.Tensor) -> torch.Tensor:
-        """See `EncodecModel.decode`."""
+        """See `MimiModel.decode`."""
         ...
 
     @abstractmethod
@@ -90,7 +91,7 @@ class CompressionModel(StreamingModule[State]):
 
 
 @dataclass
-class _EncodecState:
+class _MimiState:
     graphed_tr_enc: CUDAGraphed | None
     graphed_tr_dec: CUDAGraphed | None
 
@@ -98,8 +99,8 @@ class _EncodecState:
         pass
 
 
-class EncodecModel(CompressionModel[_EncodecState]):
-    """Encodec model operating on the raw waveform.
+class MimiModel(CompressionModel[_MimiState]):
+    """Mimi model operating on the raw waveform.
 
     Args:
         encoder (nn.Module): Encoder network.
@@ -122,6 +123,7 @@ class EncodecModel(CompressionModel[_EncodecState]):
         torch_compile_encoder_decoder (bool): if True, uses torch.compile on the encoder / decoder.
             Deactivated by default for training as this is incompatible at the moment with weight norm.
             See https://github.com/pytorch/pytorch/issues/121902
+            Also this seems to work well with 2.2.0, but completely fail with 2.4.0.
     """
 
     def __init__(
@@ -217,14 +219,16 @@ class EncodecModel(CompressionModel[_EncodecState]):
                     channel_wise=upsample_channel_wise_bug,
                 )
 
-    def _init_streaming_state(self, batch_size: int) -> _EncodecState:
+    def _init_streaming_state(self, batch_size: int) -> _MimiState:
+        device = next(self.parameters()).device
+        disable = device.type != 'cuda'
         graphed_tr_dec = None
         graphed_tr_enc = None
         if self.encoder_transformer is not None:
-            graphed_tr_enc = CUDAGraphed(self.encoder_transformer)
+            graphed_tr_enc = CUDAGraphed(self.encoder_transformer, disable=disable)
         if self.decoder_transformer is not None:
-            graphed_tr_dec = CUDAGraphed(self.decoder_transformer)
-        return _EncodecState(graphed_tr_enc, graphed_tr_dec)
+            graphed_tr_dec = CUDAGraphed(self.decoder_transformer, disable=disable)
+        return _MimiState(graphed_tr_enc, graphed_tr_dec)
 
     @property
     def channels(self) -> int:
@@ -368,7 +372,8 @@ class EncodecModel(CompressionModel[_EncodecState]):
             x (torch.Tensor): Float tensor of shape [B, C, T]
 
         Returns:
-            codes (torch.Tensor): an int tensor of shape [B, K, T] with K the number of codebooks used and T the timestep.
+            codes (torch.Tensor): an int tensor of shape [B, K, T]
+                with K the number of codebooks used and T the timestep.
         """
         emb = self._encode_to_unquantized_latent(x)
         codes = self.quantizer.encode(emb)
