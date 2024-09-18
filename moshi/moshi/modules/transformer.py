@@ -9,6 +9,7 @@ Optimized for inference.
 See `StreamingTransformer` for more information.
 """
 
+from contextlib import ExitStack
 from dataclasses import dataclass
 import typing as tp
 
@@ -17,6 +18,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from ..utils.compile import no_compile
 from .gating import make_gating
 from .rope import RotaryEmbedding
 from .streaming import StreamingModule, StreamingContainer
@@ -579,12 +581,15 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         return x_orig + self.layer_scale_1(update)
 
     def forward(self, x: torch.Tensor):
-        x = self._sa_block(x)
-        x = self._ff_block(x)
-        state = self._streaming_state
-        if state:
-            state.offset_cpu += x.shape[1]
-        return x
+        with ExitStack() as stack:
+            if x.device.type != 'cuda':
+                stack.enter_context(no_compile())
+            x = self._sa_block(x)
+            x = self._ff_block(x)
+            state = self._streaming_state
+            if state:
+                state.offset_cpu += x.shape[1]
+            return x
 
 
 @dataclass

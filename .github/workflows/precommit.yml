@@ -1,4 +1,4 @@
-name: precommmit
+name: precommit
 on:
   push:
     branches: [ main ]
