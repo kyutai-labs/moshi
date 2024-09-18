@@ -3,7 +3,7 @@
 See the [top-level README.md][main_repo] for more information on Moshi.
 
 [Moshi][moshi] is a speech-text foundation model and full-duplex spoken dialogue framework.
-It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at a framerate of 12.5 Hz, and compress
+It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at a framerate of 12.5 Hz, and compresses
 24 kHz audio down to 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size), yet performs better than existing, non-streaming, codec.
 
 This is the MLX implementation for Moshi. For Mimi, this uses our Rust based implementation through the Python binding provided in `rustymimi`, available in the [rust/](https://github.com/kyutai-labs/moshi/tree/main/rust) folder of our main repository.
@@ -55,12 +55,14 @@ The present code is provided under the MIT license.
 If you use either Mimi or Moshi, please cite the following paper,
 
 ```
-@article{defossez2024moshi,
-    title={Moshi: a speech-text foundation model for real-time dialogue},
-    author={Alexandre Défossez and Laurent Mazaré and Manu Orsini and Amélie Royer and
-            Patrick Pérez and Hervé Jégou and Edouard Grave and Neil Zeghidour},
-    journal={arXiv:TBC},
+@techreport{kyutai2024moshi,
+    author = {Alexandre D\'efossez and Laurent Mazar\'e and Manu Orsini and Am\'elie Royer and
+			  Patrick P\'erez and Herv\'e J\'egou and Edouard Grave and Neil Zeghidour},
+    title = {Moshi: a speech-text foundation model for real-time dialogue},
+    institution = {Kyutai},
     year={2024},
+    month={September},
+    url={http://kyutai.org/Moshi.pdf},
 }
 ```
 
