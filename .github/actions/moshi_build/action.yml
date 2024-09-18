@@ -25,4 +25,3 @@ runs:
       .  env/bin/activate
       pre-commit install
       pip install -e './moshi[dev]'
-      pip install -e './moshi_mlx[dev]'
