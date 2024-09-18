@@ -17,6 +17,7 @@ body:
   - type: dropdown
     id: os
     attributes:
+      label: Operating system
       description: What is your operating system?
       options:
         - Linux
@@ -27,6 +28,7 @@ body:
   - type: dropdown
     id: os
     attributes:
+      label: Hardware
       description: What hardware are you using?
       options:
         - CPU
