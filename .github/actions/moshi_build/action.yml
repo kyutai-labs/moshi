@@ -22,6 +22,6 @@ runs:
   - name: Setup env
     shell: bash
     run: |
-      source  env/bin/activate || ( echo "FAILED" && ls && ls env && exit 1)
-      pre-commit install
+      source  env/bin/activate 
+      pre-commit install || ( echo "FAILED" && ls && ls env && ls env/bin/ && exit 1 )
       pip install -e './moshi[dev]'
