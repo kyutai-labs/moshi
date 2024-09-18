@@ -40,12 +40,12 @@ python -m moshi.server [--gradio-tunnel]
 And then access the web UI on [localhost:8998](http://localhost:8998). If your GPU is on a distant machine
 with no direct access, `--gradio-tunnel` will create a tunnel with a URL accessible from anywhere.
 Keep in mind that this tunnel goes through the US and can add significant latency (up to 500ms from Europe).
-You can use `--gradio-tunnel-token` to set a fixed secret and reuse the same address over time.
+You can use `--gradio-tunnel-token` to set a fixed secret token and reuse the same address over time.
 Alternatively, you might want to use SSH to redirect your connection.
 
 You can use `--hf-repo` to select a different pretrained model, by setting the proper Hugging Face repository.
 
-Accessing a server that is not localhost via http may cause issues around using
+Accessing a server that is not localhost via http may cause issues with using
 the microphone in the web UI (in some browsers this is only allowed using
 https).
 
@@ -53,7 +53,7 @@ A local client is also available, as
 ```bash
 python -m moshi.client [--url URL_TO_GRADIO]
 ```
-However note, that unlike the web browser, this client is bare bone. It doesn't do any echo cancellation,
+However note, that unlike the web browser, this client is barebone. It does not perform any echo cancellation,
 nor does it try to compensate for a growing lag by skipping frames.
 
 

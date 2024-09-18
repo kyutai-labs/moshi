@@ -9,19 +9,17 @@
  yet performs better than existing, non-streaming, codec like
  [SpeechTokenizer](https://github.com/ZhangXInFD/SpeechTokenizer) (50 Hz, 4 kbps), or [SemantiCodec](https://github.com/haoheliu/SemantiCodec-inference) (50 Hz, 1kbps).
 
- Moshi models **two streams of audio**: one corresponds to Moshi, and one to the user.
+ Moshi models **two streams of audio**: one corresponds to Moshi, and the other one to the user.
  At inference, the stream from the user is taken from the audio input,
-and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech, its **inner monologue**,
-which greatly improves the quality of its generation. A small depth transformer models inter codebook dependencies for a given step,
+and the one for Moshi is sampled from the model's output. Along these two audio streams, Moshi predicts text tokens corresponding to its own speech, its **inner monologue**,
+which greatly improves the quality of its generation. A small Depth Transformer models inter codebook dependencies for a given step,
 while a large, 7B parameter Transformer models the temporal dependencies. Moshi achieves a theoretical latency
 of 160ms (80ms for the frame size of Mimi + 80ms of acoustic delay), with a practical overall latency as low as 200ms.
 [Talk to Moshi](https://moshi.chat) now on our live demo.
 
 <p align="center">
-<img src="./moshi.png" alt="Schema representing the structure Moshi. Moshi models two streams of audio:
-    one corresponds to Moshi, and one to the user. At inference, the one from the user is taken from the audio input,
-    and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech
-    for improved accuracy. A small depth transformer models inter codebook dependencies for a given step."
+<img src="./moshi.png" alt="Schema representing the structure of Moshi. Moshi models two streams of audio:
+    one corresponds to Moshi, and the other one to the user. At inference, the audio stream of the user is taken from the audio input, and the audio stream for Moshi is sampled from the model's output. Along that, Moshi predicts text tokens corresponding to its own speech for improved accuracy. A small Depth Transformer models inter codebook dependencies for a given step."
 width="650px"></p>
 
 Mimi builds on previous neural audio codecs such as [SoundStream](https://arxiv.org/abs/2107.03312)
@@ -32,23 +30,21 @@ Similarly to SpeechTokenizer, Mimi uses a distillation loss so that the first co
 a self-supervised representation from [WavLM](https://arxiv.org/abs/2110.13900). Interestingly, while
 Mimi is fully causal and streaming, it learns to match sufficiently well the non causal representation from WavLM,
 without introducing any delays. Finally, and similary to [EBEN](https://arxiv.org/pdf/2210.14090), Mimi
-uses **only an adversarial training loss**, along with feature matching, showing strong improvements in terms of subjective quality
-despite its low bitrate.
+uses **only an adversarial training loss**, along with feature matching, showing strong improvements in terms of subjective quality despite its low bitrate.
 
 <p align="center">
-<img src="./mimi.png" alt="Schema representing the structure Moshi. Moshi models two streams of audio:
-    one corresponds to Moshi, and one to the user. At inference, the one from the user is taken from the audio input,
-    and the one for Moshi is sampled from. Along that, Moshi predicts text tokens corresponding to its own speech
-    for improved accuracy. A small depth transformer models inter codebook dependencies for a given step."
+<img src="./mimi.png" alt="Schema representing the structure of Mimi, our proposed neural codec. Mimi contains a Transformer
+in both its encoder and decoded, and achieves a frame rate closer to that of text tokens. This allows us to reduce 
+the number of auto-regressive steps taken by Moshi, thus reducing the latency of the model."
 width="800px"></p>
 
 
 ## Organisation of the repository
 
 There are three separate versions of the moshi inference stack in this repo.
-- The python version using PyTorch is in the [`moshi/`](moshi/) directory.
-- The python version using MLX for M series Macs is in the [`moshi_mlx/`](moshi_mlx/) directory.
-- The rust version used in production is in the [`rust/`](rust/) directory.
+- The Python version using PyTorch is in the [`moshi/`](moshi/) directory.
+- The Python version using MLX for M series Macs is in the [`moshi_mlx/`](moshi_mlx/) directory.
+- The Rust version used in production is in the [`rust/`](rust/) directory.
     This contains in particular a Mimi implementation in Rust, with Python bindings available
     as `rustymimi`.
 
@@ -63,7 +59,7 @@ We release three models:
 - Moshi fine-tuned on a female synthetic voice (Moshika).
 
 Depending on the backend, the file format and quantization available will vary. Here is the list
-of the HuggingFace repo with each model. Mimi is bundled in any of those, and always use the same checkpoint format.
+of the HuggingFace repo with each model. Mimi is bundled in each of those, and always use the same checkpoint format.
 
 - Moshika for PyTorch (bf16): [kmhf/moshika-pytorch-bf16](https://huggingface.co/kmhf/moshika-pytorch-bf16).
 - Moshiko for PyTorch (bf16): [kmhf/moshiko-pytorch-bf16](https://huggingface.co/kmhf/moshiko-pytorch-bf16).
@@ -88,10 +84,10 @@ pip install rustymimi  # mimi, rust implementation with Python bindings from PyP
 ```
 
 While we hope that the present codebase will work on Windows, we do not provide official support for it.
-We have tested the MLX version with MacBook Pro M3. At the moment, we do not support quantization
+We have tested the MLX version on a MacBook Pro M3. At the moment, we do not support quantization
 for the PyTorch version, so you will need a GPU with a significant amount of memory (24GB).
 
-For using the rust backend, you will need a recent version of the [Rust toolchain](https://rustup.rs/).
+For using the Rust backend, you will need a recent version of the [Rust toolchain](https://rustup.rs/).
 To compile GPU support, you will also need the [CUDA](https://developer.nvidia.com/cuda-toolkit) properly installed for your GPU, in particular with `nvcc`.
 
 ## Development
@@ -126,12 +122,12 @@ python -m moshi.server [--gradio-tunnel] [--hf-repo kmhf/moshika-pytorch-bf16]
 And then access the web UI on [localhost:8998](http://localhost:8998). If your GPU is on a distant machine
 with no direct access, `--gradio-tunnel` will create a tunnel with a URL accessible from anywhere.
 Keep in mind that this tunnel goes through the US and can add significant latency (up to 500ms from Europe).
-You can use `--gradio-tunnel-token` to set a fixed secret and reuse the same address over time.
+You can use `--gradio-tunnel-token` to set a fixed secret token and reuse the same address over time.
 Alternatively, you might want to use SSH to redirect your connection.
 
 You can use `--hf-repo` to select a different pretrained model, by setting the proper Hugging Face repository.
 
-Accessing a server that is not localhost via http may cause issues around using
+Accessing a server that is not localhost via http may cause issues with using 
 the microphone in the web UI (in some browsers this is only allowed using
 https).
 
@@ -139,7 +135,7 @@ A local client is also available, as
 ```bash
 python -m moshi.client [--url URL_TO_GRADIO]
 ```
-However note, that unlike the web browser, this client is bare bone. It doesn't do any echo cancellation,
+However note that, unlike the web browser, this client is barebone: It does not perform any echo cancellation,
 nor does it try to compensate for a growing lag by skipping frames.
 
 For more information, in particular on how to use the API directly, please
@@ -157,15 +153,15 @@ python -m moshi_mlx.local -q 8 --hf-repo kmhf/moshika-mlx-q8
 # be careful to always match the `-q` and `--hf-repo` flag.
 ```
 
-This uses a command line interface, which is bare bone. It doesn't do any echo cancellation,
+This command line interface is also barebone. It does not perform any echo cancellation,
 nor does it try to compensate for a growing lag by skipping frames.
 
-Alternatively you can use `python -m moshi_mlx.local_web` to use
-the web UI, connection is via http on [localhost:8998](http://localhost:8998).
+Alternatively you can run `python -m moshi_mlx.local_web` to use
+the web UI, the connection is via http and will be at [localhost:8998](http://localhost:8998).
 
 ## Rust
 
-In order to run the rust inference server, use the following command from within
+In order to run the Rust inference server, use the following command from within
 the `rust` directory:
 
 ```bash
@@ -175,22 +171,22 @@ cargo run --features cuda --bin moshi-backend -r -- --config moshi-backend/confi
 When using macOS, you can replace `--features cuda` with `--features metal`.
 
 Alternatively you can use `config-q8.json` rather than `config.json` to use the
-quantified q8 model. You can select a different pretrained model, e.g. Moshika,
+quantized q8 model. You can select a different pretrained model, e.g. Moshika,
 by changing the `"hf_repo"` key in either file.
 
 Once the server has printed 'standalone worker listening', you can use the web
-UI. By default the rust version uses https so it will be at
+UI. By default the Rust server uses https so it will be at
 [localhost:8998](https://localhost:8998).
 
-You will get some warnings about the site being unsafe. When using chrome you
-can bypass it by selecting "Details" or "Advanced", then "Visit this unsafe
+You will get warnings about the site being unsafe. When using chrome you
+can bypass these by selecting "Details" or "Advanced", then "Visit this unsafe
 site" or "Proceed to localhost (unsafe)".
 
 ## Clients
 
-We recommend using the web UI as it provides some echo cancellation that helps
-the overall model quality. Alternatively we provide some command line interfaces
-for the rust and python versions, the protocol is the same as with the web UI so
+We recommend using the web UI as it provides additional echo cancellation that helps
+the overall model quality. Alternatively, we provide command line interfaces
+for the Rust and Python versions, the protocol is the same as with the web UI so
 there is nothing to change on the server side.
 
 ### Rust Command Line
