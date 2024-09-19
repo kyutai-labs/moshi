@@ -100,22 +100,6 @@ for the PyTorch version, so you will need a GPU with a significant amount of mem
 For using the Rust backend, you will need a recent version of the [Rust toolchain](https://rustup.rs/).
 To compile GPU support, you will also need the [CUDA](https://developer.nvidia.com/cuda-toolkit) properly installed for your GPU, in particular with `nvcc`.
 
-## Development
-
-If you wish to install from a clone of this repository, maybe to further develop Moshi, you can do the following:
-```bash
-# From the root of the clone of the repo
-pip install -e 'moshi[dev]'
-pip install -e 'moshi_mlx[dev]'
-pre-commit install
-```
-
-If you wish to build locally `rustymimi` (assuming you have Rust properly installed):
-```bash
-pip install maturin
-maturin dev -r -m rust/mimi-pyo3/Cargo.toml
-```
-
 ## Python (PyTorch)
 
 The PyTorch based API can be found in the `moshi` directory. It provides a streaming
@@ -228,6 +212,27 @@ npm run build
 ```
 
 The web UI can then be found in the `client/dist` directory.
+
+## Development
+
+If you wish to install from a clone of this repository, maybe to further develop Moshi, you can do the following:
+```bash
+# From the root of the clone of the repo
+pip install -e 'moshi[dev]'
+pip install -e 'moshi_mlx[dev]'
+pre-commit install
+```
+
+If you wish to build locally `rustymimi` (assuming you have Rust properly installed):
+```bash
+pip install maturin
+maturin dev -r -m rust/mimi-pyo3/Cargo.toml
+```
+
+## FAQ
+
+Checkout the [Frequently Asked Questions](FAQ.md) section before opening an issue.
+
 
 ## License
 

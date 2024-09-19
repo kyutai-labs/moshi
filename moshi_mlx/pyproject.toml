@@ -17,6 +17,7 @@ authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 license = {text = "MIT"}
 dynamic = ["version"]
+readme = "README.md"
 
 
 [build-system]
