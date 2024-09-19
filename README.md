@@ -77,12 +77,12 @@ All models are released under the CC-BY 4.0 license.
 
 ## Requirements
 
-You will need at least Python 3.10. For specific requirements, please check the individual backends
+You will need at least Python 3.10, with 3.12 recommended. For specific requirements, please check the individual backends
 directories. You can install the PyTorch and MLX clients with the following:
 
 ```bash
 pip install moshi      # moshi PyTorch, from PyPI
-pip install moshi_mlx  # moshi MLX, from PyPI
+pip install moshi_mlx  # moshi MLX, from PyPI, best with Python 3.12.
 # Or the bleeding edge versions for Moshi and Moshi-MLX.
 pip install -e "git+https://git@github.com/kyutai-labs/moshi.git#egg=moshi&subdirectory=moshi"
 pip install -e "git+https://git@github.com/kyutai-labs/moshi.git#egg=moshi_mlx&subdirectory=moshi_mlx"
@@ -90,8 +90,8 @@ pip install -e "git+https://git@github.com/kyutai-labs/moshi.git#egg=moshi_mlx&s
 pip install rustymimi  # mimi, rust implementation with Python bindings from PyPI
 ```
 
-If you get an error when installing `moshi_mlx` or `rustymimi` (which `moshi_mlx` depends on),
-you might need to install the [Rust toolchain](https://rustup.rs/) to install `rustymimi` from sources.
+If you are not using Python 3.12, you might get an error when installing
+`moshi_mlx` or `rustymimi` (which `moshi_mlx` depends on). Then,you will need to install the [Rust toolchain](https://rustup.rs/), or switch to Python 3.12.
 
 While we hope that the present codebase will work on Windows, we do not provide official support for it.
 We have tested the MLX version on a MacBook Pro M3. At the moment, we do not support quantization
