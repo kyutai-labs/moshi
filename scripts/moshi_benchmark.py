@@ -58,8 +58,6 @@ print("loading moshi")
 if args.moshi_weight is None:
     args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
 lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
-moshi_path = loaders.resolve_model_checkpoint(args.moshi_weight, args.hf_repo)
-lm = loaders.get_moshi_lm(moshi_path, args.device)
 lm_gen = LMGen(lm)
 print("lm loaded")
 
