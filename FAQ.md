@@ -29,3 +29,10 @@ While we keep those limitations in mind for future versions, there is no immedia
 
 At the moment no, we might look into adding this feature when we get the time. At the moment
 it is however possible to use the Rust backend, which should run in int8 with CUDA.
+
+### Moshi stopped talking after 5 min.
+
+This is expected on the MLX and Rust implementation. We only use a fixed buffer, and we do not discard
+past entries. The PyTorch version should work for unlimited times, although this is mostly untested and we
+expect the quality to degrade after a bit (we have no attention sink or other mechanism to improve the streaming
+beyond the finite context used at training).
