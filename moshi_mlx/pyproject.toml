@@ -19,6 +19,9 @@ license = {text = "MIT"}
 dynamic = ["version"]
 readme = "README.md"
 
+[project.scripts]
+moshi-local = "moshi_mlx.local:main"
+moshi-local-web = "moshi_mlx.local_web:main"
 
 [build-system]
 requires = ["setuptools"]

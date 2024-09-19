@@ -250,7 +250,7 @@ def client(printer_q, client_to_server, server_to_client, args):
         pass
 
 
-def main(printer: AnyPrinter):
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--moshi-weight", type=str)
@@ -275,6 +275,12 @@ def main(printer: AnyPrinter):
     client_to_server = multiprocessing.Queue()
     server_to_client = multiprocessing.Queue()
     printer_q = multiprocessing.Queue()
+
+    printer: AnyPrinter
+    if sys.stdout.isatty():
+        printer = Printer()
+    else:
+        printer = RawPrinter()
 
     # Create two processes
     subprocess_args = printer_q, client_to_server, server_to_client, args
@@ -372,9 +378,4 @@ def main(printer: AnyPrinter):
 
 
 if __name__ == "__main__":
-    printer: AnyPrinter
-    if sys.stdout.isatty():
-        printer = Printer()
-    else:
-        printer = RawPrinter()
-    main(printer)
+    main()
