@@ -23,5 +23,5 @@ runs:
     shell: bash
     run: |
       source  env/bin/activate
-      pre-commit install || ( echo "FAILED" && ls && ls env && ls -lht env/bin/ && file env/bin/python3 && exit 1 )
       pip install -e './moshi[dev]'
+      pre-commit install
