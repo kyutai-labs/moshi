@@ -23,7 +23,7 @@ parser.add_argument("--moshi-weight", type=str, default=loaders.MOSHIKO_V0_1,
                     help="Name of the Moshi checkpoint in the given HF repo, or path to a local file.")
 parser.add_argument("--mimi-weight", type=str, default=loaders.MIMI_V0_1,
                     help="Name of the Mimi checkpoint in the given HF repo, or path to a local file.")
-parser.add_argument("--hf-repo", type=str, default=loaders.HF_REPO,
+parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO,
                     help="HF repo to look into, defaults to Kyutai's official one.")
 parser.add_argument("--steps", default=100, type=int)
 parser.add_argument("--profile", action="store_true")
