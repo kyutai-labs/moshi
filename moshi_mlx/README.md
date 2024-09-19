@@ -10,18 +10,17 @@ This is the MLX implementation for Moshi. For Mimi, this uses our Rust based imp
 
 ## Requirements
 
-You will need at least Python 3.10.
+You will need at least Python 3.10, we recommend Python 3.12.
 
 ```bash
-pip install moshi_mlx  # moshi MLX, from PyPI
+pip install moshi_mlx  # moshi MLX, from PyPI, best with Python 3.12.
 # Or the bleeding edge versions for Moshi and Moshi-MLX.
 pip install -e "git+https://git@github.com/kyutai-labs/moshi#egg=moshi_mlx&subdirectory=moshi_mlx"
 ```
 We have tested the MLX version with MacBook Pro M3.
 
-If you get an error when installing `moshi_mlx` or `rustymimi` (which `moshi_mlx` depends on),
-you might need to install the [Rust toolchain](https://rustup.rs/) to install `rustymimi` from sources.
-
+If you are not using Python 3.12, you might get an error when installing
+`moshi_mlx` or `rustymimi` (which `moshi_mlx` depends on). Then,you will need to install the [Rust toolchain](https://rustup.rs/), or switch to Python 3.12.
 
 ## Usage
 
