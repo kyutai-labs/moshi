@@ -20,6 +20,9 @@ MOSHI_NAME = 'model.safetensors'
 MIMI_NAME = 'tokenizer-e351c8d8-checkpoint125.safetensors'
 DEFAULT_REPO = 'kyutai/moshiko-pytorch-bf16'
 
+TEXT_TOKENIZER_V0_1 = None
+MOSHIKO_V0_1 = None
+MIMI_V0_1 = None
 
 _seanet_kwargs = {
     "channels": 1,
