@@ -85,6 +85,12 @@ with torch.no_grad():
             codes = mimi.encode(frame)
             assert codes.shape[-1] == 1, codes.shape
             all_codes.append(codes)
+
+## WARNING: When streaming, make sure to always feed a total amount of audio that is a multiple
+#           of the frame size (1920), otherwise the last frame will not be complete, and thus
+#           will not be encoded. For simplicity, we recommend feeding in audio always in multiple
+#           of the frame size, so that you always know how many time steps you get back in `codes`.
+
 # Now if you have a GPU around.
 mimi.cuda()
 moshi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MOSHI_NAME)
