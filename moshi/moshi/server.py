@@ -21,7 +21,6 @@ import sentencepiece
 import sphn
 import torch
 
-
 from .client_utils import make_log
 from .models import loaders, MimiModel, LMModel, LMGen
 
@@ -166,6 +165,19 @@ class ServerState:
         return ws
 
 
+def safe_extract(tar: tarfile.TarFile, path: Path, members=None, *, numeric_owner=False):
+    """
+    Extrai arquivos de forma segura, prevenindo a vulnerabilidade de Tar Slip.
+    """
+    for member in tar.getmembers():
+        member_path = Path(path) / member.name
+        try:
+            member_path.resolve().relative_to(path.resolve())
+        except ValueError:
+            raise Exception(f"Arquivo malicioso detectado: {member.name}")
+    tar.extractall(path=path, members=members, numeric_owner=numeric_owner)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="localhost", type=str)
@@ -230,7 +242,7 @@ def main():
         dist = dist_tgz.parent / "dist"
         if not dist.exists():
             with tarfile.open(dist_tgz, "r:gz") as tar:
-                tar.extractall(path=dist_tgz.parent)
+                safe_extract(tar, path=dist_tgz.parent)
         static_path = str(dist)
     elif args.static != "none":
         # When set to the "none" string, we don't serve any static content.
