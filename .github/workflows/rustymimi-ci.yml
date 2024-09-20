@@ -3,7 +3,7 @@
 #
 #    maturin generate-ci github -m rust/mimi-pyo3/Cargo.toml
 #
-name: CI
+name: rustymimi
 
 on:
   push:
