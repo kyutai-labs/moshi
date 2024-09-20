@@ -21,6 +21,7 @@ permissions:
 jobs:
   linux:
     runs-on: ${{ matrix.platform.runner }}
+    if: "startsWith(github.ref, 'refs/tags/rustymimi')"
     strategy:
       matrix:
         platform:
@@ -52,6 +53,7 @@ jobs:
 
   musllinux:
     runs-on: ${{ matrix.platform.runner }}
+    if: "startsWith(github.ref, 'refs/tags/rustymimi')"
     strategy:
       matrix:
         platform:
@@ -83,6 +85,7 @@ jobs:
 
   windows:
     runs-on: ${{ matrix.platform.runner }}
+    if: "startsWith(github.ref, 'refs/tags/rustymimi')"
     strategy:
       matrix:
         platform:
@@ -110,6 +113,7 @@ jobs:
 
   macos:
     runs-on: ${{ matrix.platform.runner }}
+    if: "startsWith(github.ref, 'refs/tags/rustymimi')"
     strategy:
       matrix:
         platform:
@@ -136,6 +140,7 @@ jobs:
 
   sdist:
     runs-on: ubuntu-latest
+    if: "startsWith(github.ref, 'refs/tags/rustymimi')"
     steps:
       - uses: actions/checkout@v4
       - name: Build sdist
@@ -152,7 +157,7 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    if: "startsWith(github.ref, 'refs/tags/')"
+    if: "startsWith(github.ref, 'refs/tags/rustymimi')"
     needs: [linux, musllinux, windows, macos, sdist]
     permissions:
       id-token: write
