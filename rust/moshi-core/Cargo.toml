@@ -25,10 +25,3 @@ default = []
 cuda = ["candle/cuda", "candle-nn/cuda", "cudarc"]
 metal = ["candle/metal", "candle-nn/metal"]
 flash-attn = ["cuda", "dep:candle-flash-attn"]
-
-[profile.release]
-debug = true
-
-[profile.release-no-debug]
-inherits = "release"
-debug = false
