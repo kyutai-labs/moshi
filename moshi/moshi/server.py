@@ -167,14 +167,15 @@ class ServerState:
 
 def safe_extract(tar: tarfile.TarFile, path: Path, members=None, *, numeric_owner=False):
     """
-    Extrai arquivos de forma segura, prevenindo a vulnerabilidade de Tar Slip.
+    Safely extract tar files to prevent Path Traversal vulnerabilities.
     """
     for member in tar.getmembers():
         member_path = Path(path) / member.name
         try:
+            # Resolve the absolute path and ensure it is within the target directory
             member_path.resolve().relative_to(path.resolve())
         except ValueError:
-            raise Exception(f"Arquivo malicioso detectado: {member.name}")
+            raise Exception(f"Malicious file detected: {member.name}")
     tar.extractall(path=path, members=members, numeric_owner=numeric_owner)
 
 
@@ -182,7 +183,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
-    parser.add_argument("--static", type=str)
+    parser.add_argument("--static", type=str, help="Directory for static content")
     parser.add_argument("--gradio-tunnel", action='store_true', help='Activate a gradio tunnel.')
     parser.add_argument("--gradio-tunnel-token",
                         help='Provide a custom (secret) token here to keep getting the same URL.')
@@ -235,6 +236,7 @@ def main():
     app = web.Application()
     app.router.add_get("/api/chat", state.handle_chat)
     static_path: None | str = None
+
     if args.static is None:
         log("info", "retrieving the static content")
         dist_tgz = hf_hub_download("kyutai/moshi-artifacts", "dist.tgz")
@@ -244,18 +246,43 @@ def main():
             with tarfile.open(dist_tgz, "r:gz") as tar:
                 safe_extract(tar, path=dist_tgz.parent)
         static_path = str(dist)
-    elif args.static != "none":
+    elif args.static.lower() != "none":
         # When set to the "none" string, we don't serve any static content.
         static_path = args.static
-    if static_path is not None:
-        async def handle_root(_):
-            return web.FileResponse(os.path.join(static_path, "index.html"))
 
-        log("info", f"serving static content from {static_path}")
+    if static_path is not None:
+        # Resolve the static path to an absolute path
+        static_path = Path(static_path).resolve()
+
+        # Ensure that the static path exists and is a directory
+        if not static_path.is_dir():
+            log("error", f"The provided static path is not a valid directory: {static_path}")
+            sys.exit(1)
+
+        # Optional: Define a base directory to restrict static content
+        # Uncomment and set to your base directory if needed
+        # base_static_dir = Path("/var/www/static").resolve()
+        # if not static_path.is_relative_to(base_static_dir):
+        #     log("error", "Attempt to access a directory outside the allowed base directory.")
+        #     sys.exit(1)
+
+        async def handle_root(_):
+            try:
+                index_file = static_path / "index.html"
+                if not index_file.is_file():
+                    return web.Response(status=404, text="Index file not found.")
+                return web.FileResponse(index_file)
+            except Exception as e:
+                log("error", f"Error serving index.html: {e}")
+                return web.Response(status=500, text="Internal Server Error.")
+
+        log("info", f"Serving static content from {static_path}")
         app.router.add_get("/", handle_root)
         app.router.add_static(
-            "/", path=static_path, follow_symlinks=True, name="static"
+            "/", path=str(static_path), follow_symlinks=False, name="static",
+            # Add more restrictions if necessary, such as allowing only certain methods
         )
+
     log("info", f"Access the Web UI directly at http://{args.host}:{args.port}")
     if setup_tunnel is not None:
         tunnel = setup_tunnel('localhost', args.port, tunnel_token, None)
