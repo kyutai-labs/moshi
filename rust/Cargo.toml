@@ -22,3 +22,10 @@ candle = { version = "0.6.0", package = "candle-core" }
 candle-nn = "0.6.0"
 candle-transformers = "0.6.0"
 candle-flash-attn = "0.6.0"
+
+[profile.release]
+debug = true
+
+[profile.release-no-debug]
+inherits = "release"
+debug = false
