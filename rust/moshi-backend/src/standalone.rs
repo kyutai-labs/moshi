@@ -70,7 +70,7 @@ impl stream_both::AppStateInner {
             sentencepiece::SentencePieceProcessor::open(&config.text_tokenizer_file)?;
         // Warm-up code.
         {
-            tracing::info!("warming up the model");
+            tracing::info!(?dtype, ?device, "warming up the model");
             let mut lm_model = lm_model.clone();
             let (_v, ys) = lm_model.forward(None, vec![None; config.encodec_num_codebooks])?;
             let mut lp = candle_transformers::generation::LogitsProcessor::new(123, None, None);
