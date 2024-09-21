@@ -8,7 +8,7 @@
  [Moshi][moshi] is a speech-text foundation model and **full-duplex** spoken dialogue framework.
  It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi processes 24 kHz audio, down to a 12.5 Hz representation
  with a bandwidth of 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size),
- yet performs better than existing, non-streaming, codec like
+ yet performs better than existing, non-streaming, codecs like
  [SpeechTokenizer](https://github.com/ZhangXInFD/SpeechTokenizer) (50 Hz, 4kbps), or [SemantiCodec](https://github.com/haoheliu/SemantiCodec-inference) (50 Hz, 1.3kbps).
 
  Moshi models **two streams of audio**: one corresponds to Moshi, and the other one to the user.
@@ -38,7 +38,7 @@ subjective quality despite its low bitrate.
 
 <p align="center">
 <img src="./mimi.png" alt="Schema representing the structure of Mimi, our proposed neural codec. Mimi contains a Transformer
-in both its encoder and decoded, and achieves a frame rate closer to that of text tokens. This allows us to reduce
+in both its encoder and decoder, and achieves a frame rate closer to that of text tokens. This allows us to reduce
 the number of auto-regressive steps taken by Moshi, thus reducing the latency of the model."
 width="800px"></p>
 
@@ -91,7 +91,7 @@ pip install rustymimi  # mimi, rust implementation with Python bindings from PyP
 ```
 
 If you are not using Python 3.12, you might get an error when installing
-`moshi_mlx` or `rustymimi` (which `moshi_mlx` depends on). Then,you will need to install the [Rust toolchain](https://rustup.rs/), or switch to Python 3.12.
+`moshi_mlx` or `rustymimi` (which `moshi_mlx` depends on). Then, you will need to install the [Rust toolchain](https://rustup.rs/), or switch to Python 3.12.
 
 While we hope that the present codebase will work on Windows, we do not provide official support for it.
 We have tested the MLX version on a MacBook Pro M3. At the moment, we do not support quantization
@@ -129,7 +129,7 @@ A local client is also available, as
 ```bash
 python -m moshi.client [--url URL_TO_GRADIO]
 ```
-However note that, unlike the web browser, this client is barebone: It does not perform any echo cancellation,
+However note that, unlike the web browser, this client is barebone: it does not perform any echo cancellation,
 nor does it try to compensate for a growing lag by skipping frames.
 
 For more information, in particular on how to use the API directly, please
@@ -179,7 +179,7 @@ site" or "Proceed to localhost (unsafe)".
 ## Clients
 
 We recommend using the web UI as it provides additional echo cancellation that helps
-the overall model quality. Note that most command will directly serve this UI
+the overall model quality. Note that most commands will directly serve this UI
 in the provided URL, and there is in general nothing more to do.
 
 Alternatively, we provide command line interfaces
