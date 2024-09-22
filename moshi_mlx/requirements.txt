@@ -9,7 +9,7 @@ numpy==2.1.0
 psutil==6.0.0
 pycparser==2.22
 pyright==1.1.378
-rustymimi==0.1.1
+rustymimi==0.2.2
 safetensors==0.4.4
 sentencepiece==0.2.0
 six==1.16.0
