@@ -358,7 +358,7 @@ def main():
     parser.add_argument("--moshi-weight", type=str)
     parser.add_argument("--mimi-weight", type=str)
     parser.add_argument("-q", "--quantized", type=int, choices=[4, 8])
-    parser.add_argument("--steps", default=2500, type=int)
+    parser.add_argument("--steps", default=4000, type=int)
     parser.add_argument("--hf-repo", type=str)
     parser.add_argument("--static", type=str)
     parser.add_argument("--host", default="localhost", type=str)
