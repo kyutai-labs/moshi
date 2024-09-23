@@ -37,3 +37,19 @@ We only use a fixed buffer, and we do not discard past entries.
 The PyTorch version should work for unlimited times, although this is mostly untested and we
 expect the quality to degrade after a bit (we have no attention sink or other mechanism to improve the streaming
 beyond the finite context used at training).
+
+### The server seems to be running but nothing happens on connect.
+
+For diagnosis, look at your browser console if there is any error being
+reported.
+
+If you see issues that look like the following:
+```
+Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'addModule')
+```
+this is likely caused by the http server being remote and audio being disabled
+for http in such a case.
+
+To get around this, tunnel the 8998 port from the remote server to the localhost
+via ssh and access [localhost:8998](http://localhost:8998) via http normally
+after that.

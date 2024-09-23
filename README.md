@@ -113,11 +113,16 @@ Start the server with:
 python -m moshi.server [--gradio-tunnel] [--hf-repo kyutai/moshika-pytorch-bf16]
 ```
 
-And then access the web UI on [localhost:8998](http://localhost:8998). If your GPU is on a distant machine
-with no direct access, `--gradio-tunnel` will create a tunnel with a URL accessible from anywhere.
-Keep in mind that this tunnel goes through the US and can add significant latency (up to 500ms from Europe).
-You can use `--gradio-tunnel-token` to set a fixed secret token and reuse the same address over time.
-Alternatively, you might want to use SSH to redirect your connection.
+And then access the web UI on [localhost:8998](http://localhost:8998).
+If your GPU is on a distant machine this will not work as websites using http
+are not allowed to use the audio worklet api. There are two ways to get around
+this:
+- Forward the remote 8998 port to your localhost using ssh `-L` flag. Then
+  connects to [localhost:8998](http://localhost:8998) as mentionned previously.
+- Use the `--gradio-tunnel` argument, this sets up a tunnel with a URL accessible from anywhere.
+  Keep in mind that this tunnel goes through the US and can add significant
+  latency (up to 500ms from Europe). You can use `--gradio-tunnel-token` to set a
+  fixed secret token and reuse the same address over time.
 
 You can use `--hf-repo` to select a different pretrained model, by setting the proper Hugging Face repository.
 
