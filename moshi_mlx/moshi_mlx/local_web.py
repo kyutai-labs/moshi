@@ -332,10 +332,10 @@ def web_server(client_to_server, server_to_client, args):
             log("info", f"serving static content from {static_path}")
             app.router.add_get("/", handle_root)
             app.router.add_static("/", path=static_path, name="static")
-        log("info", f"listening to http://{args.host}:{args.port}")
         runner = web.AppRunner(app)
         await runner.setup()
         ssl_context = None
+        protocol = "http"
         if args.ssl is not None:
             import ssl
 
@@ -343,11 +343,14 @@ def web_server(client_to_server, server_to_client, args):
             cert_file = os.path.join(args.ssl, "cert.pem")
             key_file = os.path.join(args.ssl, "key.pem")
             ssl_context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+            protocol = "https"
         site = web.TCPSite(runner, args.host, args.port, ssl_context=ssl_context)
 
+        log("info", f"listening to {protocol}://{args.host}:{args.port}")
+
         if not args.no_browser:
-            log("info", f"opening browser at http://{args.host}:{args.port}")
-            webbrowser.open(f"http://{args.host}:{args.port}")
+            log("info", f"opening browser at {protocol}://{args.host}:{args.port}")
+            webbrowser.open(f"{protocol}://{args.host}:{args.port}")
 
         await asyncio.gather(
             recv_loop(), send_loop(), recv_loop2(), send_loop2(), site.start()
@@ -371,7 +374,14 @@ def main():
     parser.add_argument("--static", type=str)
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
-    parser.add_argument("--ssl", type=str, help="use https instead of http, this flag should point to a directory that contains valid key.pem and cert.pem files")
+    parser.add_argument(
+        "--ssl",
+        type=str,
+        help=(
+            "use https instead of http, this flag should point to a directory "
+            "that contains valid key.pem and cert.pem files"
+        )
+    )
     parser.add_argument("--no-browser", action="store_true")
 
     args = parser.parse_args()
