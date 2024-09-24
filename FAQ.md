@@ -53,3 +53,8 @@ for http in such a case.
 To get around this, tunnel the 8998 port from the remote server to the localhost
 via ssh and access [localhost:8998](http://localhost:8998) via http normally
 after that.
+
+### How to get the key.pem and cert.pem files required for serving over https?
+```bash
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"
+```

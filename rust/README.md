@@ -29,6 +29,12 @@ maturin dev -r -m rust/mimi-pyo3/Cargo.toml
 
 ## Rust server
 
+If you don't have ssl certificates yet, generate a `key.pem` and `cert.pem` file
+using the following command.
+```bash
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"
+```
+
 In order to run the rust inference server, use the following command from within
 the this directory:
 
