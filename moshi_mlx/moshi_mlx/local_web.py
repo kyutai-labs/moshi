@@ -335,7 +335,15 @@ def web_server(client_to_server, server_to_client, args):
         log("info", f"listening to http://{args.host}:{args.port}")
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, args.host, args.port)
+        ssl_context = None
+        if args.ssl is not None:
+            import ssl
+
+            ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            cert_file = os.path.join(args.ssl, "cert.pem")
+            key_file = os.path.join(args.ssl, "key.pem")
+            ssl_context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+        site = web.TCPSite(runner, args.host, args.port, ssl_context=ssl_context)
 
         if not args.no_browser:
             log("info", f"opening browser at http://{args.host}:{args.port}")
@@ -363,6 +371,7 @@ def main():
     parser.add_argument("--static", type=str)
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
+    parser.add_argument("--ssl", type=str, help="use https instead of http, this flag should point to a directory that contains valid key.pem and cert.pem files")
     parser.add_argument("--no-browser", action="store_true")
 
     args = parser.parse_args()
