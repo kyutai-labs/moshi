@@ -44,11 +44,13 @@ jobs:
         rust: [stable]
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
       - uses: ./.github/actions/rust_build
         with:
           target: test
       - name: test
         shell: bash
         run: |
-          sudo apt-get install libpython3.10-dev
           cargo test
