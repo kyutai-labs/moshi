@@ -58,3 +58,7 @@ after that.
 ```bash
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"
 ```
+
+### Can I run on a 12GB / 8 GB GPU ?
+For a 12GB GPU, this is possible following instructions in [issue #54](https://github.com/kyutai-labs/moshi/issues/54).
+For 8GB GPU, this is not possible at the moment.
