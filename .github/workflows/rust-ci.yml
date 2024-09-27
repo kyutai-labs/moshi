@@ -50,5 +50,5 @@ jobs:
       - name: test
         shell: bash
         run: |
-          sudo apt-get install libpython3-dev
+          sudo apt-get install libpython3.10-dev
           cargo test
