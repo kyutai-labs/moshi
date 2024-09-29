@@ -201,6 +201,14 @@ cargo run --bin moshi-cli -r -- tui --host localhost
 python -m moshi.client
 ```
 
+### Docker Compose (CUDA only)
+
+```bash
+docker compose up
+```
+
+* Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+
 ### WebUI
 
 The web UI can be built from this repo via the
