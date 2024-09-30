@@ -81,7 +81,7 @@ fn encodec_cfg(max_seq_len: Option<usize>) -> encodec::Config {
         dim_feedforward: 2048,
         kv_repeat: 1,
         conv_layout: true, // see builders.py
-        cross_attention: false,
+        cross_attention: None,
         max_seq_len: max_seq_len.unwrap_or(8192), // the transformer works at 25hz so this is ~5 mins.
     };
     encodec::Config {
