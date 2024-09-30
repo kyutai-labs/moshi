@@ -63,7 +63,7 @@ impl Config {
             conv_kernel_size: 5,
             use_conv_bias: true,
             use_conv_block: false,
-            cross_attention: false,
+            cross_attention: None,
             max_period: 10000,
             gating: None,
             norm: crate::NormType::LayerNorm,

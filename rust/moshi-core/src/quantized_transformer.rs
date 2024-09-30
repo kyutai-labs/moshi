@@ -3,7 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use crate::streaming::{StreamTensor, StreamingModule};
-use crate::transformer::{get_mask, PositionalEmbedding, RotaryEmbedding};
+use crate::transformer::{get_mask, CrossAttention, PositionalEmbedding, RotaryEmbedding};
 
 use candle::{DType, IndexOp, Module, Result, Tensor, D};
 use candle_transformers::quantized_nn::{layer_norm, linear_b, Linear};
@@ -169,7 +169,7 @@ pub struct StreamingMultiheadCrossAttention {
 }
 
 impl StreamingMultiheadCrossAttention {
-    pub fn new(_cfg: &Config, _vb: VarBuilder) -> Result<Self> {
+    pub fn new(_ca: CrossAttention, _cfg: &Config, _vb: VarBuilder) -> Result<Self> {
         candle::bail!("cross-attn is not supported at the moment")
     }
 
@@ -347,12 +347,14 @@ impl StreamingTransformerLayer {
             }
         };
         let self_attn = StreamingMultiheadAttention::new(rope, cfg, vb.pp("self_attn"))?;
-        let cross_attn = if cfg.cross_attention {
-            let norm_cross = layer_norm(cfg.d_model, 1e-5, vb.pp("norm_cross"))?;
-            let cross_attn = StreamingMultiheadCrossAttention::new(cfg, vb.pp("cross_attention"))?;
-            Some((norm_cross, cross_attn))
-        } else {
-            None
+        let cross_attn = match cfg.cross_attention {
+            Some(ca) => {
+                let norm_cross = layer_norm(cfg.d_model, 1e-5, vb.pp("norm_cross"))?;
+                let cross_attn =
+                    StreamingMultiheadCrossAttention::new(ca, cfg, vb.pp("cross_attention"))?;
+                Some((norm_cross, cross_attn))
+            }
+            None => None,
         };
         Ok(Self {
             self_attn,
