@@ -26,7 +26,7 @@ rcgen = "0.13.1"
 http = "1.1.0"
 lazy_static = "1.5.0"
 log = "0.4.20"
-moshi = { path = "../moshi-core", version = "0.2.3" }
+moshi = { path = "../moshi-core", version = "0.2.4" }
 ogg = { version = "0.9.1", features = ["async"] }
 opus = "0.3.0"
 rand = { version = "0.8.5", features = ["getrandom"] }
