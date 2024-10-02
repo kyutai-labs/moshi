@@ -254,14 +254,15 @@ If you use either Mimi or Moshi, please cite the following paper,
 
 ```
 @techreport{kyutai2024moshi,
-    author = {Alexandre D\'efossez and Laurent Mazar\'e and Manu Orsini and Am\'elie Royer and
-			  Patrick P\'erez and Herv\'e J\'egou and Edouard Grave and Neil Zeghidour},
-    title = {Moshi: a speech-text foundation model for real-time dialogue},
-    institution = {Kyutai},
-    year={2024},
-    month={September},
-    url={http://kyutai.org/Moshi.pdf},
+      title={Moshi: a speech-text foundation model for real-time dialogue},
+      author={Alexandre D\'efossez and Laurent Mazar\'e and Manu Orsini and
+      Am\'elie Royer and Patrick P\'erez and Herv\'e J\'egou and Edouard Grave and Neil Zeghidour},
+      year={2024},
+      eprint={2410.00037},
+      archivePrefix={arXiv},
+      primaryClass={eess.AS},
+      url={https://arxiv.org/abs/2410.00037},
 }
 ```
 
-[moshi]: https://kyutai.org/Moshi.pdf
+[moshi]: https://arxiv.org/abs/2410.00037
