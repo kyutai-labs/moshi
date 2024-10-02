@@ -14,7 +14,6 @@ candle = { workspace = true }
 candle-nn = { workspace = true }
 candle-transformers = { workspace = true }
 candle-flash-attn = { workspace = true, optional = true }
-cudarc = { version = "=0.11.6", features = ["std", "cublas", "cublaslt", "curand", "driver", "nvrtc", "f16", "cuda-version-from-build-system", "dynamic-linking"], default-features=false, optional = true }
 
 rayon = "1.8.1"
 serde = { version = "1.0", features = ["derive"] }
@@ -22,6 +21,6 @@ tracing = "0.1.40"
 
 [features]
 default = []
-cuda = ["candle/cuda", "candle-nn/cuda", "cudarc"]
+cuda = ["candle/cuda", "candle-nn/cuda"]
 metal = ["candle/metal", "candle-nn/metal"]
 flash-attn = ["cuda", "dep:candle-flash-attn"]
