@@ -1,0 +1,40 @@
+version: "3.8"
+
+name: moshi
+
+services:
+
+  moshi:
+    build:
+      context: ./moshi
+    expose:
+     - 8998/tcp
+    restart: unless-stopped
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    environment:
+      #- HF_REPO=kyutai/moshika-pytorch-bf16
+      - HF_REPO=kyutai/moshiko-pytorch-bf16
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: all
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    pull_policy: always
+    restart: unless-stopped
+    expose:
+      - 43337/tcp
+    environment:
+      TUNNEL_URL: http://moshi:8998
+      TUNNEL_METRICS: 0.0.0.0:43337
+    command: tunnel --no-autoupdate
+    depends_on:
+      - moshi
+
+volumes:
+  hf-cache:
