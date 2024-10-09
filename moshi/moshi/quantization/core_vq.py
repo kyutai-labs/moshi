@@ -8,9 +8,10 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import math
 import typing as tp
 
-from einops import rearrange
+from einops import rearrange, repeat
 import torch
 from torch import nn
 from torch import distributed
@@ -63,6 +64,29 @@ def _compute_entropy(usage: torch.Tensor) -> torch.Tensor:
 def _is_distributed() -> bool:
     # Checks if we need to use distributed routines.
     return distributed.is_initialized() and distributed.get_world_size() > 1
+
+
+def _run_kmeans(samples: torch.Tensor, num_clusters: int, num_iters: int = 10) -> tp.Tuple[torch.Tensor, torch.Tensor]:
+    # Kmeans algorithm used to initialize the codebooks.
+    dim = samples.shape[-1]
+    means = _sample_vectors(samples, num_clusters)
+    bins = None
+
+    for _ in range(num_iters):
+        dists = torch.cdist(samples[None], means[None], p=2)[0]
+        buckets = dists.argmin(dim=-1)
+        bins = torch.bincount(buckets, minlength=num_clusters)
+        zero_mask = bins == 0
+        bins.clamp_(min=1)
+
+        new_means = torch.zeros_like(means)
+        new_means.scatter_add_(0, repeat(buckets, "n -> n d", d=dim), samples)
+        new_means /= bins[..., None]
+        resampled = _sample_vectors(samples, num_clusters)
+        means = torch.where(zero_mask[..., None], resampled, new_means)
+
+    assert bins is not None
+    return means, bins
 
 
 def zero_scalar(device) -> torch.Tensor:
@@ -121,7 +145,6 @@ class EuclideanCodebook(nn.Module):
         self.register_buffer("cluster_usage", torch.ones(codebook_size))
         self.register_buffer("embedding_sum", embedding)
         self.register_buffer("_embedding", None, persistent=False)
-        self._cached_initialized = False
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs) -> None:
         # Mapping old names to new names
@@ -211,10 +234,36 @@ class EuclideanCodebook(nn.Module):
         shape = x.shape
         x = self._reshape_input(x)
 
+        if self.training and initialize:
+            # If initialize is False, we are not allowed to initialize this layer
+            # and the rest of the code will operate on a 0 filled codebook.
+            # This is due to previous layers having used the batch to run kmeans init
+            # and thus, the residuals are mostly 0s.
+            self._init_embedding(x.detach())
+
         flat_codes = self._quantize(x)
         codes = self._reshape_codes(flat_codes, shape)
         quantized = self.decode(codes)
         metrics: tp.Dict[str, torch.Tensor] = {}
+
+        if self.training:
+            # We do the expiry of the unused codes at this point as buffers are in sync
+            # and all the workers will take the same decision.
+            expired = self._check_expired_codes(x)
+            metrics['rvq_expired'] = expired
+            cluster_usage = torch.zeros_like(self.cluster_usage)
+            cluster_usage.scatter_add_(
+                0, flat_codes, torch.ones_like(flat_codes, dtype=cluster_usage.dtype))
+            _ema_inplace(self.cluster_usage, cluster_usage, self.decay)
+
+            if self.initialized:
+                # We report the entropy normalized by that of the uniform distribution,
+                # This means the codebooks are optimally used when entropy=1.
+                metrics['rvq_entropy'] = _compute_entropy(self.cluster_usage) / math.log(self.codebook_size)
+
+            embedding_sum = torch.zeros_like(self.embedding_sum)
+            embedding_sum.scatter_add_(0, repeat(flat_codes, "n -> n d", d=self.dim), x)
+            _ema_inplace(self.embedding_sum, embedding_sum, self.decay)
 
         return _CodebookForwardResult(quantized, codes, metrics)
 
@@ -341,9 +390,16 @@ class ResidualVectorQuantization(nn.Module):
         previous_layer_is_initialized = True
 
         for i, layer in enumerate(self.layers[:n_q]):  # type: ignore
+            if self.training:
+                this_layer_is_initialized = layer.initialized
+            # We only allow the kmeans initialization if the previous layer is already initialized from the previous
+            # iterations, this is to avoid learning the subsequent kmeans on the same batch, which would eventually
+            # lead to its exhaustion and running kmeans on 0 values.
             quantized, codes, loss, metrics = layer(
                 residual, initialize=previous_layer_is_initialized
             )
+            if self.training:
+                previous_layer_is_initialized = this_layer_is_initialized  # type: ignore
 
             quantized = quantized.detach()
             residual = residual - quantized
@@ -358,6 +414,10 @@ class ResidualVectorQuantization(nn.Module):
                 else:
                     all_metrics[key] = value / n_q
                 all_metrics[key + f"_{i + self.codebook_offset}"] = value
+
+        if self.training:
+            # Solving subtle bug with STE and RVQ: https://github.com/facebookresearch/encodec/issues/25
+            quantized_out = x + (quantized_out - x).detach()
 
         out_losses, out_codes = map(torch.stack, (all_losses, all_codes))
         return _VQForwardResult(quantized_out, out_codes, out_losses, all_metrics)
