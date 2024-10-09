@@ -3,12 +3,13 @@ import { FC, useEffect, useState, useCallback, useRef, MutableRefObject } from "
 import eruda from "eruda";
 import { useSearchParams } from "react-router-dom";
 import { Conversation } from "../Conversation/Conversation";
-import { Button } from "../../components/Button/Button";
 import { useModelParams } from "../Conversation/hooks/useModelParams";
 import { ModelParams } from "../Conversation/components/ModelParams/ModelParams";
 import { env } from "../../env";
+import { Button } from "@/components/ui/button";
+import { Settings, Power } from "lucide-react";
 
-export const Queue:FC = () => {
+export const Queue: FC = () => {
   const [searchParams] = useSearchParams();
   const overrideWorkerAddr = searchParams.get("worker_addr");
   const [hasMicrophoneAccess, setHasMicrophoneAccess] = useState<boolean>(false);
@@ -19,12 +20,12 @@ export const Queue:FC = () => {
 
   const audioContext = useRef<AudioContext | null>(null);
   const worklet = useRef<AudioWorkletNode | null>(null);
-  // enable eruda in development
+
   useEffect(() => {
     if(env.VITE_ENV === "development") {
       eruda.init();
     }
-    () => {
+    return () => {
       if(env.VITE_ENV === "development") {
         eruda.destroy();
       }
@@ -42,7 +43,7 @@ export const Queue:FC = () => {
       setHasMicrophoneAccess(false);
     }
     return false;
-}, [setHasMicrophoneAccess, setShowMicrophoneAccessMessage]);
+  }, [setHasMicrophoneAccess, setShowMicrophoneAccessMessage]);
 
   const startProcessor = useCallback(async () => {
     if(!audioContext.current) {
@@ -63,11 +64,11 @@ export const Queue:FC = () => {
   }, [audioContext, worklet]);
 
   const onConnect = useCallback(async() => {
-      await startProcessor();
-      const hasAccess = await getMicrophoneAccess();
-      if(hasAccess) {
-        setShouldConnect(true);
-      }
+    await startProcessor();
+    const hasAccess = await getMicrophoneAccess();
+    if(hasAccess) {
+      setShouldConnect(true);
+    }
   }, [setShouldConnect, startProcessor, getMicrophoneAccess]);
 
   if(hasMicrophoneAccess && audioContext.current && worklet.current) {
@@ -82,51 +83,55 @@ export const Queue:FC = () => {
   }
 
   return (
-    <div className="text-white text-center h-screen w-screen p-4 flex flex-col items-center ">
-      <div>
-        <h1 className="text-4xl">Moshi</h1>
-        {/*
-          To add more space to the top add padding to the top of the following div
-          by changing the pt-4 class to pt-8 or pt-12. (see: https://tailwindcss.com/docs/padding)
-          If you'd like to move this part to the bottom of the screen, change the class to pb-4 or pb-8 and move the following so it is contained by the last one in the page.
-          Font size can be changed by changing the text-sm class to text-lg or text-xl. (see : https://tailwindcss.com/docs/font-size)
-          As for the links you can use the one below as an example and add more by copying it and changing the href and text.
-        */}
-        <div className="pt-8 text-sm flex justify-center items-center flex-col ">
-          <div className="presentation text-left">
-          <p><span className='cute-words'>Moshi</span> is an experimental conversational AI. </p>
-          <p>Take everything it says with a grain of <span className='cute-words'>salt</span>.</p>
-          <p>Conversations are limited to <span className='cute-words'>5 min</span>.</p>
-          <p>Moshi <span className='cute-words'>thinks</span> and <span className='cute-words'>speaks</span> at the same time.</p>
-          <p>Moshi can <span className='cute-words'>listen</span> and <span className='cute-words'>talk</span> at all time: <br/>maximum flow between you and <span className='cute-words'>Moshi</span>.</p>
-          <p>Ask it to do some <span className='cute-words'>Pirate</span> role play, how to make <span className='cute-words'>Lasagna</span>,
-            or what <span className='cute-words'>movie</span> it watched last.</p>
-          <p>We strive to support all browsers, Chrome works best.</p>
-          <p>Baked with &lt;3 @<a href="https://kyutai.org/" className='cute-words underline'>Kyutai</a>.</p>
-          </div>
+    <div className="bg-black text-white min-h-screen flex flex-col items-center justify-between p-8 relative">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute top-4 right-4 text-white hover:text-blue-400 transition-colors duration-200"
+        onClick={() => modalRef.current?.showModal()}
+      >
+        <Settings className="h-6 w-6" />
+      </Button>
+
+      <div className="w-full max-w-md flex flex-col items-center justify-center flex-grow">
+        <h1 className="text-5xl font-bold mb-8 text-center">
+          <span className="text-white">Model</span>
+          <span className="text-blue-500">Slab</span>
+        </h1>
+        
+        <div className="space-y-6 w-full">
+          {showMicrophoneAccessMessage && (
+            <p className="text-center text-yellow-400">Please enable your microphone before proceeding</p>
+          )}
+          
+          <Button
+            onClick={onConnect}
+            className="w-full bg-white text-black hover:bg-gray-200 font-bold py-3 px-4 rounded-md transition duration-200 flex items-center justify-center space-x-2"
+          >
+            <Power className="h-5 w-5" />
+            <span>Connect</span>
+          </Button>
         </div>
       </div>
-      <div className="flex flex-grow justify-center items-center flex-col">
-        <>
-          {showMicrophoneAccessMessage &&
-            <p className="text-center">Please enable your microphone before proceeding</p>
-          }
-          <Button onClick={async () => await onConnect()}>Connect</Button>
-          <Button className="absolute top-4 right-4" onClick={()=> modalRef.current?.showModal()}>Settings</Button>
-            <dialog ref={modalRef} className="modal">
-              <div className="modal-box border-2 border-white rounded-none flex justify-center bg-black">
-                <ModelParams {...modelParams} isConnected={shouldConnect} modal={modalRef}/>
-              </div>
-              <form method="dialog" className="modal-backdrop">
-                <button>Close</button>
-              </form>
-            </dialog>
-        </>
-      </div>
-      <div className="text-center flex justify-end items-center flex-col">
-        <a target="_blank" href="https://kyutai.org/moshi-terms.pdf" className="text-center">Terms of Use</a>
-        <a target="_blank" href="https://kyutai.org/moshi-privacy.pdf" className="text-center">Privacy Policy</a>
+
+      <dialog ref={modalRef} className="bg-black border border-blue-500 rounded-lg p-6 w-full max-w-md">
+        <ModelParams {...modelParams} isConnected={shouldConnect} modal={modalRef} />
+        <form method="dialog" className="mt-4">
+          <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200">
+            Close
+          </Button>
+        </form>
+      </dialog>
+
+      <div className="text-center space-y-2 text-xs text-white">
+        <a href="https://kyutai.org/moshi-terms.pdf" target="_blank" rel="noopener noreferrer" className="hover:text-blue-300 transition-colors duration-200">
+          Terms of Use
+        </a>
+        <span className="mx-2">|</span>
+        <a href="https://kyutai.org/moshi-privacy.pdf" target="_blank" rel="noopener noreferrer" className="hover:text-blue-300 transition-colors duration-200">
+          Privacy Policy
+        </a>
       </div>
     </div>
-  )
+  );
 };
