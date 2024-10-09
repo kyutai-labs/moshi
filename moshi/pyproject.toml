@@ -12,6 +12,7 @@ dependencies = [
     "sphn >= 0.1.4",
     "torch >= 2.2.0, < 2.5",
     "aiohttp>=3.10.5, <3.11",
+    "pytest >= 8.3.3",
 ]
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
