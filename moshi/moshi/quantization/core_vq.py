@@ -133,6 +133,7 @@ class EuclideanCodebook(nn.Module):
         self.replaced_usage_ratio = replaced_usage_ratio
         self.check_unused_every = check_unused_every
         self._next_unused_check = check_unused_every
+        self._cached_initialized = False
 
         self.register_buffer("_initialized", torch.tensor([False], dtype=torch.float))
         self.register_buffer("cluster_usage", torch.ones(codebook_size))
