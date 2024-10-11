@@ -10,7 +10,7 @@ torch.backends.cudnn.enabled = False  # Disable cuDNN for deterministic behavior
 
 
 SEANET_RESNET_DATA = [
-    # batch_size,dim,res_layer_index,seq_len,kernel_size
+    # batch_size, dim, res_layer_index, seq_len, kernel_size
     pytest.param(
         3, 4, 1, 10, 6,
         id='small resnet test 1',

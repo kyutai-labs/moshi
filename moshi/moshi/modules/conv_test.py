@@ -10,7 +10,7 @@ torch.backends.cudnn.enabled = False  # Disable cuDNN for deterministic behavior
 
 
 CONV1D_DATA = [
-    # batch_size,in_channels,out_channels,seq_len,kernel_size
+    # batch_size, in_channels, out_channels, seq_len, kernel_size
     pytest.param(
         3, 4, 5, 10, 6,
         id='small conv1d test 1',
@@ -30,7 +30,7 @@ CONV1D_DATA = [
 ]
 
 CONV1D_TRANSPOSE_DATA = [
-    # batch_size,in_channels,out_channels,seq_len,kernel_size,stride
+    # batch_size, in_channels, out_channels, seq_len, kernel_size, stride
     pytest.param(
         3, 4, 5, 10, 6, 1,
         id='small conv1d transpose test 1',
@@ -60,7 +60,7 @@ def _init_weights(module, generator=None):
             nn.init.xavier_uniform_(param, generator=generator)
 
 
-@pytest.mark.parametrize("batch_size,in_channels,out_channels,seq_len,kernel_size", CONV1D_DATA)
+@pytest.mark.parametrize("batch_size, in_channels, out_channels, seq_len, kernel_size", CONV1D_DATA)
 def test_conv1d(batch_size, in_channels, out_channels, seq_len, kernel_size):
     """Test that StreamingConv1d() calls are causal. Having new inputs does not change the previous output."""
     assert seq_len > kernel_size
