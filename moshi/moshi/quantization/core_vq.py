@@ -196,7 +196,7 @@ class EuclideanCodebook(nn.Module):
                 distributed.gather_object(data.shape)
                 distributed.gather(data)
         if rank == 0:
-            embedding, cluster_usage = _run_kmeans(data, self.codebook_size, self.kmeans_iters)
+            embedding, cluster_usage = _run_kmeans(data, self.codebook_size)
             self.embedding_sum.data.copy_(embedding * cluster_usage[:, None])
             self.cluster_usage.data.copy_(cluster_usage)
             self._initialized.data.fill_(1)
