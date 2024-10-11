@@ -314,6 +314,7 @@ class EuclideanCodebook(nn.Module):
             embedding_sum = torch.zeros_like(self.embedding_sum)
             embedding_sum.scatter_add_(0, repeat(flat_codes, "n -> n d", d=self.dim), x)
             _ema_inplace(self.embedding_sum, embedding_sum, self.decay)
+            self.register_buffer('_embedding', None)
 
         return _CodebookForwardResult(quantized, codes, metrics)
 
