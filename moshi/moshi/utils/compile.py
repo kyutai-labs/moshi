@@ -241,7 +241,7 @@ class CUDAGraphed:
                         )
                     if source.shape != target.shape:
                         raise ValueError(
-                            f"Argument #{idx} had shape {target.shape}, but got shae {source.shape}"
+                            f"Argument #{idx} had shape {target.shape}, but got shape {source.shape}"
                         )
                     target.copy_(source)
                 else:
