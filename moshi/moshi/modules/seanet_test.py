@@ -6,6 +6,9 @@ import pytest
 from .seanet import SEANetResnetBlock, SEANetDecoder
 
 
+torch.backends.cudnn.enabled = False  # Disable cuDNN for deterministic behavior
+
+
 SEANET_RESNET_DATA = [
     # batch_size,dim,res_layer_index,seq_len,kernel_size
     pytest.param(

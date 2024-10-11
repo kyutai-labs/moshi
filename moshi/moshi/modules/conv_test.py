@@ -6,6 +6,9 @@ import pytest
 from .conv import StreamingConv1d, StreamingConvTranspose1d
 
 
+torch.backends.cudnn.enabled = False  # Disable cuDNN for deterministic behavior
+
+
 CONV1D_DATA = [
     # batch_size,in_channels,out_channels,seq_len,kernel_size
     pytest.param(
