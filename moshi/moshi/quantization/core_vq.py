@@ -412,7 +412,6 @@ class VectorQuantization(nn.Module):
         else:
             loss = zero_scalar(x.device)
 
-        loss = zero_scalar(x.device)
 
         quantized = self.project_out(quantized)
         quantized = self._rearrange_output(quantized)
