@@ -9,6 +9,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
+import random
 import typing as tp
 
 import torch
@@ -48,7 +49,6 @@ class ResidualVectorQuantizer(BaseQuantizer):
         output_dimension: tp.Optional[int] = None,
         n_q: int = 8,
         q_dropout: bool = False,
-        q_first_only_proba: float = 0.0,
         no_quantization_rate: float = 0.0,
         bins: int = 1024,
         decay: float = 0.99,
@@ -56,27 +56,20 @@ class ResidualVectorQuantizer(BaseQuantizer):
         replaced_usage_ratio: float = 1.0,
         codebook_offset: int = 0,
         force_projection: bool = False,
-        generator_seed: tp.Optional[int] = None,
     ):
         super().__init__()
         self.max_n_q = n_q
         self.n_q = n_q
         self.q_dropout = q_dropout
         self.no_quantization_rate = no_quantization_rate
-        self.q_first_only_proba = q_first_only_proba
         self.dimension = dimension
         self.input_dimension = input_dimension or dimension
         self.output_dimension = output_dimension or dimension
         self.bins = bins
         self.decay = decay
+        self.rng_dropout = random.Random(1234)
         self.input_proj: torch.nn.Module
         self.output_proj: torch.nn.Module
-        self.generator = None
-        if generator_seed is not None:
-            self.generator = torch.Generator(
-                device="cuda" if torch.cuda.is_available() else "cpu"
-            )
-            self.generator.manual_seed(generator_seed)
         if self.input_dimension == self.dimension and not force_projection:
             self.input_proj = torch.nn.Identity()
         else:
@@ -116,17 +109,19 @@ class ResidualVectorQuantizer(BaseQuantizer):
         """
         n_q = self.n_q
         x = self.input_proj(x)
-
+        if self.training and self.q_dropout:
+            n_q = self.rng_dropout.randint(1, self.n_q)
         bw_per_q = math.log2(self.bins) * frame_rate / 1000
         quantized, codes, commit_loss, metrics = self.vq(x, n_q=n_q)
         B, _, _ = quantized.shape
+        if self.training and self.no_quantization_rate > 0:
+            mask = (torch.rand(B, 1, 1, device=x.device) <= self.no_quantization_rate).float()
+            quantized = x * mask + (1 - mask) * quantized
         quantized = self.output_proj(quantized)
         codes = codes.transpose(0, 1)
         # codes is [B, K, T], with T frames, K nb of codebooks.
         bw = torch.tensor(n_q * bw_per_q).to(x)
-        return QuantizedResult(
-            quantized, codes, bw, penalty=torch.mean(commit_loss), metrics=metrics
-        )
+        return QuantizedResult(quantized, codes, bw, penalty=torch.mean(commit_loss), metrics=metrics)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         """Encode a given input tensor with the specified frame rate at the given bandwidth.
@@ -174,9 +169,6 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
     Args:
         n_q (int): Number of residual vector quantizers used.
         n_semantic_q (int): Number of residual vector quantizers used for the semantic quantizer.
-        no_quantization_mode (str): if 'true_skip', when doing no quantization, the input will not go
-            through the sub quantizers. If `independent`, independent decisions are taken by
-            the semantic and acoustic quantizers. If `same` (the default), the same decision is taken by both.
         **kwargs: Arguments to the constructor of `ResidualVectorQuantizer` that are shared between both.
     """
 
@@ -184,8 +176,6 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         self,
         *,
         n_q: int = 8,
-        no_quantization_rate: float = 0.0,
-        no_quantization_mode: str = "same",
         n_q_semantic: int = 1,
         **kwargs,
     ):
@@ -197,15 +187,6 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         self.max_n_q = n_q
         self.n_q_semantic = n_q_semantic
         self.n_q_acoustic = n_q - n_q_semantic
-        if no_quantization_mode == "true_skip":
-            self.no_quantization_rate = no_quantization_rate
-            # Setting to zero for the underlying RVQ.
-            no_quantization_rate = 0.0
-        else:
-            self.no_quantization_rate = 0.0
-        if no_quantization_mode == "same":
-            kwargs["generator_seed"] = 1234
-        kwargs["no_quantization_rate"] = no_quantization_rate
         q_dropout = kwargs.pop("q_dropout", False)
         self.rvq_first = ResidualVectorQuantizer(
             n_q=n_q_semantic, force_projection=True, q_dropout=False, **kwargs
@@ -217,9 +198,6 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
             q_dropout=q_dropout,
             **kwargs,
         )
-        if no_quantization_mode == "true_skip":
-            assert self.rvq_first.input_dimension == self.rvq_first.output_dimension
-            assert self.rvq_rest.input_dimension == self.rvq_rest.output_dimension
 
     def _renorm_and_add(
         self,
