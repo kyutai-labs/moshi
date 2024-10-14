@@ -406,13 +406,9 @@ class VectorQuantization(nn.Module):
 
         if self.training:
             quantized = x + (quantized - x).detach()
-
-        if self.training:
             loss = F.mse_loss(x, quantized.detach())
         else:
             loss = zero_scalar(x.device)
-
-        loss = zero_scalar(x.device)
 
         quantized = self.project_out(quantized)
         quantized = self._rearrange_output(quantized)
