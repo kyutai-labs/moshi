@@ -465,6 +465,7 @@ class LMGen(StreamingModule[_LMGenState]):
         depformer_tokens: list[torch.Tensor] = []
         assert not lm_model.depformer.is_streaming
         with lm_model.depformer.streaming(B):
+            assert lm_model.depformer.is_streaming
             for cb_index in range(lm_model.dep_q):
                 input_ = prev_token[:, None, None]
                 logits = lm_model.forward_depformer(cb_index, input_, transformer_out)
