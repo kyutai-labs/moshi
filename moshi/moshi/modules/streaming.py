@@ -64,11 +64,15 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
         return self._streaming_state is not None
 
     def set_streaming_propagate(self, streaming_propagate: bool):
+        """If set to False, this module will not switch to streaming if a parent module
+        is set to streaming mode, only if directly set to streaming mode."""
         self._streaming_propagate = streaming_propagate
 
     def _apply_named_streaming(self, fn: tp.Any):
         def _handle_module(prefix: str, module: nn.Module):
             if isinstance(module, StreamingModule):
+                # If prefix is empty, we are the direct receiver of the streaming request,
+                # otherwise, we are inheriting from a parent and will stop if _streaming_propagate is False.
                 if not module._streaming_propagate and prefix != "":
                     return
                 fn(prefix, module)
