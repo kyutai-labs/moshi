@@ -180,7 +180,9 @@ class LMModel(StreamingContainer):
             dtype=dtype,
             **kwargs_dep,
         )
-        self.depformer.set_streaming_propagate(False)
+        # Depformer follow its own cycle of streaming entirely contained in one time step
+        # and should not follow the streaming of the steps dimensions.
+        self.depformer.set_streaming_detached(True)
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
         self.linears = nn.ModuleList(
@@ -465,6 +467,7 @@ class LMGen(StreamingModule[_LMGenState]):
         depformer_tokens: list[torch.Tensor] = []
         assert not lm_model.depformer.is_streaming
         with lm_model.depformer.streaming(B):
+            assert lm_model.depformer.is_streaming
             for cb_index in range(lm_model.dep_q):
                 input_ = prev_token[:, None, None]
                 logits = lm_model.forward_depformer(cb_index, input_, transformer_out)

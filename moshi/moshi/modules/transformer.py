@@ -242,11 +242,11 @@ class RingKVCache:
     def complete(self, k: torch.Tensor, v: torch.Tensor) -> KVCacheResult:
         assert k.shape[:-1] == v.shape[:-1], (k.shape, v.shape)
         B, H, T, D = k.shape
+        assert T > 0
         indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype) + self.end_offset
         indexes = indexes % self.capacity
         self.cache[0].index_copy_(2, indexes, k)
         self.cache[1].index_copy_(2, indexes, v)
-        self.end_offset.add_(T)
 
         keys = self.cache[0]
         values = self.cache[1]
@@ -254,25 +254,25 @@ class RingKVCache:
         indexes = torch.arange(
             self.capacity, device=self.end_offset.device, dtype=torch.long
         )
-        invalid = indexes >= self.end_offset
 
-        end_index = self.end_offset % self.capacity
+        # end_index correspond to the actual index where the last value was written.
+        last_offset = self.end_offset + T - 1
+        end_index = last_offset % self.capacity
         delta = indexes - end_index
 
-        # If last key is for step S, and capacity is C, last key was written at index S % C.
-        # then end_offset = S + 1, and end_index = (S + 1) % C.
-        # Then for index = (S % C), delta = -1, and the next code gives us:
-        # position(index) = (S + 1) - 1 = S, all good.
-        # Now the time step at end_offset is actually the oldest in the KVCache, e.g., its
-        # position should be (S - self.capacity + 1).
-        # The following code gives us:
-        # position(index + 1) = S + 1 + 0 - self.capacity.
+        # We know that if `index == end_index`, then we should output `self.end_offset`.
+        # If `index = end_index - 1` we should output `self.end_offset - 1`
+        # If `index = end_index - n` we should output `self.end_offset - n`
+        # Now, for `index == end_index + 1` , we actually have the oldest entry in the cache,
+        # so we should output `end_index + 1 - self.capacity`
 
         positions = torch.where(
             delta <= 0,
-            self.end_offset + delta,
-            self.end_offset + delta - self.capacity,
+            last_offset + delta,
+            last_offset + delta - self.capacity,
         )
+        self.end_offset.add_(T)
+        invalid = indexes >= self.end_offset
         positions = torch.where(invalid, torch.full_like(positions, -1), positions)
 
         return KVCacheResult(keys, values, positions)

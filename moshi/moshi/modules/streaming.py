@@ -33,56 +33,52 @@ State = tp.TypeVar("State", bound=Resetable)
 class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
     """Common API for streaming components.
 
-    Each streaming component has a streaming state, which is just a dict[str, Tensor].
-    By convention, the first dim of each tensor must be the batch size.
-    Don't use dots in the key names, as this would clash with submodules
-    (like in state_dict).
-
-    If `self._is_streaming` is True, the component should use and remember
-    the proper state inside `self._streaming_state`.
+    Each streaming component has a streaming state, `self._streaming_state`, which is None by default.
 
     To set a streaming component in streaming state, use
 
         with module.streaming():
             ...
 
-    This will automatically reset the streaming state when exiting the context manager.
+    This will automatically void the streaming state when exiting the context manager.
     This also automatically propagates to all streaming children module.
-
-    Some module might also implement the `StreamingModule.flush` method, although
-    this one is trickier, as all parents module must be StreamingModule and implement
-    it as well for it to work properly. See `StreamingSequential` after.
+    When the streaming state is set, modules should store whatever state they need in there.
     """
-
     def __init__(self) -> None:
         super().__init__()
         self._streaming_state: State | None = None
-        self._streaming_propagate: bool = True
+        self._streaming_detached: bool = False
 
     @property
     def is_streaming(self):
         return self._streaming_state is not None
 
-    def set_streaming_propagate(self, streaming_propagate: bool):
-        self._streaming_propagate = streaming_propagate
+    def set_streaming_detached(self, streaming_detached: bool):
+        """If set to False, the default, this module and all submodules will switch to streaming mode
+        if a parent module is set to streaming mode.
+        If set to True, or in detach mode, only a direct call to this module `.streaming(...)` method
+        will set it into streaming mode, ignoring the changes from its parents.
+
+        This is useful is streaming over two different dimensions, e.g. for the RQ-Transformer
+        with the inner Depth Transformer working on the dimension of the codebooks."""
+        self._streaming_detached = streaming_detached
 
     def _apply_named_streaming(self, fn: tp.Any):
-        def _handle_module(prefix: str, module: nn.Module, recurse: bool = True):
-            propagate = True
+        def _handle_module(prefix: str, module: nn.Module):
             if isinstance(module, StreamingModule):
-                if module._streaming_propagate:
-                    fn(prefix, module)
+                # If prefix is empty, we are the direct receiver of the streaming request,
+                # otherwise, we are inheriting from a parent and will stop if detached.
+                if module._streaming_detached and prefix != "":
+                    return
+                fn(prefix, module)
+            for name, child in module.named_children():
+                if prefix:
+                    new_prefix = prefix + "." + name
                 else:
-                    propagate = False
-            if not recurse:
-                return
-            if propagate:
-                for name, child in module.named_children():
-                    _handle_module(prefix + "." + name, child)
+                    new_prefix = name
+                _handle_module(new_prefix, child)
 
-        _handle_module("", self, recurse=False)
-        for name, child in self.named_children():
-            _handle_module(name, child)
+        _handle_module("", self)
 
     def _start_streaming(self, batch_size: int):
         def _start_streaming(name: str, module: StreamingModule):
