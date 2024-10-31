@@ -180,7 +180,9 @@ class LMModel(StreamingContainer):
             dtype=dtype,
             **kwargs_dep,
         )
-        self.depformer.set_streaming_propagate(False)
+        # Depformer follow its own cycle of streaming entirely contained in one time step
+        # and should not follow the streaming of the steps dimensions.
+        self.depformer.set_streaming_detached(True)
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
         self.linears = nn.ModuleList(
