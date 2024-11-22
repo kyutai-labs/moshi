@@ -9,19 +9,19 @@ Optimized for inference.
 See `StreamingTransformer` for more information.
 """
 
+import typing as tp
 from contextlib import ExitStack
 from dataclasses import dataclass
-import typing as tp
 
-from einops import rearrange
 import torch
 import torch.nn as nn
+from einops import rearrange
 from torch.nn import functional as F
 
 from ..utils.compile import no_compile
 from .gating import make_gating
 from .rope import RotaryEmbedding
-from .streaming import StreamingModule, StreamingContainer
+from .streaming import StreamingContainer, StreamingModule
 
 
 class LayerNormF32(nn.LayerNorm):
@@ -57,9 +57,7 @@ class RMSNorm(nn.Module):
         super().__init__()
         self.eps = eps
         self.dtype = dtype
-        self.alpha = nn.Parameter(
-            torch.full((1, 1, dim), 1.0, requires_grad=True, device=device, dtype=dtype)
-        )
+        self.alpha = nn.Parameter(torch.full((1, 1, dim), 1.0, requires_grad=True, device=device, dtype=dtype))
 
     def forward(self, x: torch.Tensor):
         return _rms_norm(x, self.alpha, self.dtype, self.eps)
@@ -87,11 +85,7 @@ class LayerScale(nn.Module):
     ):
         super().__init__()
         self.channel_last = channel_last
-        self.scale = nn.Parameter(
-            torch.full(
-                (channels,), init, requires_grad=True, device=device, dtype=dtype
-            )
-        )
+        self.scale = nn.Parameter(torch.full((channels,), init, requires_grad=True, device=device, dtype=dtype))
 
     def forward(self, x: torch.Tensor):
         if self.channel_last:
@@ -145,9 +139,7 @@ def create_sin_embedding(
     half_dim = dim // 2
     positions = positions.to(dtype)
     adim = torch.arange(half_dim, device=positions.device, dtype=dtype).view(1, 1, -1)
-    max_period_tensor = torch.full(
-        [], max_period, device=positions.device, dtype=dtype
-    )  # avoid sync point
+    max_period_tensor = torch.full([], max_period, device=positions.device, dtype=dtype)  # avoid sync point
     phase = positions / (max_period_tensor ** (adim / (half_dim - 1)))
     return torch.cat([torch.cos(phase), torch.sin(phase)], dim=-1)
 
@@ -243,17 +235,22 @@ class RingKVCache:
         assert k.shape[:-1] == v.shape[:-1], (k.shape, v.shape)
         B, H, T, D = k.shape
         assert T > 0
+
         indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype) + self.end_offset
         indexes = indexes % self.capacity
+
+        if T > self.capacity:
+            k = k[:, :, -self.capacity :]
+            v = v[:, :, -self.capacity :]
+            indexes = indexes[-self.capacity :]
+
         self.cache[0].index_copy_(2, indexes, k)
         self.cache[1].index_copy_(2, indexes, v)
 
         keys = self.cache[0]
         values = self.cache[1]
 
-        indexes = torch.arange(
-            self.capacity, device=self.end_offset.device, dtype=torch.long
-        )
+        indexes = torch.arange(self.capacity, device=self.end_offset.device, dtype=torch.long)
 
         # end_index correspond to the actual index where the last value was written.
         last_offset = self.end_offset + T - 1
@@ -339,27 +336,21 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         # We try to follow the default PyTorch MHA convention, to easily compare results.
         self.in_proj_weight = in_proj.weight
         self.in_proj_bias = in_proj.bias
-        self.out_proj = nn.Linear(
-            embed_dim, mult * embed_dim, bias=False, **factory_kwargs
-        )
+        self.out_proj = nn.Linear(embed_dim, mult * embed_dim, bias=False, **factory_kwargs)
 
     def _init_streaming_state(self, batch_size: int) -> _MHAState:
         if self.context is None:
             if self.weights_per_step:
                 capacity = self.weights_per_step
             else:
-                raise RuntimeError(
-                    "Cannot create a streaming KVCache without a context to estimate capacity."
-                )
+                raise RuntimeError("Cannot create a streaming KVCache without a context to estimate capacity.")
         else:
             capacity = self.context
         device = self.in_proj_weight.device
         # TODO: the following estimation will not work great with FSDP.
         dtype = self.in_proj_weight.dtype
         dim_per_head = self.embed_dim // self.num_heads
-        kv_cache = RingKVCache(
-            batch_size, self.num_heads, dim_per_head, capacity, device, dtype
-        )
+        kv_cache = RingKVCache(batch_size, self.num_heads, dim_per_head, capacity, device, dtype)
         return _MHAState(
             kv_cache,
             offset=torch.zeros(1, device=device, dtype=torch.long),
@@ -386,30 +377,81 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             offset_cpu = state.offset_cpu
 
         if self.weights_per_step:
-            projected = multi_linear(
-                self.weights_per_step, self.in_proj_weight, query, offset_cpu
-            )
+            projected = multi_linear(self.weights_per_step, self.in_proj_weight, query, offset_cpu)
         else:
             projected = nn.functional.linear(query, self.in_proj_weight)
-        q, k, v = rearrange(
-            projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
-        )
+        q, k, v = rearrange(projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads)
 
         if self.rope:
             q, k = self.rope(q, k, offset, time_before_heads=False)
 
-        k, v, pos_k = self._complete_kv(k, v)
-        if self.causal:
-            pos_k = pos_k.view(1, -1)
-            pos_q = offset + torch.arange(T, device=q.device, dtype=torch.long).view(
-                -1, 1
+        device = k.device
+        B, H, T, D = k.shape
+        if T > self.context and offset_cpu == 0:
+            if self.causal:
+                ones = torch.ones(T, T, device=device).long()
+                attn_bias = ones.triu(-1 * self.context + 1).tril(0).bool()
+            else:
+                attn_bias = None
+
+            self._complete_kv(k, v)
+
+        elif T > 2 and offset_cpu >= self.context:
+            # frames exceed 1
+            # mask the cache
+
+            k_full = torch.cat((self._streaming_state.kv_cache.cache[0], k), dim=2)
+            v_full = torch.cat((self._streaming_state.kv_cache.cache[1], v), dim=2)
+
+            indexes = torch.arange(self._streaming_state.kv_cache.capacity, device=device, dtype=torch.long)
+
+            last_offset = self._streaming_state.kv_cache.end_offset - 1
+            end_index = last_offset % self._streaming_state.kv_cache.capacity
+            delta = indexes - end_index
+
+            # We know that if `index == end_index`, then we should output `self.end_offset`.
+            # If `index = end_index - 1` we should output `self.end_offset - 1`
+            # If `index = end_index - n` we should output `self.end_offset - n`
+            # Now, for `index == end_index + 1` , we actually have the oldest entry in the cache,
+            # so we should output `end_index + 1 - self.capacity`
+            positions = torch.where(
+                delta <= 0,
+                last_offset + delta,
+                last_offset + delta - self._streaming_state.kv_cache.capacity,
             )
-            delta = pos_q - pos_k
-            attn_bias = (pos_k >= 0) & (delta >= 0)
-            if self.context is not None:
-                attn_bias = attn_bias & (delta < self.context)
+
+            invalid = indexes >= self._streaming_state.kv_cache.end_offset
+            pos_k_cache = torch.where(invalid, torch.full_like(positions, -1), positions)
+            pos_k = offset + torch.arange(T, device=q.device, dtype=torch.long)
+            pos_k_full = torch.cat((pos_k_cache, pos_k), dim=0)
+
+            if self.causal:
+                pos_k_full = pos_k_full.view(1, -1)
+                pos_q = offset + torch.arange(T, device=q.device, dtype=torch.long).view(-1, 1)
+                delta = pos_q - pos_k_full
+                attn_bias = (pos_k_full >= 0) & (delta >= 0)
+
+                if self.context is not None:
+                    attn_bias = attn_bias & (delta < self.context)
+            else:
+                attn_bias = None
+
+            # maintain kv cache
+            self._complete_kv(k, v)
+            k = k_full
+            v = v_full
         else:
-            attn_bias = None
+            k, v, pos_k = self._complete_kv(k, v)
+            if self.causal:
+                pos_k = pos_k.view(1, -1)
+                pos_q = offset + torch.arange(T, device=q.device, dtype=torch.long).view(-1, 1)
+                delta = pos_q - pos_k
+                attn_bias = (pos_k >= 0) & (delta >= 0)
+                if self.context is not None:
+                    attn_bias = attn_bias & (delta < self.context)
+            else:
+                attn_bias = None
+
         x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)
 
         x = rearrange(x, "b h t d -> b t (h d)")
@@ -504,18 +546,10 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
                 f" got {len(dim_feedforward)} != {weights_per_step}"
             )
         if gating == "none":
-            assert (
-                not weights_per_step
-            ), "weights_per_step without gating not supported for now."
-            assert not isinstance(
-                dim_feedforward, list
-            ), "List dim_feedforward without gating not supported for now."
-            self.linear1 = nn.Linear(
-                d_model, dim_feedforward, bias=False, **factory_kwargs
-            )
-            self.linear2 = nn.Linear(
-                dim_feedforward, d_model, bias=False, **factory_kwargs
-            )
+            assert not weights_per_step, "weights_per_step without gating not supported for now."
+            assert not isinstance(dim_feedforward, list), "List dim_feedforward without gating not supported for now."
+            self.linear1 = nn.Linear(d_model, dim_feedforward, bias=False, **factory_kwargs)
+            self.linear2 = nn.Linear(dim_feedforward, d_model, bias=False, **factory_kwargs)
         else:
             self.linear1 = None
             self.linear2 = None
@@ -524,16 +558,11 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
                     dim_feedforward = [dim_feedforward] * weights_per_step
                 assert isinstance(dim_feedforward, list), dim_feedforward
                 self.gating = nn.ModuleList(
-                    [
-                        make_gating(gating, d_model, dim, **factory_kwargs)
-                        for dim in dim_feedforward
-                    ]
+                    [make_gating(gating, d_model, dim, **factory_kwargs) for dim in dim_feedforward]
                 )
             else:
                 assert isinstance(dim_feedforward, int)
-                self.gating = make_gating(
-                    gating, d_model, dim_feedforward, **factory_kwargs
-                )
+                self.gating = make_gating(gating, d_model, dim_feedforward, **factory_kwargs)
 
         self.layer_scale_1: nn.Module
         self.layer_scale_2: nn.Module
@@ -582,7 +611,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
 
     def forward(self, x: torch.Tensor):
         with ExitStack() as stack:
-            if x.device.type != 'cuda':
+            if x.device.type != "cuda":
                 stack.enter_context(no_compile())
             x = self._sa_block(x)
             x = self._ff_block(x)
@@ -683,9 +712,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         if self.positional_embedding in {"sin", "sin_rope"}:
             positions = torch.arange(T, device=x.device).view(1, -1, 1)
             positions = positions + offset.view(-1, 1, 1)
-            pos_emb = create_sin_embedding(
-                positions, C, max_period=self.max_period, dtype=x.dtype
-            )
+            pos_emb = create_sin_embedding(positions, C, max_period=self.max_period, dtype=x.dtype)
             x = x + self.positional_scale * pos_emb
 
         for layer in self.layers:
@@ -731,9 +758,7 @@ class ProjectedTransformer(StreamingContainer):
             if d_model == output_dimension:
                 self.output_projs.append(nn.Identity())
             else:
-                self.output_projs.append(
-                    nn.Linear(d_model, output_dimension, bias=False)
-                )
+                self.output_projs.append(nn.Linear(d_model, output_dimension, bias=False))
 
     def forward(self, x, *args, **kwargs):
         if self.conv_layout:
