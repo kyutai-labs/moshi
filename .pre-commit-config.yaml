@@ -1,28 +1,28 @@
 repos:
-  - repo: local
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
     hooks:
-    - id: flake8-moshi
-      name: flake8 on moshi package
-      language: system
-      entry: bash -c 'cd moshi && flake8'
-      pass_filenames: false
-      always_run: true
-    - id: pyright-moshi
-      name: pyright on moshi package
-      language: system
-      entry: scripts/run_ci_when_installed.sh moshi 'cd moshi && pyright'
-      pass_filenames: false
-      always_run: true
-    - id: flake8-moshi_mlx
-      name: flake8 on moshi_mlx package
-      language: system
-      entry: bash -c 'cd moshi_mlx && flake8'
-      pass_filenames: false
-      always_run: true
-    - id: pyright-moshi_mlx
-      name: pyright on moshi_mlx package
-      language: system
-      entry: scripts/run_ci_when_installed.sh moshi_mlx 'cd moshi_mlx && pyright'
-      pass_filenames: false
-      always_run: true
+      - id: black
+        args: [--line-length=120]
+        exclude: src\/questar\/speech\/data\/codebooks\_patterns\.py
 
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.1.0
+    hooks:
+      - id: flake8
+        args: [ '--config=.flake8', '--ignore=E203' ]
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: [--profile=black, --line-length=120]
+
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-executables-have-shebangs
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
