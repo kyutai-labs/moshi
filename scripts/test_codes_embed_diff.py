@@ -10,13 +10,13 @@ import torchaudio
     
 
 class MoshiMimiStreaming(unittest.TestCase):
-    def test_moshi_mimi_streaming(self, audio_path: str = '/home/wuzhiyue/Introducing_GPT-4o.wav'):
+    def test_moshi_mimi_streaming(self, audio_path: str = '/data0/tmp/Introducing_GPT-4o.wav'):
         device_id = 0 if torch.cuda.is_available() else -1
         assert device_id > -1
         device = f"cuda:{device_id}"
 
         bs = 1
-        model_weight = '/data0/questar/users/wuzhiyue/tmp/hf_mimi_to_moshi/model.safetensors'
+        model_weight = '/data0/questar/models/hf/moshi-mimi-bf32/model.safetensors'
         seed = 424242
         random.seed(seed)
         np.random.seed(seed)
@@ -24,9 +24,8 @@ class MoshiMimiStreaming(unittest.TestCase):
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
         
-        codec = loaders.get_mimi(model_weight, device)
+        codec = loaders.get_mimi(model_weight, device) # same with questar_speech extractor
 
-        
         audio, sr = torchaudio.load(audio_path)
         if sr != 24000:
             audio = torchaudio.transforms.Resample(sr, 24000)(audio).to(device).to(torch.float32)
