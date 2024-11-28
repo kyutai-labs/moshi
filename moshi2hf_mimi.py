@@ -4,8 +4,8 @@ import re
 from einops import rearrange
 
 # Load the weight files
-root_moshi_mimi_path = '/home/wuzhiyue/huggingface_ckpt/moshiko-pytorch-bf16/tokenizer-e351c8d8-checkpoint125.safetensors'
-root_hf_mimi_path = '/home/wuzhiyue/huggingface_ckpt/mimi/model.safetensors'
+root_moshi_mimi_path = '/data0/questar/models/hf/moshiko-pytorch-bf16/tokenizer-e351c8d8-checkpoint125.safetensors'
+root_hf_mimi_path = '/data0/questar/models/hf/mimi/model.safetensors' # 用做目标key的对比
 
 hf_dict = load_file(root_hf_mimi_path)
 # state_dict2 = load_file(root_moshi_mimi_path)
@@ -125,113 +125,3 @@ for key in moshi_dict.keys():
 
 # Save the new state dict
 save_file(mapped_weights, '/home/wuzhiyue/huggingface_ckpt/mimi/model.safetensors', metadata = {'format': 'pt'})
-
-ckpt = {'state_dict': mapped_weights}
-torch.save(ckpt, '/home/wuzhiyue/ckpt/Mimi/pretrain_hf_mimi.ckpt')
-
-# # 比较两个字典的key中的value是否一致
-# count = 0
-# for key in mapped_weights.keys():
-#     count += 1
-#     if key in hf_dict:
-#         if not torch.equal(mapped_weights[key], hf_dict[key]):
-#             abs_max_diff =(mapped_weights[key] - hf_dict[key]).abs().max()
-#             print(f'key {key} is not same, abs_max_diff: {abs_max_diff}')
-#         # print(f'key {key} {torch.equal(mapped_weights[key], state_dict1[key])}, count: {count}')
-#     else:
-#         print(f'key {key} is not in state_dict1')
-
-
-# import os
-# from datasets import load_dataset, Audio
-# from huggingface_hub import hf_hub_download
-# from transformers import MimiModel, AutoFeatureExtractor
-# if os.environ.get("MOSHI_DIR", None) is not None:
-#     import sys
-
-#     sys.path.insert(0, os.environ["MOSHI_DIR"])
-
-
-# from moshi.moshi.models import loaders
-# import torch
-# import numpy as np
-
-# import librosa
-# from scipy.io import wavfile
-# from lhotse import CutSet, load_manifest
-
-
-# def wav_save(path, sr, wav):
-#     wav = (wav * 32767) / max(0.01, np.max(np.abs(wav)))
-#     wavfile.write(path, sr, wav.astype(np.int16))
-
-
-# # load a demonstration datasets
-# librispeech_dummy = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
-
-# # load the model + feature extractor (for pre-processing the audio)
-# model = MimiModel.from_pretrained("/home/wuzhiyue/huggingface_ckpt/mimi")
-# feature_extractor = AutoFeatureExtractor.from_pretrained("/home/wuzhiyue/huggingface_ckpt/mimi")
-
-# # cast the audio data to the correct sampling rate for the model
-# librispeech_dummy = librispeech_dummy.cast_column("audio", Audio(sampling_rate=feature_extractor.sampling_rate))
-# audio_sample0 = librispeech_dummy[15]["audio"]["array"]
-# audio_sample1 = librispeech_dummy[16]["audio"]["array"]
-
-# # audio_samples, _ = librosa.load('/home/wumenglin/workspace/devcontainer/temp/data/fe_03_00001.wav', sr=24000, duration=25, mono=False)
-
-# # audio_sample0 = audio_samples[0]
-# # audio_sample1 = audio_samples[1]
-
-# samples = [audio_sample0, audio_sample1]
-
-# # samples = torch.nn.utils.rnn.pad_sequence(
-# #     [torch.from_numpy(sample) for sample in samples],
-# #     batch_first=True,
-# #     padding_value=0,
-# # )
-# # audio_samples = samples
-
-# # pre-process the inputs
-
-# inputs = feature_extractor(raw_audio=samples, sampling_rate=feature_extractor.sampling_rate, return_tensors="pt")
-
-# # explicitly encode then decode the audio inputs
-# with torch.no_grad():
-#     encoder_outputs_hf_mimi = model.encode(inputs["input_values"])
-#     audio_values_hf_mimi = model.decode(encoder_outputs_hf_mimi.audio_codes)[0]
-
-#     # or the equivalent with a forward pass
-#     audio_values_moshi_direct = model(inputs["input_values"]).audio_values
-
-# mimi_weight = '/home/wuzhiyue/huggingface_ckpt/moshiko-pytorch-bf16/tokenizer-e351c8d8-checkpoint125.safetensors'
-
-# # mimi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MIMI_NAME)
-
-# mimi = loaders.get_mimi(mimi_weight, 'cpu')
-
-# #inputs["input_values"] = torch.from_numpy(audio_samples).unsqueeze(1)
-
-# with torch.no_grad():
-#     encoder_outputs_moshi_mimi = mimi.encode(inputs["input_values"])
-#     audio_values_moshi_mimi = mimi.decode(encoder_outputs_moshi_mimi)
-
-# wav_save('mimi_audio.wav', 24000, audio_values_moshi_mimi[0, 0].detach().cpu().numpy())
-# wav_save('moshi_audio.wav', 24000, audio_values_hf_mimi[0, 0].detach().cpu().numpy())
-
-
-# manifest_file = "/home/wumenglin/workspace/devcontainer/repo/RSTnet/data/fisher/Fisher_LDC2004S13-x.jsonl.gz"
-
-# data = load_manifest(manifest_file)
-# cut_sets = CutSet.from_cuts([data[0], data[1]])
-
-# feature0 = cut_sets[0].load_features()
-# feature0 = feature0.reshape(-1, 2, 32)
-# feature0_c8 = feature0[..., :8] # T B C
-# feature0_c8 = torch.from_numpy(feature0_c8).long()
-# feature0_c8 = feature0_c8.permute(1, 2, 0)
-
-# with torch.no_grad():
-#     audio_values_h5py = mimi.decode(feature0_c8)
-
-# wav_save('audio_values_h5py.wav', 24000, audio_values_h5py[0, 0].detach().cpu().numpy())

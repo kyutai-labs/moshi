@@ -8,7 +8,7 @@ from pathlib import Path
 from moshi.moshi.models import loaders
 import logging
 # os.environ['NO_TORCH_COMPILE'] = '1'
-os.environ['NO_CUDA_GRAPH'] = '1'
+# os.environ['NO_CUDA_GRAPH'] = '1'
 
 class MoshiMimi:
     def __init__(
@@ -71,7 +71,14 @@ class MoshiMimi:
                 codes_list = []
                 for i in range(0, wav.shape[-1], self.chunk_size):
                     audio_chunk = wav[..., i : i+self.chunk_size]
-                    codes = self.codec.encode(audio_chunk.to(device))
+                    if audio_chunk.shape[-1] < self.chunk_size:
+                        codes_length = audio_chunk.shape[-1] // 1920
+                        audio_chunk = torch.cat([audio_chunk, 
+                                                 torch.zeros(1, 1, self.chunk_size - audio_chunk.shape[-1], device=audio_chunk.device)], dim=-1)
+                        
+                        codes = self.codec.encode(audio_chunk.to(device))[:, :, :codes_length]
+                    else:
+                        codes = self.codec.encode(audio_chunk.to(device))
                     codes_list.append(codes)
                 codes = torch.cat(codes_list, dim=-1)
 
@@ -86,17 +93,17 @@ if __name__ == "__main__":
     from tqdm import tqdm
     from pathlib import Path
     parser = argparse.ArgumentParser()
-    parser.add_argument("--filelist", default=None, type=str, help='filelist.txt include the audio absolute path', required = True)
-    parser.add_argument('--codes_save_folder_path', default=None, type=str, help='codes save folder path ', required=True)
+    # parser.add_argument("--filelist", default=None, type=str, help='filelist.txt include the audio absolute path', required = True)
+    # parser.add_argument('--codes_save_folder_path', default=None, type=str, help='codes save folder path ', required=True)
     parser.add_argument("--model_ckpt_path", type=str, default='/data0/questar/users/wuzhiyue/tmp/hf_mimi_to_moshi/model.safetensors')
 
     parser.add_argument("--device", default='cuda:0', type=str)
     parser.add_argument("--audio_chunk_length", default=4*60*24000, type=int)
     args = parser.parse_args()
     
-    # wav_path_list = ['/home/wuzhiyue/moshi_test/Introducing_GPT-4o.wav', '/home/wuzhiyue/moshi_test/Introducing_GPT-4o.wav']
-    filist_path = Path(args.filelist)
-    wav_path_list = [filist_path.parent / line.strip() for line in filist_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    wav_path_list = ['/home/wuzhiyue/Introducing_GPT-4o.wav', '/home/wuzhiyue/Introducing_GPT-4o.wav']
+    # filist_path = Path(args.filelist)
+    # wav_path_list = [filist_path.parent / line.strip() for line in filist_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     
     device = args.device
     audio_chunk_length = args.audio_chunk_length

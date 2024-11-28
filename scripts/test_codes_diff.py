@@ -1,16 +1,16 @@
 import os
 import random
 import unittest
-from moshi.moshi.models import loaders
+from moshi.models import loaders
 import numpy as np
 import torch
 import torchaudio
 
-os.environ['NO_CUDA_GRAPH'] = '1'
+# os.environ['NO_CUDA_GRAPH'] = '1'
     
 
 class MoshiMimiStreaming(unittest.TestCase):
-    def test_moshi_mimi_streaming(self, audio_path: str = '/home/wuzhiyue/moshi_test/Introducing_GPT-4o.wav'):
+    def test_moshi_mimi_streaming(self, audio_path: str = '/home/wuzhiyue/Introducing_GPT-4o.wav'):
         device_id = 0 if torch.cuda.is_available() else -1
         assert device_id > -1
         device = f"cuda:{device_id}"
@@ -66,7 +66,7 @@ class MoshiMimiStreaming(unittest.TestCase):
                 embed_list = []
                 for i in range(0, audio_copy_embedding.shape[-1], 15 * 24000):
                     audio_chunk = audio_copy_embedding[..., i : i + 15 * 24000]
-                    embed = codec._encode_to_unquantized_latent(audio_chunk)
+                    embed = codec.encoder(audio_chunk)
                     embed_list.append(embed)
                 embeddings = torch.cat(embed_list, dim=-1)
                 
@@ -74,7 +74,7 @@ class MoshiMimiStreaming(unittest.TestCase):
                 embed_list_gt = []
                 for i in range(0, audio_copy_embedding_gt.shape[-1], 1920):
                     audio_chunk_gt = audio_copy_embedding_gt[..., i : i + 1920]
-                    embed_gt = codec._encode_to_unquantized_latent(audio_chunk_gt)
+                    embed_gt = codec.encoder(audio_chunk_gt)
                     embed_list_gt.append(embed_gt)
                 embeddings_gt = torch.cat(embed_list_gt, dim=-1)
             

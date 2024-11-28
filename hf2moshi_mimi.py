@@ -4,8 +4,8 @@ import re
 from einops import rearrange
 
 # Load the weight files
-root_moshi_mimi_path = '/home/wuzhiyue/huggingface_ckpt/moshiko-pytorch-bf16/tokenizer-e351c8d8-checkpoint125.safetensors'
-root_hf_mimi_path = '/home/wuzhiyue/huggingface_ckpt/mimi/model.safetensors'
+root_moshi_mimi_path = '/data0/questar/models/hf/moshiko-pytorch-bf16/tokenizer-e351c8d8-checkpoint125.safetensors' #用作目标key的对比
+root_hf_mimi_path = '/data0/questar/models/hf/mimi/model.safetensors'
 
 hf_dict = load_file(root_hf_mimi_path)
 # state_dict2 = load_file(root_moshi_mimi_path)
@@ -131,6 +131,3 @@ for key, value in hf_dict.items():
 
 # Save the new state dict
 save_file(mapped_weights, '/data0/questar/users/wuzhiyue/tmp/hf_mimi_to_moshi/model.safetensors', metadata = {'format': 'pt'})
-
-ckpt = {'state_dict': mapped_weights}
-torch.save(ckpt, '/home/wuzhiyue/ckpt/Mimi/pretrain_hf_mimi.ckpt')
