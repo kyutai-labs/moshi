@@ -10,7 +10,7 @@ try:
     import websockets.sync.client
     from gradio_webrtc import AdditionalOutputs, StreamHandler, WebRTC
 except ImportError:
-    raise ImportError("Please install gradio-webrtc>=0.0.17 to run this script.")
+    raise ImportError("Please install gradio-webrtc>=0.0.18 to run this script.")
 
 # See https://freddyaboulton.github.io/gradio-webrtc/deployment/ for
 # instructions on how to set the rtc_configuration variable for deployment
