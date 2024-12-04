@@ -36,4 +36,5 @@ dev = [
     "pyright",
     "flake8",
     "pre-commit",
+    "gradio-webrtc>=0.0.18"
 ]
