@@ -158,6 +158,7 @@ nor does it try to compensate for a growing lag by skipping frames.
 Alternatively you can run `python -m moshi_mlx.local_web` to use
 the web UI, the connection is via http and will be at [localhost:8998](http://localhost:8998).
 
+
 ## Rust
 
 In order to run the Rust inference server, use the following command from within
@@ -205,6 +206,16 @@ cargo run --bin moshi-cli -r -- tui --host localhost
 ```bash
 python -m moshi.client
 ```
+
+### Gradio Demo
+
+You can launch a Gradio demo locally with the following command:
+
+```bash
+python -m moshi.client_gradio --url <moshi-server-url>
+```
+
+Prior to running the Gradio demo, please install `gradio-webrtc>=0.0.18`.
 
 ### Docker Compose (CUDA only)
 
