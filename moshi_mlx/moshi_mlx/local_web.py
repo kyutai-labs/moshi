@@ -104,19 +104,13 @@ def model_server(client_to_server, server_to_client, args):
     tokenizer_file = args.tokenizer
     if model_file is None:
         if args.quantized == 8:
-            model_file = hf_hub_download(
-                args.hf_repo, "model.q8.safetensors"
-            )
+            model_file = hf_hub_download(args.hf_repo, "model.q8.safetensors")
         elif args.quantized == 4:
-            model_file = hf_hub_download(
-                args.hf_repo, "model.q4.safetensors"
-            )
+            model_file = hf_hub_download(args.hf_repo, "model.q4.safetensors")
         elif args.quantized is not None:
             raise ValueError(f"Invalid quantized value: {args.quantized}")
         else:
-            model_file = hf_hub_download(
-                args.hf_repo, "model.safetensors"
-            )
+            model_file = hf_hub_download(args.hf_repo, "model.safetensors")
     if tokenizer_file is None:
         tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
     steps = args.steps
@@ -314,7 +308,7 @@ def web_server(client_to_server, server_to_client, args):
         static_path: None | str = None
         if args.static is None:
             log("info", "retrieving the static content")
-            dist_tgz = hf_hub_download('kyutai/moshi-artifacts', "dist.tgz")
+            dist_tgz = hf_hub_download("kyutai/moshi-artifacts", "dist.tgz")
             dist_tgz = Path(dist_tgz)
             dist = dist_tgz.parent / "dist"
             if not dist.exists():
@@ -380,18 +374,18 @@ def main():
         help=(
             "use https instead of http, this flag should point to a directory "
             "that contains valid key.pem and cert.pem files"
-        )
+        ),
     )
     parser.add_argument("--no-browser", action="store_true")
 
     args = parser.parse_args()
     if args.hf_repo is None:
         if args.quantized == 8:
-            args.hf_repo = 'kyutai/moshiko-mlx-q8'
+            args.hf_repo = "kyutai/moshiko-mlx-q8"
         elif args.quantized == 4:
-            args.hf_repo = 'kyutai/moshiko-mlx-q4'
+            args.hf_repo = "kyutai/moshiko-mlx-q4"
         elif args.quantized is None:
-            args.hf_repo = 'kyutai/moshiko-mlx-bf16'
+            args.hf_repo = "kyutai/moshiko-mlx-bf16"
         else:
             print(f"Invalid value for quantized {args.quantized}")
             sys.exit(1)

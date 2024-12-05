@@ -179,6 +179,7 @@ class Lm(nn.Module):
         for c in self.transformer_cache:
             c.reset()
 
+
 def config1b_202412() -> LmConfig:
     transformer = TransformerConfig(
         d_model=2048,
@@ -238,6 +239,7 @@ def config1b_202412() -> LmConfig:
         audio_codebooks=16,
         audio_delays=([0] + [1] * 7) * 2,
     )
+
 
 def config_v0_1() -> LmConfig:
     transformer = TransformerConfig(

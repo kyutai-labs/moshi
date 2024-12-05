@@ -78,19 +78,13 @@ def server(printer_q, client_to_server, server_to_client, args):
     tokenizer_file = args.tokenizer
     if model_file is None:
         if args.quantized == 8:
-            model_file = hf_hub_download(
-                args.hf_repo, "model.q8.safetensors"
-            )
+            model_file = hf_hub_download(args.hf_repo, "model.q8.safetensors")
         elif args.quantized == 4:
-            model_file = hf_hub_download(
-                args.hf_repo, "model.q4.safetensors"
-            )
+            model_file = hf_hub_download(args.hf_repo, "model.q4.safetensors")
         elif args.quantized is not None:
             raise ValueError(f"Invalid quantized value: {args.quantized}")
         else:
-            model_file = hf_hub_download(
-                args.hf_repo, "model.safetensors"
-            )
+            model_file = hf_hub_download(args.hf_repo, "model.safetensors")
     if tokenizer_file is None:
         tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
     steps = args.steps
@@ -263,11 +257,11 @@ def main():
 
     if args.hf_repo is None:
         if args.quantized == 8:
-            args.hf_repo = 'kyutai/moshiko-mlx-q8'
+            args.hf_repo = "kyutai/moshiko-mlx-q8"
         elif args.quantized == 4:
-            args.hf_repo = 'kyutai/moshiko-mlx-q4'
+            args.hf_repo = "kyutai/moshiko-mlx-q4"
         elif args.quantized is None:
-            args.hf_repo = 'kyutai/moshiko-mlx-bf16'
+            args.hf_repo = "kyutai/moshiko-mlx-bf16"
         else:
             print(f"Invalid value for quantized {args.quantized}")
             sys.exit(1)
