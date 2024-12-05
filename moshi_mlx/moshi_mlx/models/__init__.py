@@ -6,5 +6,5 @@
 Models for EnCodec, AudioGen, MusicGen, as well as the generic LMModel.
 """
 
-from .lm import Lm, LmConfig, config_v0_1
+from .lm import Lm, LmConfig, config_v0_1, config1b_202412
 from .generate import LmGen
