@@ -17,6 +17,7 @@ pub mod seanet;
 pub mod streaming;
 pub mod transformer;
 pub mod tts;
+pub mod tts_streaming;
 pub mod wav;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
