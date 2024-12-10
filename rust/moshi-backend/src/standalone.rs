@@ -29,8 +29,8 @@ impl Config {
         config.stream.log_dir = crate::utils::replace_env_vars(&config.stream.log_dir);
         config.stream.text_tokenizer_file =
             crate::utils::replace_env_vars(&config.stream.text_tokenizer_file);
-        config.stream.encodec_model_file =
-            crate::utils::replace_env_vars(&config.stream.encodec_model_file);
+        config.stream.mimi_model_file =
+            crate::utils::replace_env_vars(&config.stream.mimi_model_file);
         config.stream.lm_model_file = crate::utils::replace_env_vars(&config.stream.lm_model_file);
         Ok(config)
     }
@@ -59,12 +59,11 @@ impl stream_both::AppStateInner {
         let device = device(args.cpu)?;
         let dtype = if device.is_cuda() { candle::DType::BF16 } else { candle::DType::F32 };
         let lm_model = moshi::lm::load_streaming(&config.lm_model_file, dtype, &device)?;
-        let encodec_device =
-            if config.use_cpu_for_encodec { &candle::Device::Cpu } else { &device };
-        let encodec_model = moshi::encodec::load(
-            &config.encodec_model_file,
-            Some(config.encodec_num_codebooks),
-            encodec_device,
+        let mimi_device = if config.use_cpu_for_mimi { &candle::Device::Cpu } else { &device };
+        let mimi_model = moshi::mimi::load(
+            &config.mimi_model_file,
+            Some(config.mimi_num_codebooks),
+            mimi_device,
         )?;
         let text_tokenizer =
             sentencepiece::SentencePieceProcessor::open(&config.text_tokenizer_file)?;
@@ -72,23 +71,23 @@ impl stream_both::AppStateInner {
         {
             tracing::info!(?dtype, ?device, "warming up the model");
             let mut lm_model = lm_model.clone();
-            let (_v, ys) = lm_model.forward(None, vec![None; config.encodec_num_codebooks])?;
+            let (_v, ys) = lm_model.forward(None, vec![None; config.mimi_num_codebooks])?;
             let mut lp = candle_transformers::generation::LogitsProcessor::new(123, None, None);
             let _ = lm_model.depformer_sample(0, &ys, None, &mut lp)?;
-            let mut encodec_model = encodec_model.clone();
-            let config = encodec_model.config();
+            let mut mimi_model = mimi_model.clone();
+            let config = mimi_model.config();
             let frame_length = (config.sample_rate / config.frame_rate).ceil() as usize;
             let fake_pcm =
-                candle::Tensor::zeros((1, 1, frame_length), candle::DType::F32, encodec_device)?;
-            let codes = encodec_model.encode_step(&fake_pcm.into())?;
-            let ys = encodec_model.decode_step(&codes)?;
+                candle::Tensor::zeros((1, 1, frame_length), candle::DType::F32, mimi_device)?;
+            let codes = mimi_model.encode_step(&fake_pcm.into())?;
+            let ys = mimi_model.decode_step(&codes)?;
             if ys.as_option().is_none() {
-                anyhow::bail!("Expected Encodec to output some stuff, but nothing came out.");
+                anyhow::bail!("Expected mimi to output some stuff, but nothing came out.");
             }
             device.synchronize()?;
             tracing::info!("model is ready to roll!");
         }
-        Ok(Self { lm_model, encodec_model, device, config: config.clone(), text_tokenizer })
+        Ok(Self { lm_model, mimi_model, device, config: config.clone(), text_tokenizer })
     }
 }
 
@@ -121,7 +120,7 @@ pub async fn download_from_hub(config: &mut stream_both::Config) -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("'{path}' has no file name"))
     };
     for file_path in
-        [&mut config.lm_model_file, &mut config.encodec_model_file, &mut config.text_tokenizer_file]
+        [&mut config.lm_model_file, &mut config.mimi_model_file, &mut config.text_tokenizer_file]
             .iter_mut()
     {
         let filename = extract_filename(file_path)

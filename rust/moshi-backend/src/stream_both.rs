@@ -17,11 +17,11 @@ pub struct Config {
     pub lm_model_file: String,
     pub log_dir: String,
     pub text_tokenizer_file: String,
-    pub encodec_model_file: String,
-    pub encodec_num_codebooks: usize,
+    pub mimi_model_file: String,
+    pub mimi_num_codebooks: usize,
     pub lm_config: Option<moshi::lm_generate_multistream::Config>,
     #[serde(default = "default_false")]
-    pub use_cpu_for_encodec: bool,
+    pub use_cpu_for_mimi: bool,
 }
 
 fn default_false() -> bool {
@@ -34,14 +34,14 @@ impl Config {
         let mut config: Self = serde_json::from_str(&config)?;
         config.log_dir = crate::utils::replace_env_vars(&config.log_dir);
         config.text_tokenizer_file = crate::utils::replace_env_vars(&config.text_tokenizer_file);
-        config.encodec_model_file = crate::utils::replace_env_vars(&config.encodec_model_file);
+        config.mimi_model_file = crate::utils::replace_env_vars(&config.mimi_model_file);
         config.lm_model_file = crate::utils::replace_env_vars(&config.lm_model_file);
         Ok(config)
     }
 
     /// Check if all modelling files are available on machine.
     pub fn requires_model_download(&self) -> bool {
-        [&self.lm_model_file, &self.encodec_model_file, &self.text_tokenizer_file]
+        [&self.lm_model_file, &self.mimi_model_file, &self.text_tokenizer_file]
             .iter()
             .any(|file| !std::path::Path::new(file).exists())
     }
@@ -50,7 +50,7 @@ impl Config {
 pub type AppState = Arc<AppStateInner>;
 pub struct AppStateInner {
     pub lm_model: moshi::lm::LmModel,
-    pub encodec_model: moshi::encodec::Encodec,
+    pub mimi_model: moshi::mimi::Mimi,
     pub text_tokenizer: sentencepiece::SentencePieceProcessor,
     pub device: candle::Device,
     pub config: Config,
@@ -126,7 +126,7 @@ struct SessionSummary<'a> {
     transcript: String,
     addr: Option<String>,
     lm_model_file: &'a str,
-    encodec_model_file: &'a str,
+    mimi_model_file: &'a str,
     #[serde(flatten)]
     lm_config: &'a Option<moshi::lm_generate_multistream::Config>,
 }
@@ -162,7 +162,7 @@ pub struct MetaData {
     repetition_penalty_context: usize,
     repetition_penalty: f32,
     lm_model_file: String,
-    encodec_model_file: String,
+    mimi_model_file: String,
     build_info: crate::utils::BuildInfo,
     instance_name: String,
 }
@@ -332,16 +332,16 @@ impl StreamingModel {
 
         let app_state = &self.state;
 
-        let mut encodec = app_state.encodec_model.clone();
+        let mut mimi = app_state.mimi_model.clone();
         let config = state.config().clone();
 
-        encodec.reset_state();
+        mimi.reset_state();
         tracing::info!("processing loop");
         let mut prev_text_token = config.text_start_token;
         let mut tensor_tokens = vec![];
-        let encodec_device =
-            if self.state.config.use_cpu_for_encodec { &candle::Device::Cpu } else { &self.device };
-        encodec_device.synchronize()?;
+        let mimi_device =
+            if self.state.config.use_cpu_for_mimi { &candle::Device::Cpu } else { &self.device };
+        mimi_device.synchronize()?;
         sender.send(StreamOut::Ready)?;
         while let Ok(in_pcm) = receiver.recv() {
             if in_pcm.is_empty() {
@@ -349,8 +349,8 @@ impl StreamingModel {
             }
             let pcm_len = in_pcm.len();
             sender.send(StreamOut::InputPcm { pcm_len })?;
-            let pcms = candle::Tensor::from_vec(in_pcm, (1, 1, pcm_len), encodec_device)?;
-            let audio_tokens = encodec.encode_step(&pcms.into())?;
+            let pcms = candle::Tensor::from_vec(in_pcm, (1, 1, pcm_len), mimi_device)?;
+            let audio_tokens = mimi.encode_step(&pcms.into())?;
             let audio_tokens = match audio_tokens.as_option() {
                 None => continue,
                 Some(audio_tokens) => audio_tokens,
@@ -364,11 +364,11 @@ impl StreamingModel {
                 sender.send(StreamOut::StepPostSampling { step })?;
                 if let Some(audio_tokens) = state.last_audio_tokens() {
                     let audio_tokens = {
-                        let cb = app_state.config.encodec_num_codebooks;
-                        candle::Tensor::from_slice(&audio_tokens[..cb], (1, cb, 1), encodec_device)?
+                        let cb = app_state.config.mimi_num_codebooks;
+                        candle::Tensor::from_slice(&audio_tokens[..cb], (1, cb, 1), mimi_device)?
                     };
                     tensor_tokens.push(audio_tokens.clone());
-                    let pcm = encodec.decode_step(&audio_tokens.into())?;
+                    let pcm = mimi.decode_step(&audio_tokens.into())?;
                     if let Some(pcm) = pcm.as_option() {
                         let pcm = pcm.i((0, 0))?.to_vec1::<f32>()?;
                         sender.send(StreamOut::Pcm { pcm })?;
@@ -395,10 +395,10 @@ impl StreamingModel {
 
         let app_state = &self.state;
 
-        let mut encodec = app_state.encodec_model.clone();
+        let mut mimi = app_state.mimi_model.clone();
         let config = state.config().clone();
 
-        encodec.reset_state();
+        mimi.reset_state();
         tracing::info!("processing loop");
         let mut prev_text_token = config.text_start_token;
         let mut tensor_tokens = vec![];
@@ -407,7 +407,7 @@ impl StreamingModel {
         let sender = Arc::new(sender);
         let status = std::thread::scope(|s| {
             s.spawn({
-                let mut encodec = encodec.clone();
+                let mut mimi = mimi.clone();
                 let sender = sender.clone();
                 move || {
                     'outer: while let Ok(in_pcm) = receiver.recv() {
@@ -421,7 +421,7 @@ impl StreamingModel {
                             (1, 1, pcm_len),
                             &candle::Device::Cpu,
                         )?;
-                        let audio_tokens = encodec.encode_step(&pcms.into())?;
+                        let audio_tokens = mimi.encode_step(&pcms.into())?;
                         let audio_tokens = match audio_tokens.as_option() {
                             None => continue,
                             Some(audio_tokens) => audio_tokens,
@@ -438,7 +438,7 @@ impl StreamingModel {
                 }
             });
             s.spawn({
-                let cb = app_state.config.encodec_num_codebooks;
+                let cb = app_state.config.mimi_num_codebooks;
                 let sender = sender.clone();
                 move || {
                     while let Ok(audio_tokens) = rx_o.recv() {
@@ -450,7 +450,7 @@ impl StreamingModel {
                             )?
                         };
                         tensor_tokens.push(audio_tokens.clone());
-                        let pcm = encodec.decode_step(&audio_tokens.into())?;
+                        let pcm = mimi.decode_step(&audio_tokens.into())?;
                         if let Some(pcm) = pcm.as_option() {
                             let pcm = pcm.i((0, 0))?.to_vec1::<f32>()?;
                             sender.send(StreamOut::Pcm { pcm })?;
@@ -516,7 +516,7 @@ impl StreamingModel {
             repetition_penalty,
             repetition_penalty_context,
             lm_model_file: self.state.config.lm_model_file.to_string(),
-            encodec_model_file: self.state.config.encodec_model_file.to_string(),
+            mimi_model_file: self.state.config.mimi_model_file.to_string(),
             build_info: crate::utils::BuildInfo::new(),
             instance_name: self.state.config.instance_name.to_string(),
         };
@@ -547,7 +547,7 @@ impl StreamingModel {
         );
 
         // We want to log the output even if the run function returns an error.
-        let run_result = if self.state.config.use_cpu_for_encodec {
+        let run_result = if self.state.config.use_cpu_for_mimi {
             self.run_with_state_mt(&mut state, receiver, sender)
         } else {
             self.run_with_state(&mut state, receiver, sender)
@@ -589,7 +589,7 @@ impl StreamingModel {
                 last_step_idx: state.step_idx(),
                 transcript,
                 addr,
-                encodec_model_file: &self.state.config.encodec_model_file,
+                mimi_model_file: &self.state.config.mimi_model_file,
                 lm_model_file: &self.state.config.lm_model_file,
                 lm_config: &self.state.config.lm_config,
             })?;

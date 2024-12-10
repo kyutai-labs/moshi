@@ -6,10 +6,10 @@ pub use candle;
 pub use candle_nn;
 
 pub mod conv;
-pub mod encodec;
 pub mod lm;
 pub mod lm_generate;
 pub mod lm_generate_multistream;
+pub mod mimi;
 pub mod quantization;
 pub mod quantized_lm;
 pub mod quantized_transformer;
