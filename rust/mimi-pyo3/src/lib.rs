@@ -5,7 +5,7 @@
 use pyo3::prelude::*;
 
 use ::moshi as mm;
-use mm::{candle, candle_nn, conv, encodec, seanet, transformer};
+use mm::{candle, candle_nn, conv, mimi, seanet, transformer};
 
 trait PyRes<R> {
     #[allow(unused)]
@@ -39,7 +39,7 @@ macro_rules! py_bail {
     };
 }
 
-fn encodec_cfg(max_seq_len: Option<usize>) -> encodec::Config {
+fn mimi_cfg(max_seq_len: Option<usize>) -> mimi::Config {
     let seanet_cfg = seanet::Config {
         dimension: 512,
         channels: 1,
@@ -84,12 +84,12 @@ fn encodec_cfg(max_seq_len: Option<usize>) -> encodec::Config {
         cross_attention: None,
         max_seq_len: max_seq_len.unwrap_or(8192), // the transformer works at 25hz so this is ~5 mins.
     };
-    encodec::Config {
+    mimi::Config {
         channels: 1,
         sample_rate: 24_000.,
         frame_rate: 12.5,
         renormalize: true,
-        resample_method: encodec::ResampleMethod::Conv,
+        resample_method: mimi::ResampleMethod::Conv,
         seanet: seanet_cfg,
         transformer: transformer_cfg,
         quantizer_n_q: 8,
@@ -100,7 +100,7 @@ fn encodec_cfg(max_seq_len: Option<usize>) -> encodec::Config {
 
 #[pyclass]
 struct Tokenizer {
-    encodec: encodec::Encodec,
+    mimi: mimi::Mimi,
     device: candle::Device,
     dtype: candle::DType,
 }
@@ -119,9 +119,9 @@ impl Tokenizer {
         };
         let vb =
             unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[path], dtype, &device).w()? };
-        let cfg = encodec_cfg(max_seq_len);
-        let encodec = encodec::Encodec::new(cfg, vb).w()?;
-        Ok(Self { encodec, device, dtype })
+        let cfg = mimi_cfg(max_seq_len);
+        let mimi = mimi::Mimi::new(cfg, vb).w()?;
+        Ok(Self { mimi, device, dtype })
     }
 
     fn encode(&mut self, pcm_data: numpy::PyReadonlyArray3<f32>) -> PyResult<PyObject> {
@@ -136,7 +136,7 @@ impl Tokenizer {
             .allow_threads(|| {
                 let pcm_data = candle::Tensor::from_slice(pcm_data, pcm_shape, &self.device)?
                     .to_dtype(self.dtype)?;
-                let codes = self.encodec.encode(&pcm_data)?;
+                let codes = self.mimi.encode(&pcm_data)?;
                 codes.to_vec3::<u32>()
             })
             .w()?;
@@ -156,7 +156,7 @@ impl Tokenizer {
             .allow_threads(|| {
                 let pcm_data = candle::Tensor::from_slice(pcm_data, pcm_shape, &self.device)?
                     .to_dtype(self.dtype)?;
-                let codes = self.encodec.encode_step(&pcm_data.into())?;
+                let codes = self.mimi.encode_step(&pcm_data.into())?;
                 match codes.as_option() {
                     Some(codes) => Ok::<_, candle::Error>(Some(codes.to_vec3::<u32>()?)),
                     None => Ok(None),
@@ -182,7 +182,7 @@ impl Tokenizer {
         let pcm = py
             .allow_threads(|| {
                 let codes = candle::Tensor::from_slice(codes, codes_shape, &self.device)?;
-                let pcm = self.encodec.decode(&codes)?.to_dtype(candle::DType::F32)?;
+                let pcm = self.mimi.decode(&codes)?.to_dtype(candle::DType::F32)?;
                 pcm.to_vec3::<f32>()
             })
             .w()?;
@@ -204,7 +204,7 @@ impl Tokenizer {
         let pcm = py
             .allow_threads(|| {
                 let codes = candle::Tensor::from_slice(codes, codes_shape, &self.device)?;
-                let pcm = self.encodec.decode_step(&codes.into())?;
+                let pcm = self.mimi.decode_step(&codes.into())?;
                 match pcm.as_option() {
                     Some(pcm) => {
                         let pcm = pcm.to_dtype(candle::DType::F32)?;
@@ -224,7 +224,7 @@ impl Tokenizer {
     }
 
     fn reset(&mut self) {
-        self.encodec.reset_state()
+        self.mimi.reset_state()
     }
 }
 
@@ -252,9 +252,9 @@ impl StreamTokenizer {
         };
         let vb =
             unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[path], dtype, &device).w()? };
-        let cfg = encodec_cfg(max_seq_len);
-        let mut e_encodec = encodec::Encodec::new(cfg, vb).w()?;
-        let mut d_encodec = e_encodec.clone();
+        let cfg = mimi_cfg(max_seq_len);
+        let mut e_mimi = mimi::Mimi::new(cfg, vb).w()?;
+        let mut d_mimi = e_mimi.clone();
         let (encoder_tx, e_rx) = std::sync::mpsc::channel::<Vec<f32>>();
         let (decoder_tx, d_rx) = std::sync::mpsc::channel::<Vec<Vec<u32>>>();
         let (d_tx, decoder_rx) = std::sync::mpsc::channel::<Vec<f32>>();
@@ -267,7 +267,7 @@ impl StreamTokenizer {
                     let pcm_data =
                         candle::Tensor::from_vec(pcm_data, (1, 1, l), &candle::Device::Cpu)?
                             .to_dtype(dtype)?;
-                    let codes = e_encodec.encode_step(&pcm_data.into())?;
+                    let codes = e_mimi.encode_step(&pcm_data.into())?;
                     if let Some(codes) = codes.as_option() {
                         let mut codes = codes.to_vec3::<u32>()?;
                         e_tx.send(codes.remove(0))?;
@@ -282,7 +282,7 @@ impl StreamTokenizer {
             while let Ok(codes) = d_rx.recv() {
                 if let Err(err) = (|| {
                     let codes = candle::Tensor::new(codes, &candle::Device::Cpu)?.unsqueeze(2)?;
-                    let pcm_data = d_encodec.decode_step(&codes.into())?;
+                    let pcm_data = d_mimi.decode_step(&codes.into())?;
                     if let Some(pcm_data) = pcm_data.as_option() {
                         let mut pcm_data = pcm_data.to_vec3::<f32>()?;
                         d_tx.send(pcm_data.remove(0).remove(0))?;

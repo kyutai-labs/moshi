@@ -79,22 +79,21 @@ pub async fn run(args: &crate::BenchmarkArgs, config: &Config) -> Result<()> {
     };
     if args.mimi_only {
         let device = crate::standalone::device(args.cpu)?;
-        let encodec_device =
-            if config.use_cpu_for_encodec { &candle::Device::Cpu } else { &device };
-        let mut encodec_model = moshi::encodec::load(
-            &config.encodec_model_file,
-            Some(config.encodec_num_codebooks),
-            encodec_device,
+        let mimi_device = if config.use_cpu_for_mimi { &candle::Device::Cpu } else { &device };
+        let mut mimi_model = moshi::mimi::load(
+            &config.mimi_model_file,
+            Some(config.mimi_num_codebooks),
+            mimi_device,
         )?;
-        let config = encodec_model.config();
+        let config = mimi_model.config();
         let frame_length = (config.sample_rate / config.frame_rate).ceil() as usize;
         for _step in 0..args.steps {
             let fake_pcm =
-                candle::Tensor::zeros((1, 1, frame_length), candle::DType::F32, encodec_device)?;
-            let codes = encodec_model.encode_step(&fake_pcm.into())?;
-            let ys = encodec_model.decode_step(&codes)?;
+                candle::Tensor::zeros((1, 1, frame_length), candle::DType::F32, mimi_device)?;
+            let codes = mimi_model.encode_step(&fake_pcm.into())?;
+            let ys = mimi_model.decode_step(&codes)?;
             if ys.as_option().is_none() {
-                anyhow::bail!("Expected Encodec to output some stuff, but nothing came out.");
+                anyhow::bail!("Expected mimi to output some stuff, but nothing came out.");
             }
             device.synchronize()?;
         }

@@ -9,7 +9,7 @@ use candle_transformers::models::t5;
 pub struct Config {
     pub t5: t5::Config,
     pub lm: crate::lm::Config,
-    pub encodec: crate::encodec::Config,
+    pub mimi: crate::mimi::Config,
     pub max_duration_s: f64,
     pub speaker_cond_duration_s: f64,
     pub max_speakers: usize,
@@ -18,14 +18,14 @@ pub struct Config {
 impl Config {
     pub fn v0_1(t5: t5::Config) -> Self {
         let lm = crate::lm::Config::tts_v0_1();
-        let encodec = crate::encodec::Config::v0_1(None);
-        Self { t5, lm, encodec, max_duration_s: 60., speaker_cond_duration_s: 4., max_speakers: 5 }
+        let mimi = crate::mimi::Config::v0_1(None);
+        Self { t5, lm, mimi, max_duration_s: 60., speaker_cond_duration_s: 4., max_speakers: 5 }
     }
 
     pub fn v0_2(t5: t5::Config) -> Self {
         let lm = crate::lm::Config::tts_v0_1();
-        let encodec = crate::encodec::Config::v0_1(None);
-        Self { t5, lm, encodec, max_duration_s: 60., speaker_cond_duration_s: 10., max_speakers: 2 }
+        let mimi = crate::mimi::Config::v0_1(None);
+        Self { t5, lm, mimi, max_duration_s: 60., speaker_cond_duration_s: 10., max_speakers: 2 }
     }
 }
 
@@ -33,7 +33,7 @@ impl Config {
 pub struct Model {
     t5: t5::T5EncoderModel,
     pub lm: crate::lm::Lm,
-    speaker_cond: Option<(crate::encodec::Encodec, Linear)>,
+    speaker_cond: Option<(crate::mimi::Mimi, Linear)>,
     t5_proj: Linear,
     pub sample_rate: f64,
     frame_rate: f64,
@@ -55,13 +55,13 @@ impl Model {
         let speaker_cond = match vb_speaker_cond {
             None => None,
             Some(vb) => {
-                let encodec = crate::encodec::Encodec::new(cfg.encodec.clone(), vb)?;
+                let mimi = crate::mimi::Mimi::new(cfg.mimi.clone(), vb)?;
                 let proj = linear_no_bias(
-                    cfg.encodec.seanet.dimension,
+                    cfg.mimi.seanet.dimension,
                     cfg.lm.transformer.d_model,
                     vb_lm.pp("condition_provider.conditioners.speaker_wavs.output_proj"),
                 )?;
-                Some((encodec, proj))
+                Some((mimi, proj))
             }
         };
         let t5_proj = {
@@ -78,8 +78,8 @@ impl Model {
             lm,
             speaker_cond,
             t5_proj,
-            sample_rate: cfg.encodec.sample_rate,
-            frame_rate: cfg.encodec.frame_rate,
+            sample_rate: cfg.mimi.sample_rate,
+            frame_rate: cfg.mimi.frame_rate,
             audio_vocab_size: cfg.lm.audio_vocab_size as u32,
             audio_codebooks: cfg.lm.audio_codebooks,
             max_duration_s: cfg.max_duration_s,
@@ -118,7 +118,7 @@ impl Model {
             Some(speaker_pcm) => {
                 let sc = match self.speaker_cond.as_mut() {
                     None => candle::bail!("speaker_pcm specified without a speaker-cond model"),
-                    Some((encodec, proj)) => encodec
+                    Some((mimi, proj)) => mimi
                         .encode_pre_quantize(speaker_pcm)?
                         .t()?
                         .to_dtype(candle::DType::BF16)?

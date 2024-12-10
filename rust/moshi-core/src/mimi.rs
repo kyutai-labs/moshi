@@ -90,7 +90,7 @@ impl Config {
 }
 
 #[derive(Debug, Clone)]
-pub struct Encodec {
+pub struct Mimi {
     encoder: seanet::SeaNetEncoder,
     decoder: seanet::SeaNetDecoder,
     encoder_transformer: transformer::ProjectedTransformer,
@@ -101,7 +101,7 @@ pub struct Encodec {
     config: Config,
 }
 
-impl Encodec {
+impl Mimi {
     pub fn new(cfg: Config, vb: VarBuilder) -> Result<Self> {
         let dim = cfg.seanet.dimension;
         let encoder = seanet::SeaNetEncoder::new(&cfg.seanet, vb.pp("encoder"))?;
@@ -221,10 +221,10 @@ impl Encodec {
     }
 }
 
-pub fn load(model_file: &str, num_codebooks: Option<usize>, dev: &Device) -> Result<Encodec> {
+pub fn load(model_file: &str, num_codebooks: Option<usize>, dev: &Device) -> Result<Mimi> {
     let vb =
         unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[model_file], DType::F32, dev)? };
     let cfg = Config::v0_1(num_codebooks);
-    let encodec = Encodec::new(cfg, vb)?;
-    Ok(encodec)
+    let mimi = Mimi::new(cfg, vb)?;
+    Ok(mimi)
 }
