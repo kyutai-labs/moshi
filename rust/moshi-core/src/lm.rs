@@ -515,6 +515,18 @@ impl LmModel {
         }
     }
 
+    pub fn forward_ca(
+        &mut self,
+        text_ids: Option<Tensor>,
+        audio_ids: Vec<Option<Tensor>>,
+        ca_src: &Tensor,
+    ) -> candle::Result<(Tensor, Tensor)> {
+        match self {
+            Self::Lm(m) => m.forward_ca(text_ids, audio_ids, ca_src),
+            Self::QuantizedLm(m) => m.forward_ca(text_ids, audio_ids, ca_src),
+        }
+    }
+
     pub fn depformer_sample(
         &mut self,
         step_idx: usize,
