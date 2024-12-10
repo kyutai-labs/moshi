@@ -538,6 +538,7 @@ impl StreamingModel {
         );
         let mut state = moshi::lm_generate_multistream::State::new(
             lm_model,
+            None,
             self.session_config.max_steps,
             audio_lp,
             text_lp,
