@@ -52,6 +52,9 @@ pub struct BenchmarkArgs {
     chrome_tracing: bool,
 
     #[clap(long)]
+    asr: bool,
+
+    #[clap(long)]
     mimi_only: bool,
 }
 

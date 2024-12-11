@@ -82,7 +82,7 @@ impl stream_both::AppStateInner {
             let codes = mimi_model.encode_step(&fake_pcm.into())?;
             let ys = mimi_model.decode_step(&codes)?;
             if ys.as_option().is_none() {
-                anyhow::bail!("Expected mimi to output some stuff, but nothing came out.");
+                anyhow::bail!("Expected Mimi to output some stuff, but nothing came out.");
             }
             device.synchronize()?;
             tracing::info!("model is ready to roll!");

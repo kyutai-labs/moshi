@@ -131,8 +131,8 @@ pub async fn run(args: &crate::BenchmarkArgs, config: &Config) -> Result<()> {
                 tokio::time::sleep_until(target_time).await;
                 in_pcm_tx.send(zeros.to_vec())?;
             }
-            let _ = task.await;
-            let _ = w.await;
+            task.await?;
+            w.await??;
         }
     }
     Ok(())
