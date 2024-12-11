@@ -13,6 +13,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     pub instance_name: String,
+    #[serde(default)]
     pub hf_repo: String,
     pub lm_model_file: String,
     pub log_dir: String,
