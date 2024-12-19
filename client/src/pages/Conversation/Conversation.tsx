@@ -49,10 +49,10 @@ const buildURL = ({
   }
   const wsProtocol = (window.location.protocol === 'https:') ? 'wss' : 'ws';
   const url = new URL(`${wsProtocol}://${workerAddr}/api/chat`);
-  if(workerAuthId) {
+  if (workerAuthId) {
     url.searchParams.append("worker_auth_id", workerAuthId);
   }
-  if(email) {
+  if (email) {
     url.searchParams.append("email", email);
   }
   url.searchParams.append("text_temperature", params.textTemperature.toString());
@@ -64,12 +64,17 @@ const buildURL = ({
   url.searchParams.append("audio_seed", audioSeed.toString());
   url.searchParams.append("repetition_penalty_context", params.repetitionPenaltyContext.toString());
   url.searchParams.append("repetition_penalty", params.repetitionPenalty.toString());
+  // Add image params if given
+  if (params.imageUrl != undefined) {
+    url.searchParams.append("image_url", params.imageUrl.toString());
+    url.searchParams.append("image_resolution", params.imageResolution.toString());
+  }
   console.log(url.toString());
   return url.toString();
 };
 
 
-export const Conversation:FC<ConversationProps> = ({
+export const Conversation: FC<ConversationProps> = ({
   workerAddr,
   workerAuthId,
   audioContext,
@@ -77,7 +82,7 @@ export const Conversation:FC<ConversationProps> = ({
   sessionAuthId,
   sessionId,
   onConversationEnd,
-  isBypass=false,
+  isBypass = false,
   email,
   ...params
 }) => {
@@ -95,7 +100,7 @@ export const Conversation:FC<ConversationProps> = ({
 
   const audioStreamDestination = useRef<MediaStreamAudioDestinationNode>(audioContext.current.createMediaStreamDestination());
   const mediaRecorder = useRef<MediaRecorder | null>(null);
-  const audioRecorder = useRef<MediaRecorder>(new MediaRecorder(audioStreamDestination.current.stream, { mimeType: getMimeType("audio"), audioBitsPerSecond: 128000  }));
+  const audioRecorder = useRef<MediaRecorder>(new MediaRecorder(audioStreamDestination.current.stream, { mimeType: getMimeType("audio"), audioBitsPerSecond: 128000 }));
   const [videoURL, setVideoURL] = useState<string>("");
   const [audioURL, setAudioURL] = useState<string>("");
   const [isOver, setIsOver] = useState(false);
@@ -136,10 +141,10 @@ export const Conversation:FC<ConversationProps> = ({
     audioRecorder.current.onstop = async () => {
       let blob: Blob;
       const mimeType = getMimeType("audio");
-      if(mimeType.includes("webm")) {
+      if (mimeType.includes("webm")) {
         blob = await fixWebmDuration(new Blob(audioChunks.current, { type: mimeType }));
-        } else {
-          blob = new Blob(audioChunks.current, { type: mimeType });
+      } else {
+        blob = new Blob(audioChunks.current, { type: mimeType });
       }
       setAudioURL(URL.createObjectURL(blob));
       audioChunks.current = [];
@@ -157,30 +162,30 @@ export const Conversation:FC<ConversationProps> = ({
 
   useEffect(() => {
 
-    if(!canvasRef) {
+    if (!canvasRef) {
       console.log("No canvas ref");
       return;
     }
-    if(!logoRef) {
+    if (!logoRef) {
       console.log("No logo ref");
       return;
     }
-    if(!isLogoLoaded) {
+    if (!isLogoLoaded) {
       console.log("Logo not loaded");
       return;
     }
-    if(!canvasRef.current) {
+    if (!canvasRef.current) {
       console.log("No canvas");
       return;
     }
-    if(!logoRef.current) {
+    if (!logoRef.current) {
       console.log("No logo");
       return;
     }
 
     const ctx = canvasRef.current.getContext("2d");
-    if(ctx) {
-      ctx.drawImage(logoRef.current, 20, 250 , 320, 98);
+    if (ctx) {
+      ctx.drawImage(logoRef.current, 20, 250, 320, 98);
       ctx.lineWidth = 1;
       ctx.strokeStyle = "white";
       ctx.strokeRect(5, 5, 370, 370);
@@ -188,12 +193,12 @@ export const Conversation:FC<ConversationProps> = ({
   }, [canvasRef, logoRef, isLogoLoaded]);
 
   const startRecording = useCallback(() => {
-    if(isRecording.current) {
+    if (isRecording.current) {
       return;
     }
     console.log(Date.now() % 1000, "Starting recording");
     console.log("Starting recording");
-    if(canvasRef.current) {
+    if (canvasRef.current) {
       // Note: Attaching a track from this stream to the existing MediaRecorder
       // rather than creating a new MediaRecorder for the canvas stream
       // doesn't work on Safari as it just ends the recording immediately.
@@ -201,7 +206,7 @@ export const Conversation:FC<ConversationProps> = ({
       console.log("Adding canvas to stream");
       const captureStream = canvasRef.current.captureStream(30);
       captureStream.addTrack(audioStreamDestination.current.stream.getAudioTracks()[0]);
-      mediaRecorder.current = new MediaRecorder(captureStream, { mimeType: getMimeType("video"), videoBitsPerSecond: 1000000});
+      mediaRecorder.current = new MediaRecorder(captureStream, { mimeType: getMimeType("video"), videoBitsPerSecond: 1000000 });
       mediaRecorder.current.ondataavailable = (e) => {
         console.log("Video data available");
         videoChunks.current.push(e.data);
@@ -209,7 +214,7 @@ export const Conversation:FC<ConversationProps> = ({
       mediaRecorder.current.onstop = async () => {
         let blob: Blob;
         const mimeType = getMimeType("video");
-        if(mimeType.includes("webm")) {
+        if (mimeType.includes("webm")) {
           blob = await fixWebmDuration(new Blob(videoChunks.current, { type: mimeType }));
         } else {
           blob = new Blob(videoChunks.current, { type: mimeType });
@@ -232,7 +237,7 @@ export const Conversation:FC<ConversationProps> = ({
   const stopRecording = useCallback(() => {
     console.log("Stopping recording");
     console.log("isRecording", isRecording)
-    if(!isRecording.current) {
+    if (!isRecording.current) {
       return;
     }
     worklet.current?.disconnect(audioStreamDestination.current);
@@ -250,82 +255,103 @@ export const Conversation:FC<ConversationProps> = ({
         socket,
       }}
     >
-    <MediaContext.Provider value={
-      {
-        startRecording,
-        stopRecording,
-        audioContext,
-        worklet,
-        audioStreamDestination,
-        micDuration,
-        actualAudioPlayed,
-      }
-    }>
-    <div>
-    <div className="main-grid h-screen max-h-screen w-screen p-4 max-w-96 md:max-w-screen-lg m-auto">
-      <div className="controls text-center flex justify-center items-center gap-2">
-         {isOver && !isBypass && (
-            <Button
-              onClick={() => {
-                // Reload the page to reset the conversation on iOS
-                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-                if(onConversationEnd && !isIOS) {
-                  onConversationEnd();
-                  return;
-                }
-                document.location.reload();
-              }}
-            >
-              Start Over
-            </Button>
-          )
-        }
+      <MediaContext.Provider value={
         {
-          (!isOver || isBypass) && (
-            <Button
-              onClick={() => {
-                audioContext.current.resume();
-                isConnected ? stop() : start();
-              }}
-            >
-              {!isConnected ? "Connect" : "Disconnect"}
-            </Button>
-          )
+          startRecording,
+          stopRecording,
+          audioContext,
+          worklet,
+          audioStreamDestination,
+          micDuration,
+          actualAudioPlayed,
         }
-          <div className={`h-4 w-4 rounded-full ${isConnected ? 'bg-green-700': 'bg-red-700'}`} />
-        </div>
-          <div className="relative player h-full max-h-full w-full justify-between gap-3 border-2 border-white  md:p-12">
+      }>
+        <div>
+          <div className="main-grid h-screen max-h-screen w-screen p-4 max-w-96 md:max-w-screen-lg m-auto">
+            <div className="controls text-center flex justify-center items-center gap-2">
+              {isOver && !isBypass && (
+                <Button
+                  onClick={() => {
+                    // Reload the page to reset the conversation on iOS
+                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+                    if (onConversationEnd && !isIOS) {
+                      onConversationEnd();
+                      return;
+                    }
+                    localStorage.setItem("textTemperature", modelParams.textTemperature.toString());
+                    localStorage.setItem("textTopk", modelParams.textTopk.toString());
+                    localStorage.setItem("audioTemperature", modelParams.audioTemperature.toString());
+                    localStorage.setItem("audioTopk", modelParams.audioTopk.toString());
+                    localStorage.setItem("padMult", modelParams.padMult.toString());
+                    localStorage.setItem("repetitionPenalty", modelParams.repetitionPenalty.toString());
+                    localStorage.setItem("repetitionPenaltyContext", modelParams.repetitionPenaltyContext.toString());
+                    localStorage.setItem("imageResolution", modelParams.imageResolution.toString());
+                    localStorage.setItem("isImageMode", (modelParams.imageUrl != undefined).toString());
+                    document.location.reload();
+                  }}
+                >
+                  Start Over
+                </Button>
+              )
+              }
+              {
+                (!isOver || isBypass) && (
+                  <Button
+                    onClick={() => {
+                      audioContext.current.resume();
+                      isConnected ? stop() : start();
+                    }}
+                  >
+                    {!isConnected ? "Connect" : "Disconnect"}
+                  </Button>
+                )
+              }
+              <div className={`h-4 w-4 rounded-full ${isConnected ? 'bg-green-700' : 'bg-red-700'}`} />
+            </div>
+            <div className="relative player h-full max-h-full w-full justify-between gap-3 border-2 border-white md:p-12"
+              style={{
+                backgroundImage: `url(${params.imageUrl})`,
+                backgroundSize: '70%',
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'center 10%',
+              }} >
               <ServerAudio
+                imageUrl={params.imageUrl}
                 copyCanvasRef={canvasRef}
                 setGetAudioStats={(callback: () => AudioStats) =>
                   (getAudioStats.current = callback)
                 }
               />
-              <UserAudio copyCanvasRef={canvasRef}/>
-              <div className="pt-8 text-sm flex justify-center items-center flex-col download-links">
+              <UserAudio copyCanvasRef={canvasRef} />
+              <div className="pt-8 text-sm flex justify-center items-center flex-col download-links"
+                style={{
+                  minHeight: 80,
+                  margin: -10,
+                  padding: 0,
+                }}>
                 {audioURL && <div><a href={audioURL} download={`moshi audio.${getExtension("audio")}`} className="pt-2 text-center block">Download audio</a></div>}
                 {videoURL && <div><a href={videoURL} download={`moshi video.${getExtension("video")}`} className="pt-2 text-center">Download video</a></div>}
                 {videoURL && getExtension("video") === "webm" && <div><a href="https://restream.io/tools/webm-to-mp4-converter" target="_blank" rel="noreferrer" className="explain-links pt-2 text-center italic block">How to convert to mp4</a></div>}
               </div>
+            </div>
+            <div className="scrollbar player-text border-2 border-white " ref={textContainerRef}>
+              <TextDisplay containerRef={textContainerRef} displayColor={params.displayColor} />
+            </div>
+            <div className="player-stats hidden md:block">
+              <ServerAudioStats getAudioStats={getAudioStats} />
+            </div>
           </div>
-          <div className="scrollbar player-text border-2 border-white " ref={textContainerRef}>
-            <TextDisplay containerRef={textContainerRef}/>
+          <div className="max-w-96 md:max-w-screen-lg p-4 m-auto text-center">
+            <ServerInfo />
+            {!workerAuthId && <ModelParams {...modelParams} isConnected={isConnected} isImageMode={params.imageUrl != undefined} />}
           </div>
-          <div className="player-stats hidden md:block">
-            <ServerAudioStats getAudioStats={getAudioStats} />
-          </div>
+          <canvas height={380} width={380} className="hidden" ref={canvasRef} />
+          <img src={canvasLogo} ref={logoRef} className="hidden" onLoad={() => {
+            console.log("Logo loaded");
+            setIsLogoLoaded(true);
+          }} />
         </div>
-        <div className="max-w-96 md:max-w-screen-lg p-4 m-auto text-center">
-          <ServerInfo/>
-          {!workerAuthId && <ModelParams {...modelParams} isConnected={isConnected} /> }
-        </div>
-        <canvas height={380} width={380} className="hidden" ref={canvasRef} />
-        <img src={canvasLogo} ref={logoRef} className="hidden" onLoad={() => {
-          console.log("Logo loaded");
-          setIsLogoLoaded(true);
-        }} />
-      </div>
       </MediaContext.Provider>
-    </SocketContext.Provider>
+    </SocketContext.Provider >
   );
 };

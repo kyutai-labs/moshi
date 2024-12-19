@@ -18,6 +18,8 @@ export const encodeMessage = (message: WSMessage): Uint8Array => {
       return new Uint8Array([0x01, ...message.data]);
     case "text":
       return new Uint8Array([0x02, ...new TextEncoder().encode(message.data)]);
+    case "coloredtext":
+      return new Uint8Array([0x02, 0x05, ...new TextEncoder().encode(message.data)]);
     case "control":
       return new Uint8Array([0x03, CONTROL_MESSAGES_MAP[message.action]]);
     case "metadata":
@@ -52,6 +54,12 @@ export const decodeMessage = (data: Uint8Array): WSMessage => {
       return {
         type: "text",
         data: new TextDecoder().decode(payload),
+      };
+    case 0x07:
+      return {
+        type: "coloredtext",
+        color: payload[0],
+        data: new TextDecoder().decode(payload.slice(1)),
       };
     case 0x03: {
       const action = Object.keys(CONTROL_MESSAGES_MAP).find(

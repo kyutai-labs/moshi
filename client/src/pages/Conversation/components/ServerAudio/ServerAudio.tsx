@@ -4,9 +4,10 @@ import { ServerVisualizer } from "../AudioVisualizer/ServerVisualizer";
 
 type ServerAudioProps = {
   setGetAudioStats: (getAudioStats: () => AudioStats) => void;
+  imageUrl: string | undefined;
   copyCanvasRef?: React.RefObject<HTMLCanvasElement>;
 };
-export const ServerAudio: FC<ServerAudioProps> = ({ setGetAudioStats,copyCanvasRef }) => {
+export const ServerAudio: FC<ServerAudioProps> = ({ setGetAudioStats, imageUrl, copyCanvasRef }) => {
   const { analyser, hasCriticalDelay, setHasCriticalDelay } = useServerAudio({
     setGetAudioStats,
   });
@@ -27,7 +28,7 @@ export const ServerAudio: FC<ServerAudioProps> = ({ setGetAudioStats,copyCanvasR
         </div>
       )}
       <div className="server-audio h-4/6 aspect-square" ref={containerRef}>
-        <ServerVisualizer analyser={analyser.current} parent={containerRef} copyCanvasRef={copyCanvasRef}/>
+        <ServerVisualizer analyser={analyser.current} parent={containerRef} imageUrl={imageUrl} copyCanvasRef={copyCanvasRef} />
       </div>
     </>
   );
