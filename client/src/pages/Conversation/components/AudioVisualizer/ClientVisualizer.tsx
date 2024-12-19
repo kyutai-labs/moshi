@@ -24,7 +24,7 @@ const COLORS = [
 ];
 
 export const ClientVisualizer: FC<AudioVisualizerProps> = ({ analyser, parent, copyCanvasRef }) => {
-  const [canvasWidth, setCanvasWidth] = useState(parent.current ? Math.min(parent.current.clientWidth, parent.current.clientHeight) : 0 );
+  const [canvasWidth, setCanvasWidth] = useState(parent.current ? Math.min(parent.current.clientWidth, parent.current.clientHeight) : 0);
   const requestRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -40,11 +40,11 @@ export const ClientVisualizer: FC<AudioVisualizerProps> = ({ analyser, parent, c
     ) => {
       const barHeight = height / 10 - gap;
       for (let i = 1; i <= 10; i++) {
-        const barY = y + height + gap + Math.min(1, width / 30)- (i * barHeight + i * gap);
+        const barY = y + height + gap + Math.min(1, width / 30) - (i * barHeight + i * gap);
         ctx.fillStyle = COLORS[i - 1];
         ctx.strokeStyle = "white";
         ctx.lineWidth = Math.min(1, height / 100);
-        if(i <= volume) {
+        if (i <= volume) {
           ctx.fillRect(x, barY, width, barHeight);
         }
         ctx.strokeRect(x, barY, width, barHeight);
@@ -53,7 +53,7 @@ export const ClientVisualizer: FC<AudioVisualizerProps> = ({ analyser, parent, c
     [],
   );
 
-  const draw = useCallback((ctx:CanvasRenderingContext2D, audioData: Uint8Array,  x:number, y: number, width:number, height: number) => {
+  const draw = useCallback((ctx: CanvasRenderingContext2D, audioData: Uint8Array, x: number, y: number, width: number, height: number) => {
     const stereoGap = Math.floor(width / 30);
     const barGap = Math.floor(height / 30);
     const padding = Math.floor(width / 30);
@@ -72,7 +72,7 @@ export const ClientVisualizer: FC<AudioVisualizerProps> = ({ analyser, parent, c
       MAX_INTENSITY,
     );
     const volume = Math.floor((intensity * 10) / MAX_INTENSITY);
-    ctx.fillStyle = "#000000";
+    ctx.fillStyle = "rgba(0, 0, 0, 0)";
     ctx.fillRect(x, y, width, height);
     drawBars(
       ctx,
@@ -96,7 +96,7 @@ export const ClientVisualizer: FC<AudioVisualizerProps> = ({ analyser, parent, c
 
   const visualizeData = useCallback(() => {
     const width = parent.current ? Math.min(parent.current.clientWidth, parent.current.clientHeight) : 0
-    if(width !== canvasWidth) {
+    if (width !== canvasWidth) {
       console.log("Setting canvas width");
       setCanvasWidth(width);
     }
@@ -114,10 +114,10 @@ export const ClientVisualizer: FC<AudioVisualizerProps> = ({ analyser, parent, c
       return;
     }
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-    draw(ctx, audioData, 0, 0,  width, width);
-    if(copyCanvasRef?.current) {
+    draw(ctx, audioData, 0, 0, width, width);
+    if (copyCanvasRef?.current) {
       const copyCtx = copyCanvasRef.current.getContext("2d");
-      if(copyCtx) {
+      if (copyCtx) {
         copyCtx.clearRect(220, 40, 140, 180);
         draw(copyCtx, audioData, 220, 40, 140, 180);
       }

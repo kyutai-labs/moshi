@@ -2,6 +2,7 @@ export type MessageType =
   | "handshake"
   | "audio"
   | "text"
+  | "coloredtext"
   | "control"
   | "metadata";
 
@@ -19,32 +20,37 @@ export type MODEL = keyof typeof MODELS_MAP;
 
 export type WSMessage =
   | {
-      type: "handshake";
-      version: VERSION;
-      model: MODEL;
-    }
+    type: "handshake";
+    version: VERSION;
+    model: MODEL;
+  }
   | {
-      type: "audio";
-      data: Uint8Array;
-    }
+    type: "audio";
+    data: Uint8Array;
+  }
   | {
-      type: "text";
-      data: string;
-    }
+    type: "text";
+    data: string;
+  }
   | {
-      type: "control";
-      action: CONTROL_MESSAGE;
-    }
+    type: "coloredtext";
+    color: number;
+    data: string;
+  }
   | {
-      type: "metadata";
-      data: unknown;
-    }
+    type: "control";
+    action: CONTROL_MESSAGE;
+  }
+  | {
+    type: "metadata";
+    data: unknown;
+  }
   | {
     type: "error";
     data: string;
   }
   | {
-    type:"ping";
+    type: "ping";
   }
 
 export const CONTROL_MESSAGES_MAP = {
