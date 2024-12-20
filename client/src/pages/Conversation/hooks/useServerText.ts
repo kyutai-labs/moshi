@@ -4,6 +4,7 @@ import { decodeMessage } from "../../../protocol/encoder";
 
 export const useServerText = () => {
   const [text, setText] = useState<string[]>([]);
+  const [textColor, setTextColor] = useState<number[]>([]);
   const [totalTextMessages, setTotalTextMessages] = useState(0);
   const { socket } = useSocketContext();
 
@@ -12,6 +13,10 @@ export const useServerText = () => {
     const message = decodeMessage(dataArray);
     if (message.type === "text") {
       setText(text => [...text, message.data]);
+      setTotalTextMessages(count => count + 1);
+    } else if (message.type === "coloredtext") {
+      setText(text => [...text, message.data]);
+      setTextColor(textColor => [...textColor, message.color]);
       setTotalTextMessages(count => count + 1);
     }
   }, []);
@@ -28,5 +33,5 @@ export const useServerText = () => {
     };
   }, [socket]);
 
-  return { text, totalTextMessages };
+  return { text, textColor, totalTextMessages };
 };

@@ -6,7 +6,7 @@ import { ClientVisualizer } from "../AudioVisualizer/ClientVisualizer";
 type UserAudioProps = {
   copyCanvasRef: React.RefObject<HTMLCanvasElement>;
 };
-export const UserAudio: FC<UserAudioProps> = ({copyCanvasRef}) => {
+export const UserAudio: FC<UserAudioProps> = ({ copyCanvasRef }) => {
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const { sendMessage, isConnected } = useSocketContext();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -65,7 +65,7 @@ export const UserAudio: FC<UserAudioProps> = ({copyCanvasRef}) => {
 
   return (
     <div className="user-audio h-5/6 aspect-square" ref={containerRef}>
-      <ClientVisualizer analyser={analyser} parent={containerRef} copyCanvasRef={copyCanvasRef}/>
+      <ClientVisualizer analyser={analyser} parent={containerRef} copyCanvasRef={copyCanvasRef} />
     </div>
   );
 };
