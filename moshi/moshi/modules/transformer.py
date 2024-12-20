@@ -581,9 +581,6 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         return x_orig + self.layer_scale_1(update)
 
     def forward(self, x: torch.Tensor):
-        with ExitStack() as stack:
-            if x.device.type != 'cuda':
-                stack.enter_context(no_compile())
             x = self._sa_block(x)
             x = self._ff_block(x)
             state = self._streaming_state
