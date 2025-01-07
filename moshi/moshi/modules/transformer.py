@@ -208,7 +208,7 @@ class KVCacheResult(tp.NamedTuple):
         return KVCacheResult(keys, values, positions)
 
 
-class RingKVCache:
+class RingKVCache(nn.Module):
     """Efficient streaming KVCache to be compatible with Cuda Graph.
 
     Args:
@@ -228,13 +228,14 @@ class RingKVCache:
         device: torch.device = torch.device("cuda"),
         dtype: torch.dtype = torch.bfloat16,
     ):
+        super().__init__()
         self.capacity = capacity
-        self.cache = torch.zeros(
+        self.register_buffer("cache", torch.zeros(
             (2, batch_size, num_heads, capacity, dim_per_head),
             device=device,
             dtype=dtype,
-        )
-        self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
+        ))
+        self.register_buffer("end_offset", torch.zeros(1, device=device, dtype=torch.long))
 
     def reset(self):
         self.end_offset.zero_()
@@ -280,13 +281,9 @@ class RingKVCache:
 
 @dataclass
 class _MHAState:
-    kv_cache: RingKVCache
-    offset: torch.Tensor
     offset_cpu: int
 
     def reset(self):
-        self.kv_cache.reset()
-        self.offset.zero_()
         self.offset_cpu = 0
 
 
@@ -342,6 +339,21 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         self.out_proj = nn.Linear(
             embed_dim, mult * embed_dim, bias=False, **factory_kwargs
         )
+        self.register_buffer("offset", torch.zeros(1, device=in_proj.weight.device, dtype=torch.long))
+        dim_per_head = self.embed_dim // self.num_heads
+        dtype = self.in_proj_weight.dtype
+        if self.context is None:
+            if self.weights_per_step:
+                capacity = self.weights_per_step
+            else:
+                raise RuntimeError(
+                    "Cannot create a streaming KVCache without a context to estimate capacity."
+                )
+        else:
+            capacity = self.context
+        self.kv_cache = RingKVCache(
+            1, self.num_heads, dim_per_head, capacity, device, dtype
+        )
 
     def _init_streaming_state(self, batch_size: int) -> _MHAState:
         if self.context is None:
@@ -357,12 +369,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         # TODO: the following estimation will not work great with FSDP.
         dtype = self.in_proj_weight.dtype
         dim_per_head = self.embed_dim // self.num_heads
-        kv_cache = RingKVCache(
-            batch_size, self.num_heads, dim_per_head, capacity, device, dtype
-        )
         return _MHAState(
-            kv_cache,
-            offset=torch.zeros(1, device=device, dtype=torch.long),
             offset_cpu=0,
         )
 
@@ -371,7 +378,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         if state is None:
             return KVCacheResult.from_kv(k, v)
         else:
-            return state.kv_cache.complete(k, v)
+            return self.kv_cache.complete(k, v)
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
         state = self._streaming_state
@@ -382,7 +389,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             offset_cpu = 0
         else:
             assert self.causal, "Streaming only available for causal"
-            offset = state.offset
+            offset = self.offset
             offset_cpu = state.offset_cpu
 
         if self.weights_per_step:
@@ -418,7 +425,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         else:
             x = self.out_proj(x)
         if state is not None:
-            state.offset.add_(T)
+            self.offset.add_(T)
             state.offset_cpu += T
         return x
 
@@ -591,10 +598,8 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
 
 @dataclass
 class _TransformerState:
-    offset: torch.Tensor
-
     def reset(self):
-        self.offset.zero_()
+        pass
 
 
 class StreamingTransformer(StreamingModule[_TransformerState]):
@@ -663,10 +668,11 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
                     **kwargs,
                 )
             )
+        self.register_buffer("offset", torch.zeros(1, device=device, dtype=torch.long))
 
     def _init_streaming_state(self, batch_size: int) -> _TransformerState:
         device = next(self.parameters()).device
-        return _TransformerState(offset=torch.zeros(1, device=device, dtype=torch.long))
+        return _TransformerState()
 
     def forward(self, x: torch.Tensor, *args, **kwargs):
         B, T, C = x.shape
@@ -675,7 +681,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         if state is None:
             offset = torch.zeros(1, dtype=torch.long, device=x.device)
         else:
-            offset = state.offset
+            offset = self.offset
 
         if self.positional_embedding in {"sin", "sin_rope"}:
             positions = torch.arange(T, device=x.device).view(1, -1, 1)
@@ -689,7 +695,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
             x = layer(x, *args, **kwargs)
 
         if state is not None:
-            state.offset.add_(T)
+            self.offset.add_(T)
         return x
 
 
