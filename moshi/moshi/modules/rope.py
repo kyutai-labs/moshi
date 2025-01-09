@@ -62,8 +62,8 @@ def apply_rope(
     koi = kr * roti + ki * rotr
 
     dtype = q.dtype
-    qo = torch.stack([qor.to(dtype), qoi.to(dtype)], dim=-1)
-    ko = torch.stack([kor.to(dtype), koi.to(dtype)], dim=-1)
+    qo = torch.stack([qor, qoi], dim=-1).to(dtype)
+    ko = torch.stack([kor, koi], dim=-1).to(dtype)
 
     return qo.view(*dims, D), ko.view(*dims, D)
 

@@ -230,8 +230,13 @@ class RingKVCache(nn.Module):
     ):
         super().__init__()
         self.capacity = capacity
-        self.register_buffer("cache", torch.zeros(
-            (2, batch_size, num_heads, capacity, dim_per_head),
+        self.register_buffer("k_cache", torch.zeros(
+            (batch_size, num_heads, capacity, dim_per_head),
+            device=device,
+            dtype=dtype,
+        ))
+        self.register_buffer("v_cache", torch.zeros(
+            (batch_size, num_heads, capacity, dim_per_head),
             device=device,
             dtype=dtype,
         ))
@@ -246,11 +251,11 @@ class RingKVCache(nn.Module):
         assert T > 0
         indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype) + self.end_offset
         indexes = indexes % self.capacity
-        self.cache[0].index_copy_(2, indexes, k)
-        self.cache[1].index_copy_(2, indexes, v)
+        self.k_cache[:, :, indexes] = k
+        self.v_cache[:, :, indexes] = v
 
-        keys = self.cache[0]
-        values = self.cache[1]
+        keys = self.k_cache
+        values = self.v_cache
 
         indexes = torch.arange(
             self.capacity, device=self.end_offset.device, dtype=torch.long
