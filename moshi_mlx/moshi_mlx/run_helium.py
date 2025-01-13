@@ -4,6 +4,7 @@
 
 import argparse
 import sentencepiece
+import huggingface_hub
 import mlx.core as mx
 from moshi_mlx import models, utils
 
@@ -13,18 +14,29 @@ def main():
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--weights", type=str)
     parser.add_argument("--nsteps", type=int, default=20)
-    parser.add_argument("--hf-repo", type=str)
-    parser.add_argument("--prompt", type=str, default="Hello, this is ")
+    parser.add_argument("--hf-repo", type=str, default="kyutai/helium-1-preview-2b-mlx")
+    parser.add_argument("--prompt", type=str, default="Aujourd'hui, il est temps")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
+
+    weights = args.weights
+    if weights is None:
+        weights = huggingface_hub.hf_hub_download(
+            args.hf_repo, "helium-1-preview-2b-bf16.safetensors"
+        )
+    tokenizer = args.tokenizer
+    if tokenizer is None:
+        tokenizer = huggingface_hub.hf_hub_download(
+            args.hf_repo, "tokenizer_spm_48k_multi6_2.model"
+        )
 
     mx.random.seed(299792458)
     lm_config = models.config_helium_1_preview_2b()
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
-    model.load_weights(args.weights, strict=True)
+    model.load_weights(weights, strict=True)
     sampler = utils.Sampler()
-    tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)  # type: ignore
+    tokenizer = sentencepiece.SentencePieceProcessor(tokenizer)  # type: ignore
     if args.verbose:
         print("prompt", args.prompt)
     else:
