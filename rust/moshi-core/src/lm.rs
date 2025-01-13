@@ -588,7 +588,7 @@ pub fn load_streaming<P: AsRef<std::path::Path>>(
     dev: &Device,
 ) -> Result<LmModel> {
     let cfg = Config::v0_1_streaming(8);
-    let is_gguf = model_file.as_ref().extension().map_or(false, |v| v == "gguf");
+    let is_gguf = model_file.as_ref().extension().is_some_and(|v| v == "gguf");
     let lm = if is_gguf {
         let vb =
             candle_transformers::quantized_var_builder::VarBuilder::from_gguf(model_file, dev)?;
@@ -609,7 +609,7 @@ pub fn load_streaming_both_ways<P: AsRef<std::path::Path>>(
     dev: &Device,
 ) -> Result<LmModel> {
     let cfg = Config::v0_1_streaming(16);
-    let is_gguf = model_file.as_ref().extension().map_or(false, |v| v == "gguf");
+    let is_gguf = model_file.as_ref().extension().is_some_and(|v| v == "gguf");
     let lm = if is_gguf {
         let vb =
             candle_transformers::quantized_var_builder::VarBuilder::from_gguf(model_file, dev)?;
