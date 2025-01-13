@@ -125,9 +125,13 @@ class Lm(nn.Module):
         self.transformer_cache: list[RotatingKVCache] = (
             self.transformer.make_rot_cache()
         )
-        self.depformer_cache: list[KVCache] = self.depformer.slices[
-            0
-        ].transformer.make_cache()
+
+        if len(self.depformer.slices) > 0:
+            self.depformer_cache: list[KVCache] = self.depformer.slices[
+                0
+            ].transformer.make_cache()
+        else:
+            self.depformer_cache = []
 
     def __call__(
         self,
@@ -299,4 +303,42 @@ def config_v0_1() -> LmConfig:
         text_out_vocab_size=32000,
         audio_codebooks=16,
         audio_delays=([0] + [1] * 7) * 2,
+    )
+
+def config_helium_1_preview_2b() -> LmConfig:
+    transformer = TransformerConfig(
+        d_model=2560,
+        num_heads=20,
+        num_layers=20,
+        dim_feedforward=2560 * 4,  # dim * hidden_scale
+        causal=True,
+        norm_first=True,
+        bias_ff=False,
+        bias_attn=False,
+        layer_scale=None,
+        context=4096,
+        max_period=100000,
+        use_conv_block=False,
+        use_conv_bias=True,
+        cross_attention=False,
+        gating=True,
+        norm="rms_norm",
+        positional_embedding="rope",
+        conv_layout=False,
+        conv_kernel_size=3,
+        kv_repeat=1,
+        max_seq_len=4096,
+    )
+    depformer = DepFormerConfig(
+        transformer=transformer,
+        num_slices=0,
+    )
+    return LmConfig(
+        transformer=transformer,
+        depformer=depformer,
+        audio_vocab_size=2049,
+        text_in_vocab_size=48000,
+        text_out_vocab_size=48000,
+        audio_codebooks=0,
+        audio_delays=[],
     )
