@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--weights", type=str)
     parser.add_argument("--nsteps", type=int, default=20)
     parser.add_argument("--hf-repo", type=str)
+    parser.add_argument("--prompt", type=str, default="Hello, this is ")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -24,10 +25,15 @@ def main():
     model.load_weights(args.weights, strict=True)
     sampler = utils.Sampler()
     tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)  # type: ignore
-    token = mx.array([[1]])
+    if args.verbose:
+        print("prompt", args.prompt)
+    else:
+        print(args.prompt, end="", flush=True)
+    prompt_tokens = tokenizer.encode(args.prompt)  # type: ignore
+    token = mx.array([[1] + prompt_tokens])
     for step_idx in range(args.nsteps):
         logits = model(token)
-        token, _ = sampler(logits[:, 0])
+        token, _ = sampler(logits[:, -1])
         text_token = token.item()
         _text = tokenizer.id_to_piece(text_token)  # type: ignore
         _text = _text.replace("▁", " ")
