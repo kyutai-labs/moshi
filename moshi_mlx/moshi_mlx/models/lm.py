@@ -305,6 +305,7 @@ def config_v0_1() -> LmConfig:
         audio_delays=([0] + [1] * 7) * 2,
     )
 
+
 def config_helium_1_preview_2b() -> LmConfig:
     transformer = TransformerConfig(
         d_model=2560,

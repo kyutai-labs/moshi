@@ -7,6 +7,7 @@ import sentencepiece
 import mlx.core as mx
 from moshi_mlx import models, utils
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokenizer", type=str)
