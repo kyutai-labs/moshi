@@ -309,7 +309,7 @@ def config_helium_1_preview_2b() -> LmConfig:
     transformer = TransformerConfig(
         d_model=2560,
         num_heads=20,
-        num_layers=20,
+        num_layers=24,
         dim_feedforward=2560 * 4,  # dim * hidden_scale
         causal=True,
         norm_first=True,
