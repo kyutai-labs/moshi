@@ -143,7 +143,7 @@ class MimiModel(CompressionModel[_MimiState]):
         freeze_encoder: bool = False,
         freeze_quantizer: bool = False,
         freeze_quantizer_level: int = -1,
-        torch_compile_encoder_decoder: bool = False,
+        torch_compile_encoder_decoder: bool = True,
     ):
         super().__init__()
         self.encoder = encoder
