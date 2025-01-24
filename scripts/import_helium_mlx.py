@@ -12,7 +12,7 @@ from huggingface_hub import hf_hub_download
 
 def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:
     with safe_open(in_path, framework="pt", device="cpu") as f:
-        tensors = { key: f.get_tensor(key) for key in f.keys() }
+        tensors = {key: f.get_tensor(key) for key in f.keys()}
     model = {
         "text_emb.weight": tensors["model.embed_tokens.weight"],
         "text_linear.weight": tensors["lm_head.weight"],
@@ -52,7 +52,12 @@ def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", type=str, default="kyutai/helium-1-preview-2b", help="the transformers checkpoint to import")
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default="kyutai/helium-1-preview-2b",
+        help="the transformers checkpoint to import",
+    )
     parser.add_argument("--out", type=str, help="the mlx safetensors file to generate")
     parser.add_argument(
         "-s", "--silent", action="store_true", help="Only prints the checkpoint name"
@@ -61,7 +66,9 @@ def main():
 
     ckpt_path = Path(args.checkpoint)
     if not ckpt_path.exists():
-        ckpt_path = hf_hub_download(repo_id=args.checkpoint, filename="model.safetensors")
+        ckpt_path = hf_hub_download(
+            repo_id=args.checkpoint, filename="model.safetensors"
+        )
     out_path = Path(args.out)
     if not out_path.exists():
         import_model(ckpt_path, out_path, silent=args.silent)
@@ -70,4 +77,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
