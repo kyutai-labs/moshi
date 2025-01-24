@@ -18,14 +18,22 @@ from moshi.models import loaders, LMGen
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
-parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
-parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
-parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO,
-                    help="HF repo to look into, defaults Moshiko. "
-                         "Use this to select a different pre-trained model.")
+parser.add_argument(
+    "--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi."
+)
+parser.add_argument(
+    "--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi."
+)
+parser.add_argument(
+    "--hf-repo",
+    type=str,
+    default=loaders.DEFAULT_REPO,
+    help="HF repo to look into, defaults Moshiko. "
+    "Use this to select a different pre-trained model.",
+)
 parser.add_argument("--steps", default=100, type=int)
 parser.add_argument("--profile", action="store_true")
-parser.add_argument("--device", type=str, default='cuda')
+parser.add_argument("--device", type=str, default="cuda")
 args = parser.parse_args()
 
 
@@ -59,8 +67,10 @@ lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
 lm_gen = LMGen(lm)
 print("lm loaded")
 
+
 def cb(step, total):
     print(f"{step:06d} / {total:06d}", end="\r")
+
 
 def streaming_test(bs):
     main_audio = []
@@ -119,7 +129,9 @@ def streaming_test(bs):
     print("generated text:")
     print("".join(main_text))
     sphn.write_wav(
-        "gen_main.wav", main_audio_th[0].cpu().numpy().astype(np.float32), mimi.sample_rate
+        "gen_main.wav",
+        main_audio_th[0].cpu().numpy().astype(np.float32),
+        mimi.sample_rate,
     )
 
 
