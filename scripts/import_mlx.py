@@ -58,12 +58,12 @@ def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:
             # WARNING: note that this uses in_proj_weight vs out_proj.weight
             model[layer + "self_attn.in_proj.weight"] = (
                 tch_model[f"depformer.layers.{layer_idx}.self_attn.in_proj_weight"]
-                .chunk(n_q)[idx]
+                .chunk(n_q_main)[idx]
                 .clone()
             )
             model[layer + "self_attn.out_proj.weight"] = (
                 tch_model[f"depformer.layers.{layer_idx}.self_attn.out_proj.weight"]
-                .chunk(n_q)[idx]
+                .chunk(n_q_main)[idx]
                 .clone()
             )
             model[layer + "norm1.weight"] = tch_model[
