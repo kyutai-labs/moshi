@@ -14,13 +14,21 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("original_weights", type=str)
     parser.add_argument("--out", type=str)
+    parser.add_argument("--config", type=str, default="v0_1")
     parser.add_argument("--bits", type=int, default=8)
     parser.add_argument("--group-size", type=int, default=64)
     args = parser.parse_args()
 
     model_file = args.original_weights
 
-    lm_config = moshi_mlx.models.config_v0_1()
+    if args.config == "v0_1":
+        lm_config = moshi_mlx.models.config_v0_1()
+    elif args.config == "1b":
+        lm_config = moshi_mlx.models.config1b_202412()
+    elif args.config == "helium-2b":
+        lm_config = moshi_mlx.models.config_helium_1_preview_2b()
+    else:
+        raise ValueError(f"unknown config name '{args.config}'")
     print(f"model config:\n{lm_config}")
 
     model = moshi_mlx.models.Lm(lm_config)
