@@ -6,11 +6,20 @@ import argparse
 import torch
 from pathlib import Path
 from safetensors.torch import save_file
+from moshi.models.loaders import get_moshi_lm
 
 
-def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:
-    pkg = torch.load(in_path, map_location=torch.device("cpu"))
-    tch_model = pkg["fsdp_best_state"]["model"]
+def import_model(
+    in_path: Path,
+    out_path: Path,
+    silent: bool = False,
+    is_pytorch_safetensors: bool = False,
+) -> None:
+    if is_pytorch_safetensors:
+        tch_model = get_moshi_lm(in_path).state_dict()
+    else:
+        pkg = torch.load(in_path, map_location=torch.device("cpu"))
+        tch_model = pkg["fsdp_best_state"]["model"]
 
     n_q: int | None = None
     for idx in range(999):
@@ -44,6 +53,7 @@ def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:
     # Only export the first 8 slices of the depformer (main).
     n_q_main = 8
     print(f"only exporting the first {n_q_main}/{n_q} depformer layers")
+    chunk_n_q = n_q_main if is_pytorch_safetensors else n_q
     for idx in range(n_q_main):
         base = f"depformer.slices.{idx}."
         model[base + "linear_in.weight"] = tch_model[f"depformer_in.{idx}.weight"]
@@ -58,12 +68,12 @@ def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:
             # WARNING: note that this uses in_proj_weight vs out_proj.weight
             model[layer + "self_attn.in_proj.weight"] = (
                 tch_model[f"depformer.layers.{layer_idx}.self_attn.in_proj_weight"]
-                .chunk(n_q_main)[idx]
+                .chunk(chunk_n_q)[idx]
                 .clone()
             )
             model[layer + "self_attn.out_proj.weight"] = (
                 tch_model[f"depformer.layers.{layer_idx}.self_attn.out_proj.weight"]
-                .chunk(n_q_main)[idx]
+                .chunk(chunk_n_q)[idx]
                 .clone()
             )
             model[layer + "norm1.weight"] = tch_model[
@@ -89,12 +99,15 @@ def main():
     parser.add_argument(
         "-s", "--silent", action="store_true", help="Only prints the checkpoint name"
     )
+    parser.add_argument(
+        "-p", "--is_pytorch_safetensors", action="store_true", help="Import pytorch safetensors"
+    )
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
     out_path = Path(args.out)
     if not out_path.exists():
-        import_model(ckpt_path, out_path, silent=args.silent)
+        import_model(ckpt_path, out_path, silent=args.silent, is_pytorch_safetensors=args.is_pytorch_safetensors)
     print(out_path)
 
 
