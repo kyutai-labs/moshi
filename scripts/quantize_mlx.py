@@ -25,6 +25,8 @@ def main():
         lm_config = moshi_mlx.models.config_v0_1()
     elif args.config == "1b":
         lm_config = moshi_mlx.models.config1b_202412()
+    elif args.config == "1b-16rvq":
+        lm_config = moshi_mlx.models.config1b_202412_16rvq()
     elif args.config == "helium-2b":
         lm_config = moshi_mlx.models.config_helium_1_preview_2b()
     else:

@@ -244,6 +244,66 @@ def config1b_202412() -> LmConfig:
         audio_delays=([0] + [1] * 7) * 2,
     )
 
+def config1b_202412_16rvq() -> LmConfig:
+    transformer = TransformerConfig(
+        d_model=2048,
+        num_heads=16,
+        num_layers=16,
+        dim_feedforward=2048 * 4,  # dim * hidden_scale
+        causal=True,
+        norm_first=True,
+        bias_ff=False,
+        bias_attn=False,
+        layer_scale=None,
+        context=750,
+        max_period=100000,
+        use_conv_block=False,
+        use_conv_bias=True,
+        cross_attention=False,
+        gating=True,
+        norm="rms_norm",
+        positional_embedding="rope",
+        conv_layout=False,
+        conv_kernel_size=3,
+        kv_repeat=1,
+        max_seq_len=4096,
+    )
+    depformer = DepFormerConfig(
+        transformer=TransformerConfig(
+            d_model=1024,
+            num_heads=16,
+            num_layers=6,
+            dim_feedforward=1024 * 4,  # dim * hidden_scale
+            causal=True,
+            norm_first=True,
+            bias_ff=False,
+            bias_attn=False,
+            layer_scale=None,
+            context=16,
+            max_period=10000,
+            use_conv_block=False,
+            use_conv_bias=True,
+            cross_attention=False,
+            gating=True,
+            norm="rms_norm",
+            positional_embedding="none",
+            conv_layout=False,
+            conv_kernel_size=3,
+            kv_repeat=1,
+            max_seq_len=4096,
+        ),
+        num_slices=16,
+    )
+    return LmConfig(
+        transformer=transformer,
+        depformer=depformer,
+        audio_vocab_size=2049,
+        text_in_vocab_size=48001,
+        text_out_vocab_size=48000,
+        audio_codebooks=32,
+        audio_delays=([0] + [1] * 15) * 2,
+    )
+
 
 def config_v0_1() -> LmConfig:
     transformer = TransformerConfig(
