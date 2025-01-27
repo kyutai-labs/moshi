@@ -244,6 +244,7 @@ def config1b_202412() -> LmConfig:
         audio_delays=([0] + [1] * 7) * 2,
     )
 
+
 def config1b_202412_16rvq() -> LmConfig:
     transformer = TransformerConfig(
         d_model=2048,
