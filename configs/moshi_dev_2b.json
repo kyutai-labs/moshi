@@ -22,7 +22,7 @@
     "depformer_causal": true,
     "depformer_layer_scale": null,
     "depformer_multi_linear": true,
-    "depformer_context": 8,
+    "depformer_context": 16,
     "depformer_max_period": 10000,
     "depformer_gating": "silu",
     "depformer_pos_emb": "none",

@@ -93,6 +93,11 @@ def main():
     args = parser.parse_args()
     seed_all(42424242)
 
+    log("info", f"loading input file {args.infile}")
+    in_pcms, _ = sphn.read(args.infile, sample_rate=24000)
+    in_pcms = torch.from_numpy(in_pcms).to(device=args.device)
+    in_pcms = in_pcms[None, 0:1].expand(args.batch_size, -1, -1)
+
     lm_kwargs = None
     num_codebooks = 8
     if args.lm_config is not None:
@@ -118,11 +123,9 @@ def main():
     log("info", "moshi loaded")
 
     state = InferenceState(mimi, text_tokenizer, lm, args.batch_size, args.device)
-    in_pcms, _ = sphn.read(args.infile, sample_rate=24000)
-    in_pcms = torch.from_numpy(in_pcms).to(device=args.device)
-    in_pcms = in_pcms[None, 0:1].expand(args.batch_size, -1, -1)
     out_pcms, out_text_tokens = state.run(in_pcms)
     log("info", f"out-pcm: {out_pcms.shape}, out-text: {out_text_tokens.shape}")
+
     if args.batch_size == 1:
         sphn.write_wav(args.outfile, out_pcms[0, 0].cpu().numpy(), sample_rate=24000)
     else:

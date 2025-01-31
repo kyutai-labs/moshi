@@ -154,7 +154,7 @@ def get_moshi_lm(filename: str | Path,
     ).to(device=device, dtype=dtype)
     model.eval()
     if _is_safetensors(filename):
-        load_model(model, filename)
+        load_model(model, filename, strict=False)
     else:
         pkg = torch.load(
             filename,
