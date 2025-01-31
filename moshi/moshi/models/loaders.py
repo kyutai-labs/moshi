@@ -104,7 +104,8 @@ def _is_safetensors(path: Path | str) -> bool:
 
 
 def get_mimi(filename: str | Path,
-             device: torch.device | str = 'cpu') -> MimiModel:
+             device: torch.device | str = 'cpu',
+             num_codebooks: int = 8) -> MimiModel:
     """Return a pretrained Mimi model."""
     encoder = SEANetEncoder(**_seanet_kwargs)
     decoder = SEANetDecoder(**_seanet_kwargs)
@@ -136,7 +137,7 @@ def get_mimi(filename: str | Path,
     else:
         pkg = torch.load(filename, "cpu")
         model.load_state_dict(pkg["model"])
-    model.set_num_codebooks(8)
+    model.set_num_codebooks(num_codebooks)
     return model
 
 

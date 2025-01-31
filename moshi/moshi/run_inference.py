@@ -93,10 +93,18 @@ def main():
     args = parser.parse_args()
     seed_all(42424242)
 
+    lm_kwargs = None
+    num_codebooks = 8
+    if args.lm_config is not None:
+        log("info", f"loading config from {args.lm_config}")
+        with open(args.lm_config, "r") as fobj:
+            lm_kwargs = json.load(fobj)
+            num_codebooks = lm_kwargs.get("dep_q", num_codebooks)
+
     log("info", "loading mimi")
     if args.mimi_weight is None:
         args.mimi_weight = hf_hub_download(args.hf_repo, loaders.MIMI_NAME)
-    mimi = loaders.get_mimi(args.mimi_weight, args.device)
+    mimi = loaders.get_mimi(args.mimi_weight, args.device, num_codebooks=num_codebooks)
     log("info", "mimi loaded")
 
     if args.tokenizer is None:
@@ -106,10 +114,6 @@ def main():
     log("info", "loading moshi")
     if args.moshi_weight is None:
         args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
-    lm_kwargs = None
-    if args.lm_config is not None:
-        with open(args.lm_config, "r") as fobj:
-            lm_kwargs = json.load(fobj)
     lm = loaders.get_moshi_lm(args.moshi_weight, args.device, lm_kwargs=lm_kwargs)
     log("info", "moshi loaded")
 
