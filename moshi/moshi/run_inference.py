@@ -4,6 +4,7 @@
 
 import argparse
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import random
 import time
@@ -85,6 +86,7 @@ def main():
                              "Use this to select a different pre-trained model.")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size to be used for inference.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
+    parser.add_argument("--lm-config", type=str, help="The LM config as a json file.")
     parser.add_argument("infile", type=str, help="Input audio file.")
     parser.add_argument("outfile", type=str, help="Output audio file in wav format.")
 
@@ -104,7 +106,11 @@ def main():
     log("info", "loading moshi")
     if args.moshi_weight is None:
         args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
-    lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
+    lm_kwargs = None
+    if args.lm_config is not None:
+        with open(args.lm_config, "r") as fobj:
+            lm_kwargs = json.load(fobj)
+    lm = loaders.get_moshi_lm(args.moshi_weight, args.device, lm_kwargs=lm_kwargs)
     log("info", "moshi loaded")
 
     state = InferenceState(mimi, text_tokenizer, lm, args.batch_size, args.device)

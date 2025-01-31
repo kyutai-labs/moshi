@@ -6,6 +6,7 @@ from pathlib import Path
 
 from safetensors.torch import load_model
 import torch
+import typing as tp
 
 from .compression import MimiModel
 from .lm import LMModel
@@ -140,12 +141,15 @@ def get_mimi(filename: str | Path,
 
 
 def get_moshi_lm(filename: str | Path,
-                 device: torch.device | str = 'cpu') -> LMModel:
+                 device: torch.device | str = 'cpu',
+                 lm_kwargs: tp.Optional[tp.Dict] = None) -> LMModel:
     dtype = torch.bfloat16
+    if lm_kwargs is None:
+        lm_kwargs = _lm_kwargs
     model = LMModel(
         device=device,
         dtype=dtype,
-        **_lm_kwargs,
+        **lm_kwargs,
     ).to(device=device, dtype=dtype)
     model.eval()
     if _is_safetensors(filename):
