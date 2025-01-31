@@ -93,11 +93,6 @@ def main():
     args = parser.parse_args()
     seed_all(42424242)
 
-    log("info", f"loading input file {args.infile}")
-    in_pcms, _ = sphn.read(args.infile, sample_rate=24000)
-    in_pcms = torch.from_numpy(in_pcms).to(device=args.device)
-    in_pcms = in_pcms[None, 0:1].expand(args.batch_size, -1, -1)
-
     lm_kwargs = None
     num_codebooks = 8
     if args.lm_config is not None:
@@ -111,6 +106,11 @@ def main():
         args.mimi_weight = hf_hub_download(args.hf_repo, loaders.MIMI_NAME)
     mimi = loaders.get_mimi(args.mimi_weight, args.device, num_codebooks=num_codebooks)
     log("info", "mimi loaded")
+
+    log("info", f"loading input file {args.infile}")
+    in_pcms, _ = sphn.read(args.infile, sample_rate=mimi.sample_rate)
+    in_pcms = torch.from_numpy(in_pcms).to(device=args.device)
+    in_pcms = in_pcms[None, 0:1].expand(args.batch_size, -1, -1)
 
     if args.tokenizer is None:
         args.tokenizer = hf_hub_download(args.hf_repo, loaders.TEXT_TOKENIZER_NAME)
@@ -127,7 +127,7 @@ def main():
     log("info", f"out-pcm: {out_pcms.shape}, out-text: {out_text_tokens.shape}")
 
     if args.batch_size == 1:
-        sphn.write_wav(args.outfile, out_pcms[0, 0].cpu().numpy(), sample_rate=24000)
+        sphn.write_wav(args.outfile, out_pcms[0, 0].cpu().numpy(), sample_rate=mimi.sample_rate)
     else:
         outfile = Path(args.outfile)
         for index in range(args.batch_size):
