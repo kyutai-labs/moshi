@@ -4,7 +4,9 @@
 
 import argparse
 from dataclasses import dataclass
+from pathlib import Path
 import random
+import time
 
 from huggingface_hub import hf_hub_download
 import numpy as np
@@ -51,6 +53,9 @@ class InferenceState:
     def run(self, in_pcms: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         out_pcms = []
         out_text_tokens = []
+        log("info", "starting the inference loop")
+        start_time = time.time()
+        ntokens = 0
         for chunk in in_pcms.split(1920, dim=2):
             if chunk.shape[-1] != 1920:
                 break
@@ -62,6 +67,9 @@ class InferenceState:
             out_pcm = self.mimi.decode(tokens[:, 1:])
             out_text_tokens.append(tokens[:, 0])
             out_pcms.append(out_pcm)
+            ntokens += 1
+        dt = time.time() - start_time
+        log("info", f"processed {ntokens} steps in {dt:.0f}s, {1000 * dt / ntokens:.2f}ms/step")
         out_pcms = torch.cat(out_pcms, dim=2)
         out_text_tokens = torch.cat(out_text_tokens, dim=1)
         return out_pcms, out_text_tokens
@@ -78,6 +86,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size to be used for inference.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
     parser.add_argument("infile", type=str, help="Input audio file.")
+    parser.add_argument("outfile", type=str, help="Output audio file in wav format.")
 
     args = parser.parse_args()
     seed_all(42424242)
@@ -104,6 +113,14 @@ def main():
     in_pcms = in_pcms[None, 0:1].expand(args.batch_size, -1, -1)
     out_pcms, out_text_tokens = state.run(in_pcms)
     log("info", f"out-pcm: {out_pcms.shape}, out-text: {out_text_tokens.shape}")
+    if args.batch_size == 1:
+        sphn.write_wav(args.outfile, out_pcms[0, 0].cpu().numpy(), sample_rate=24000)
+    else:
+        outfile = Path(args.outfile)
+        for index in range(args.batch_size):
+            outfile_ = outfile.with_name(f"{outfile.stem}-{index}{outfile.suffix}")
+            log("info", f"writing {outfile_}")
+            sphn.write_wav(str(outfile_), out_pcms[index, 0].cpu().numpy(), sample_rate=24000)
 
 
 if __name__ == "__main__":
