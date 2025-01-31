@@ -10,7 +10,7 @@ from huggingface_hub import hf_hub_download
 import numpy as np
 import sentencepiece
 import torch
-import torchaudio
+import sphn
 
 
 from .client_utils import make_log
@@ -39,22 +39,21 @@ class InferenceState:
     lm_gen: LMGen
 
     def __init__(self, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
-                 lm: LMModel, device: str | torch.device):
+                 lm: LMModel, batch_size: int, device: str | torch.device):
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
         self.lm_gen = LMGen(lm)
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
-        self.mimi.streaming_forever(1)
-        self.lm_gen.streaming_forever(1)
+        self.mimi.streaming_forever(batch_size)
+        self.lm_gen.streaming_forever(batch_size)
 
     def run(self, in_pcms: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         out_pcms = []
         out_text_tokens = []
-        for chunk in in_pcms.split(1920, dim=1):
-            chunk = torch.from_numpy(chunk)
-            chunk = chunk.to(device=self.device)[None, None]
-            codes = self.mimi.encode(chunk)
+        for chunk in in_pcms.split(1920, dim=2):
+            if chunk.shape[-1] != 1920:
+                break
             codes = self.mimi.encode(chunk)
             tokens = self.lm_gen.step(codes)
             if tokens is None:
@@ -63,7 +62,7 @@ class InferenceState:
             out_pcm = self.mimi.decode(tokens[:, 1:])
             out_text_tokens.append(tokens[:, 0])
             out_pcms.append(out_pcm)
-        out_pcms = torch.cat(out_pcms, dim=1)
+        out_pcms = torch.cat(out_pcms, dim=2)
         out_text_tokens = torch.cat(out_text_tokens, dim=1)
         return out_pcms, out_text_tokens
 
@@ -78,7 +77,7 @@ def main():
                              "Use this to select a different pre-trained model.")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size to be used for inference.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
-    parser.add_argument("in-file", type=str, help="Input audio file.")
+    parser.add_argument("infile", type=str, help="Input audio file.")
 
     args = parser.parse_args()
     seed_all(42424242)
@@ -99,11 +98,12 @@ def main():
     lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
     log("info", "moshi loaded")
 
-    state = InferenceState(mimi, text_tokenizer, lm, args.device)
-    in_pcms, in_sample_rate = torchaudio.load(args.in_file)
-    in_pcms = torchaudio.functional.resample(in_pcms, orig_freq=in_sample_rate, new_freq=24000)
+    state = InferenceState(mimi, text_tokenizer, lm, args.batch_size, args.device)
+    in_pcms, _ = sphn.read(args.infile, sample_rate=24000)
+    in_pcms = torch.from_numpy(in_pcms).to(device=args.device)
+    in_pcms = in_pcms[None, 0:1].expand(args.batch_size, -1, -1)
     out_pcms, out_text_tokens = state.run(in_pcms)
-    print(out_pcms.shape, out_text_tokens.shape)
+    log("info", f"out-pcm: {out_pcms.shape}, out-text: {out_text_tokens.shape}")
 
 
 if __name__ == "__main__":
