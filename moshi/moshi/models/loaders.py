@@ -143,7 +143,8 @@ def get_mimi(filename: str | Path,
 
 def get_moshi_lm(filename: str | Path,
                  device: torch.device | str = 'cpu',
-                 lm_kwargs: tp.Optional[tp.Dict] = None) -> LMModel:
+                 lm_kwargs: tp.Optional[tp.Dict] = None,
+                 strict: bool = False) -> LMModel:
     dtype = torch.bfloat16
     if lm_kwargs is None:
         lm_kwargs = _lm_kwargs
@@ -154,7 +155,7 @@ def get_moshi_lm(filename: str | Path,
     ).to(device=device, dtype=dtype)
     model.eval()
     if _is_safetensors(filename):
-        load_model(model, filename, strict=False)
+        load_model(model, filename, strict=strict)
     else:
         pkg = torch.load(
             filename,
