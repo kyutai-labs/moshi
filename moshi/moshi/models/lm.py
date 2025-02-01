@@ -286,7 +286,9 @@ class LMModel(StreamingContainer):
         text_emb = self.text_emb(input_sequence[:, 0])
         input_ = text_emb if input_ is None else input_ + text_emb
         if self.fuser is not None and condition_tensors is not None:
-            input_, _ = self.fuser(input_, condition_tensors)
+            input_, cross_attention_src = self.fuser(input_, condition_tensors)
+            if cross_attention_src is not None:
+                raise ValueError("cross-attention is not supported")
         transformer_out = self.transformer(input_)
 
         if self.out_norm:
