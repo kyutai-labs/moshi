@@ -9,6 +9,7 @@ import torch
 import typing as tp
 
 from .compression import MimiModel
+from ..conditioners import BaseConditioner, ConditionProvider, ConditionFuser
 from .lm import LMModel
 from ..modules import SEANetEncoder, SEANetDecoder, transformer
 from ..quantization import SplitResidualVectorQuantizer
@@ -144,10 +145,15 @@ def get_mimi(filename: str | Path,
 def get_moshi_lm(filename: str | Path,
                  device: torch.device | str = 'cpu',
                  lm_kwargs: tp.Optional[tp.Dict] = None,
-                 strict: bool = False) -> LMModel:
+                 strict: bool = True) -> LMModel:
     dtype = torch.bfloat16
     if lm_kwargs is None:
         lm_kwargs = _lm_kwargs
+    if "conditioners" in lm_kwargs:
+        lm_kwargs["condition_provider"] = get_conditioner_provider(lm_kwargs["dim"], device, lm_kwargs)
+        del lm_kwargs["conditioners"]
+    if "fuser" in lm_kwargs:
+        lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
     model = LMModel(
         device=device,
         dtype=dtype,
@@ -163,3 +169,33 @@ def get_moshi_lm(filename: str | Path,
         )
         model.load_state_dict(pkg["fsdp_best_state"]["model"])
     return model
+
+
+def get_conditioner(output_dim: int, device: torch.device | str, conditioner_cfg: dict) -> BaseConditioner:
+    conditioner_type = conditioner_cfg["type"]
+    conditioner_kwargs = conditioner_cfg[conditioner_type]
+    conditioner_kwargs.update({'output_dim': output_dim, 'device': device})
+    if conditioner_type == 'lut':
+        from ..conditioners.text import LUTConditioner
+        return LUTConditioner(**conditioner_kwargs)
+    else:
+        raise RuntimeError(f"Unknow conditioner type {conditioner_type}.")
+
+
+def get_conditioner_provider(output_dim: int, device: torch.device | str, cfg: dict) -> ConditionProvider:
+    """Instantiate a conditioning model."""
+    conditioners: tp.Dict[str, BaseConditioner] = {}
+    for cond, cond_cfg in cfg["conditioners"].items():
+        conditioners[cond] = get_conditioner(output_dim, device, cond_cfg)
+    conditioner = ConditionProvider(conditioners, device=device)
+    return conditioner
+
+
+def get_condition_fuser(cfg: dict) -> ConditionFuser:
+    """Instantiate a condition fuser object."""
+    fuser_cfg = cfg["fuser"]
+    fuser_methods = ['sum', 'cross', 'prepend']
+    fuse2cond = {k: fuser_cfg.get(k, []) for k in fuser_methods}
+    kwargs = {k: v for k, v in fuser_cfg.items() if k not in fuser_methods}
+    fuser = ConditionFuser(fuse2cond=fuse2cond, **kwargs)
+    return fuser

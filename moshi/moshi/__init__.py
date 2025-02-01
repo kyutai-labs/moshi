@@ -10,9 +10,10 @@ The code has been adapted from Audiocraft, see LICENSE.audiocraft
 """
 
 # flake8: noqa
-from . import utils
-from . import modules
+from . import conditioners
 from . import models
+from . import modules
 from . import quantization
+from . import utils
 
 __version__ = "0.1.1a1"
