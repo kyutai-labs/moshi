@@ -27,5 +27,14 @@
     "depformer_gating": "silu",
     "depformer_pos_emb": "none",
     "depformer_weights_per_step": true,
-    "delays": [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+    "delays": [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+    "conditioners": {
+        "description": {
+            "type": "lut",
+            "lut": {
+                "n_bins": 31,
+                "dim": 16
+            }
+        }
+    }
 }

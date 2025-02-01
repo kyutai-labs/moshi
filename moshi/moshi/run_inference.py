@@ -135,7 +135,7 @@ def main():
     log("info", "loading moshi")
     if args.moshi_weight is None:
         args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
-    lm = loaders.get_moshi_lm(hf_get(args.moshi_weight), args.device, lm_kwargs=lm_kwargs, strict=False)
+    lm = loaders.get_moshi_lm(hf_get(args.moshi_weight), args.device, lm_kwargs=lm_kwargs)
     log("info", "moshi loaded")
 
     state = InferenceState(mimi, text_tokenizer, lm, args.batch_size, args.device)
