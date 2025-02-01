@@ -17,6 +17,7 @@ import sphn
 
 
 from .client_utils import make_log
+from .conditioners import ConditionAttributes
 from .models import loaders, MimiModel, LMModel, LMGen
 
 
@@ -56,7 +57,12 @@ class InferenceState:
                  lm: LMModel, batch_size: int, device: str | torch.device):
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
-        self.lm_gen = LMGen(lm)
+        condition_tensors = None
+        if lm.condition_provider is not None:
+            conditions = ConditionAttributes(text={"description": "very_good"}, wav={})
+            prepared = lm.condition_provider.prepare([conditions])
+            condition_tensors = lm.condition_provider(prepared)
+        self.lm_gen = LMGen(lm, condition_tensors=condition_tensors)
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
         self.mimi.streaming_forever(batch_size)

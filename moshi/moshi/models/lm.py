@@ -16,7 +16,7 @@ import typing as tp
 import torch
 from torch import nn
 
-from ..conditioners import ConditionProvider, ConditionFuser
+from ..conditioners import ConditionProvider, ConditionFuser, ConditionType
 from ..utils.sampling import sample_token
 from ..utils.compile import CUDAGraphed
 from ..modules.streaming import StreamingContainer, StreamingModule
@@ -27,6 +27,9 @@ from ..modules.transformer import (
 
 
 logger = logging.getLogger(__name__)
+
+
+ConditionTensors = tp.Dict[str, ConditionType]
 
 
 class ScaledEmbedding(nn.Embedding):
@@ -267,6 +270,7 @@ class LMModel(StreamingContainer):
     def forward_text(
         self,
         sequence: torch.Tensor,
+        condition_tensors: tp.Optional[ConditionTensors] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         B, K, S = sequence.shape
         assert (
@@ -281,6 +285,8 @@ class LMModel(StreamingContainer):
             input_ = audio_emb if input_ is None else input_ + audio_emb
         text_emb = self.text_emb(input_sequence[:, 0])
         input_ = text_emb if input_ is None else input_ + text_emb
+        if self.fuser is not None and condition_tensors is not None:
+            input_, _ = self.fuser(input_, condition_tensors)
         transformer_out = self.transformer(input_)
 
         if self.out_norm:
@@ -351,6 +357,7 @@ class LMGen(StreamingModule[_LMGenState]):
         top_k: int = 250,
         top_k_text: int = 25,
         check: bool = False,
+        condition_tensors: tp.Optional[ConditionTensors] = None,
     ):
         assert not lm_model.training, "generation shouldn't be used in training mode."
         super().__init__()
@@ -368,6 +375,7 @@ class LMGen(StreamingModule[_LMGenState]):
         self.delays_cuda = torch.tensor(
             lm_model.delays, device=lm_model.device, dtype=torch.long
         )
+        self.condition_tensors = condition_tensors
 
     def _init_streaming_state(self, batch_size: int) -> _LMGenState:
         lm_model = self.lm_model
@@ -429,7 +437,7 @@ class LMGen(StreamingModule[_LMGenState]):
             assert (input_[:, lm_model.audio_offset :] <= lm_model.card).all(), input_
             assert (input_[:, :1] <= lm_model.text_card).all()
 
-        transformer_out, text_logits = state.graphed_main(input_)
+        transformer_out, text_logits = state.graphed_main(input_, self.condition_tensors)
         # Shape of text_logits should be [B, K_text=1, T=1, Card_text]
         text_token = sample_token(
             text_logits.float(),

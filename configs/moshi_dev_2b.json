@@ -33,7 +33,9 @@
             "type": "lut",
             "lut": {
                 "n_bins": 31,
-                "dim": 16
+                "dim": 16,
+                "tokenizer": "noop",
+                "possible_values": ["very_bad", "bad", "neutral", "good", "very_good"]
             }
         }
     },

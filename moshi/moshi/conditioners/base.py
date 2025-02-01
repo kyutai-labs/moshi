@@ -478,7 +478,7 @@ class ConditionProvider(nn.Module):
         output = {}
         for attribute, inputs in prepared.items():
             condition, mask = self.conditioners[attribute](inputs)
-            output[attribute] = ConditionType(condition.to(self._fsdp_dtype), mask)
+            output[attribute] = ConditionType(condition, mask)
         return output
 
 
