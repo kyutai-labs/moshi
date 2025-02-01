@@ -68,10 +68,15 @@ class InferenceState:
         log("info", "starting the inference loop")
         start_time = time.time()
         ntokens = 0
-        for chunk in in_pcms.split(1920, dim=2):
+        for i, chunk in enumerate(in_pcms.split(1920, dim=2)):
             if chunk.shape[-1] != 1920:
                 break
             codes = self.mimi.encode(chunk)
+            if i == 0:
+                # Ensure that the first slice of codes is properly seen by the transformer
+                # as otherwise the first slice is replaced by the initial tokens.
+                tokens = self.lm_gen.step(codes)
+                assert tokens is None
             tokens = self.lm_gen.step(codes)
             if tokens is None:
                 continue
