@@ -169,7 +169,7 @@ def get_moshi_lm(filename: str | Path,
     return model
 
 
-def get_conditioner(output_dim: int, device: str, conditioner_cfg: dict) -> BaseConditioner:
+def get_conditioner(output_dim: int, device: torch.device | str, conditioner_cfg: dict) -> BaseConditioner:
     conditioner_type = conditioner_cfg["type"]
     conditioner_kwargs = conditioner_cfg[conditioner_type]
     conditioner_kwargs.update({'output_dim': output_dim, 'device': device})
@@ -180,7 +180,7 @@ def get_conditioner(output_dim: int, device: str, conditioner_cfg: dict) -> Base
         raise RuntimeError(f"Unknow conditioner type {conditioner_type}.")
 
 
-def get_conditioner_provider(output_dim: int, device: str, cfg: dict) -> ConditionProvider:
+def get_conditioner_provider(output_dim: int, device: torch.device | str, cfg: dict) -> ConditionProvider:
     """Instantiate a conditioning model."""
     conditioners: tp.Dict[str, BaseConditioner] = {}
     for cond, cond_cfg in cfg["conditioners"].items():

@@ -532,7 +532,7 @@ class ConditionFuser(StreamingModule):
         B, T, _ = input.shape
         print(f"FUSER\n{input}\n{input.shape}")
 
-        if 'offsets' in self._streaming_state:
+        if self._streaming_state is not None and 'offsets' in self._streaming_state:
             first_step = False
             offsets = self._streaming_state['offsets']
         else:
@@ -575,7 +575,7 @@ class ConditionFuser(StreamingModule):
             pos_emb = create_sin_embedding(positions, cross_attention_output.shape[-1]).to(cross_attention_output.dtype)
             cross_attention_output = cross_attention_output + self.cross_attention_pos_emb_scale * pos_emb
 
-        if self._is_streaming:
+        if self._is_streaming and self._streaming_state is not None:
             self._streaming_state['offsets'] = offsets + T
 
         return input, cross_attention_output
