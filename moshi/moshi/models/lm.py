@@ -16,7 +16,7 @@ import typing as tp
 import torch
 from torch import nn
 
-from ..conditioners import ConditionProvider
+from ..conditioners import ConditionProvider, ConditionFuser
 from ..utils.sampling import sample_token
 from ..utils.compile import CUDAGraphed
 from ..modules.streaming import StreamingContainer, StreamingModule
@@ -101,6 +101,7 @@ class LMModel(StreamingContainer):
         existing_text_padding_id: tp.Optional[int] = None,
         context: tp.Optional[int] = None,
         condition_provider: tp.Optional[ConditionProvider] = None,
+        fuser: tp.Optional[ConditionFuser] = None,
         device=None,
         dtype=None,
         **kwargs,
@@ -191,6 +192,7 @@ class LMModel(StreamingContainer):
             [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
         )
         self.condition_provider = condition_provider
+        self.fuser = fuser
 
     @property
     def initial_token_id(self) -> int:

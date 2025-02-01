@@ -15,7 +15,6 @@ import typing as tp
 import torch
 from torch import nn
 
-from ..modules.streaming import StreamingModule
 from ..modules.transformer import create_sin_embedding
 
 
@@ -483,7 +482,7 @@ class ConditionProvider(nn.Module):
         return output
 
 
-class ConditionFuser(StreamingModule):
+class ConditionFuser(nn.Module):
     """Condition fuser handles the logic to combine the different conditions
     to the actual model input.
 
@@ -498,7 +497,7 @@ class ConditionFuser(StreamingModule):
         cross_attention_pos_emb (bool, optional): Use positional embeddings in cross attention.
         cross_attention_pos_emb_scale (int): Scale for positional embeddings in cross attention if used.
     """
-    FUSING_METHODS = ["sum", "streaming_sum", "prepend", "cross"]
+    FUSING_METHODS = ["sum", "prepend", "cross"]
 
     def __init__(self, fuse2cond: tp.Dict[str, tp.List[str]], cross_attention_pos_emb: bool = False,
                  cross_attention_pos_emb_scale: float = 1.0):
@@ -530,16 +529,8 @@ class ConditionFuser(StreamingModule):
                 used for cross-attention or None if no cross attention inputs exist.
         """
         B, T, _ = input.shape
-        print(f"FUSER\n{input}\n{input.shape}")
 
-        if self._streaming_state is not None and 'offsets' in self._streaming_state:
-            first_step = False
-            offsets = self._streaming_state['offsets']
-        else:
-            first_step = True
-            offsets = torch.zeros(1, dtype=torch.long)
-
-        offset = int(offsets.item())
+        first_step = True
         assert set(conditions.keys()).issubset(set(self.cond2fuse.keys())), \
             f"given conditions contain unknown attributes for fuser, " \
             f"expected {self.cond2fuse.keys()}, got {conditions.keys()}"
@@ -548,14 +539,6 @@ class ConditionFuser(StreamingModule):
             op = self.cond2fuse[cond_type]
             if op == 'sum':
                 input += cond
-            elif op == 'streaming_sum':
-                # Pad to represent the initial token.
-                zero_frame = torch.zeros(B, 1, cond.shape[-1]).to(cond.device)
-                if offset >= cond.shape[1]:
-                    # If the offset is greater than the length of the condition, pad with zeros.
-                    input += zero_frame
-                else:
-                    input += cond[:, offset: offset + T]
             elif op == 'prepend':
                 if first_step:
                     input = torch.cat([cond, input], dim=1)
@@ -574,8 +557,5 @@ class ConditionFuser(StreamingModule):
             ).view(1, -1, 1)
             pos_emb = create_sin_embedding(positions, cross_attention_output.shape[-1]).to(cross_attention_output.dtype)
             cross_attention_output = cross_attention_output + self.cross_attention_pos_emb_scale * pos_emb
-
-        if self._is_streaming and self._streaming_state is not None:
-            self._streaming_state['offsets'] = offsets + T
 
         return input, cross_attention_output

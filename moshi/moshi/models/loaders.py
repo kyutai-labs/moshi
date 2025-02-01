@@ -9,7 +9,7 @@ import torch
 import typing as tp
 
 from .compression import MimiModel
-from ..conditioners import BaseConditioner, ConditionProvider
+from ..conditioners import BaseConditioner, ConditionProvider, ConditionFuser
 from .lm import LMModel
 from ..modules import SEANetEncoder, SEANetDecoder, transformer
 from ..quantization import SplitResidualVectorQuantizer
@@ -152,6 +152,8 @@ def get_moshi_lm(filename: str | Path,
     if "conditioners" in lm_kwargs:
         lm_kwargs["condition_provider"] = get_conditioner_provider(lm_kwargs["dim"], device, lm_kwargs)
         del lm_kwargs["conditioners"]
+    if "fuser" in lm_kwargs:
+        lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
     model = LMModel(
         device=device,
         dtype=dtype,
@@ -187,3 +189,13 @@ def get_conditioner_provider(output_dim: int, device: torch.device | str, cfg: d
         conditioners[cond] = get_conditioner(output_dim, device, cond_cfg)
     conditioner = ConditionProvider(conditioners, device=device)
     return conditioner
+
+
+def get_condition_fuser(cfg: dict) -> ConditionFuser:
+    """Instantiate a condition fuser object."""
+    fuser_cfg = cfg["fuser"]
+    fuser_methods = ['sum', 'cross', 'prepend']
+    fuse2cond = {k: fuser_cfg.get(k, []) for k in fuser_methods}
+    kwargs = {k: v for k, v in fuser_cfg.items() if k not in fuser_methods}
+    fuser = ConditionFuser(fuse2cond=fuse2cond, **kwargs)
+    return fuser

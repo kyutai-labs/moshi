@@ -36,5 +36,8 @@
                 "dim": 16
             }
         }
+    },
+    "fuser": {
+        "sum": ["description"]
     }
 }
