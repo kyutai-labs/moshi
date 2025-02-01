@@ -24,6 +24,17 @@ def log(level: str, msg: str):
     print(make_log(level, msg))
 
 
+def hf_get(filename: str) -> str:
+    if filename.startswith("hf://"):
+        parts = filename[5:].split("/")
+        repo_name = parts[0] + "/" + parts[1]
+        filename = "/".join(parts[2:])
+        log("info", f"retrieving {filename} from hf repo {repo_name}")
+        return hf_hub_download(repo_name, filename)
+    else:
+        return filename
+
+
 def seed_all(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -57,10 +68,15 @@ class InferenceState:
         log("info", "starting the inference loop")
         start_time = time.time()
         ntokens = 0
-        for chunk in in_pcms.split(1920, dim=2):
+        for i, chunk in enumerate(in_pcms.split(1920, dim=2)):
             if chunk.shape[-1] != 1920:
                 break
             codes = self.mimi.encode(chunk)
+            if i == 0:
+                # Ensure that the first slice of codes is properly seen by the transformer
+                # as otherwise the first slice is replaced by the initial tokens.
+                tokens = self.lm_gen.step(codes)
+                assert tokens is None
             tokens = self.lm_gen.step(codes)
             if tokens is None:
                 continue
@@ -104,7 +120,7 @@ def main():
     log("info", "loading mimi")
     if args.mimi_weight is None:
         args.mimi_weight = hf_hub_download(args.hf_repo, loaders.MIMI_NAME)
-    mimi = loaders.get_mimi(args.mimi_weight, args.device, num_codebooks=num_codebooks)
+    mimi = loaders.get_mimi(hf_get(args.mimi_weight), args.device, num_codebooks=num_codebooks)
     log("info", "mimi loaded")
 
     log("info", f"loading input file {args.infile}")
@@ -114,12 +130,12 @@ def main():
 
     if args.tokenizer is None:
         args.tokenizer = hf_hub_download(args.hf_repo, loaders.TEXT_TOKENIZER_NAME)
-    text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)  # type: ignore
+    text_tokenizer = sentencepiece.SentencePieceProcessor(hf_get(args.tokenizer))  # type: ignore
 
     log("info", "loading moshi")
     if args.moshi_weight is None:
         args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
-    lm = loaders.get_moshi_lm(args.moshi_weight, args.device, lm_kwargs=lm_kwargs, strict=False)
+    lm = loaders.get_moshi_lm(hf_get(args.moshi_weight), args.device, lm_kwargs=lm_kwargs, strict=False)
     log("info", "moshi loaded")
 
     state = InferenceState(mimi, text_tokenizer, lm, args.batch_size, args.device)
