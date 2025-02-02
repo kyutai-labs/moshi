@@ -93,7 +93,9 @@ class NoopTokenizer(Tokenizer):
                 if self.possible_values is None:
                     output.append(hash_trick(text, self.n_bins))
                 else:
-                    output.append(self.possible_values.get(text, self.pad_idx))
+                    if text not in self.possible_values:
+                        raise ValueError(f"'{text}' is not in possible_values {self.possible_values}")
+                    output.append(self.possible_values[text])
                 lengths.append(1)
 
         tokens = torch.tensor(output).int()[:, None]
