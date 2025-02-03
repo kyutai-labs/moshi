@@ -1,0 +1,45 @@
+{
+    "dim": 2560,
+    "text_card": 48000,
+    "existing_text_padding_id": 3,
+    "n_q": 32,
+    "dep_q": 16,
+    "card": 2048,
+    "num_heads": 20,
+    "num_layers": 24,
+    "hidden_scale": 4.125,
+    "causal": true,
+    "layer_scale": null,
+    "context": 3000,
+    "max_period": 100000,
+    "gating": "silu",
+    "norm": "rms_norm_f32",
+    "positional_embedding": "rope",
+    "depformer_dim": 1024,
+    "depformer_dim_feedforward": 4224,
+    "depformer_num_heads": 16,
+    "depformer_num_layers": 6,
+    "depformer_causal": true,
+    "depformer_layer_scale": null,
+    "depformer_multi_linear": true,
+    "depformer_context": 16,
+    "depformer_max_period": 10000,
+    "depformer_gating": "silu",
+    "depformer_pos_emb": "none",
+    "depformer_weights_per_step": true,
+    "delays": [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+    "conditioners": {
+        "description": {
+            "type": "lut",
+            "lut": {
+                "n_bins": 31,
+                "dim": 16,
+                "tokenizer": "noop",
+                "possible_values": ["very_bad", "bad", "neutral", "good", "very_good"]
+            }
+        }
+    },
+    "fuser": {
+        "sum": ["description"]
+    }
+}

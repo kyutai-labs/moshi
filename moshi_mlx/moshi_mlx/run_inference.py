@@ -3,13 +3,12 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import json
 import numpy as np
 import time
-import typing as tp
 
 from huggingface_hub import hf_hub_download
 import mlx.core as mx
-import mlx.nn as nn
 import rustymimi
 import sentencepiece
 import sphn
@@ -39,6 +38,7 @@ def main():
     parser.add_argument("--moshi-weights", type=str, help="Path to a local checkpoint file for Moshi.")
     parser.add_argument("--mimi-weights", type=str, help="Path to a local checkpoint file for Mimi.")
     parser.add_argument("--hf-repo", type=str, default="kyutai/moshiko-mlx-q4")
+    parser.add_argument("--lm-config", type=str, help="The LM config as a json file.")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("infile", type=str, help="Input audio file.")
     parser.add_argument("outfile", type=str, help="Output audio file in wav format.")
@@ -54,7 +54,7 @@ def main():
     moshi_weights = args.moshi_weights
     if moshi_weights is None:
         moshi_weights = hf_hub_download(
-            args.hf_repo, "model.safetensors"
+            args.hf_repo, "model.q4.safetensors"
         )
     moshi_weights = hf_get(moshi_weights)
 
@@ -66,10 +66,16 @@ def main():
     tokenizer = hf_get(tokenizer)
 
     mx.random.seed(299792458)
-    lm_config = models.config_v0_1()
+    if args.lm_config is not None:
+        log("info", f"loading config from {args.lm_config}")
+        with open(args.lm_config, "r") as fobj:
+            lm_config = json.load(fobj)
+    else:
+        lm_config = models.config_v0_1()
+
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
-    #if args.quantize_bits is not None:
+    # if args.quantize_bits is not None:
     #    nn.quantize(model, bits=args.quantize_bits, group_size=args.quantize_group_size)
 
     log("info", f"loading model weights from {moshi_weights}")
@@ -125,4 +131,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
