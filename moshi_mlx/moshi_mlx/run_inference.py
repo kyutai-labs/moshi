@@ -38,7 +38,7 @@ def main():
     parser.add_argument("--tokenizer", type=str)
     parser.add_argument("--moshi-weights", type=str, help="Path to a local checkpoint file for Moshi.")
     parser.add_argument("--mimi-weights", type=str, help="Path to a local checkpoint file for Mimi.")
-    parser.add_argument("--hf-repo", type=str, default="kyutai/moshiko-mlx-q4")
+    parser.add_argument("--hf-repo", type=str, default="kyutai/moshiko-mlx-q8")
     parser.add_argument("--lm-config", type=str, help="The LM config as a json file.")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("infile", type=str, help="Input audio file.")
@@ -55,7 +55,7 @@ def main():
     moshi_weights = args.moshi_weights
     if moshi_weights is None:
         moshi_weights = hf_hub_download(
-            args.hf_repo, "model.q4.safetensors"
+            args.hf_repo, "model.q8.safetensors"
         )
     moshi_weights = hf_get(moshi_weights)
 
@@ -78,6 +78,8 @@ def main():
     model.set_dtype(mx.bfloat16)
     if moshi_weights.endswith(".q4.safetensors"):
         nn.quantize(model, bits=4, group_size=32)
+    elif moshi_weights.endswith(".q8.safetensors"):
+        nn.quantize(model, bits=8, group_size=64)
 
     log("info", f"loading model weights from {moshi_weights}")
     model.load_weights(moshi_weights, strict=True)
