@@ -9,6 +9,7 @@ import time
 
 from huggingface_hub import hf_hub_download
 import mlx.core as mx
+import mlx.nn as nn
 import rustymimi
 import sentencepiece
 import sphn
@@ -75,8 +76,8 @@ def main():
 
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
-    # if args.quantize_bits is not None:
-    #    nn.quantize(model, bits=args.quantize_bits, group_size=args.quantize_group_size)
+    if moshi_weights.endswith(".q4.safetensors"):
+        nn.quantize(model, bits=4, group_size=32)
 
     log("info", f"loading model weights from {moshi_weights}")
     model.load_weights(moshi_weights, strict=True)
@@ -87,8 +88,8 @@ def main():
     log("info", f"loading input file {args.infile}")
     in_pcms, _ = sphn.read(args.infile, sample_rate=24000)
 
-    log("info", f"loading the audio tokenizer {args.mimi_weights}")
-    audio_tokenizer = rustymimi.Tokenizer(args.mimi_weights)  # type: ignore
+    log("info", f"loading the audio tokenizer {mimi_weights}")
+    audio_tokenizer = rustymimi.Tokenizer(mimi_weights)  # type: ignore
 
     log("info", "warming up the model")
     model.warmup()
