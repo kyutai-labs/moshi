@@ -5,22 +5,32 @@ from safetensors.torch import save_file
 import torch
 
 
-def import_model(in_path: Path, out_path: Path) -> None:
+def import_model(in_path: Path, max_out_n_q, out_path: Path) -> None:
     pkg = torch.load(in_path, map_location=torch.device("cpu"))
     tch_model = pkg["fsdp_best_state"]["model"]
 
-    n_q: int | None = None
+    in_n_q: int | None = None
     for idx in range(999):
         name = f"emb.{idx}.weight"
         if name not in tch_model:
-            n_q = idx
+            in_n_q = idx
             break
-    assert n_q is not None
+    out_n_q: int | None = None
+    for idx in range(999):
+        name = f"depformer_in.{idx}.weight"
+        if name not in tch_model:
+            out_n_q = idx
+            break
+    assert in_n_q is not None
+    assert out_n_q is not None
 
     model = {}
     for name in ["text_emb.weight", "text_linear.weight", "out_norm.alpha"]:
         model[name] = tch_model[name]
-    for idx in range(n_q):
+    for name in tch_model.keys():
+        if name.startswith("condition_provider.conditioners"):
+            model[name] = tch_model[name]
+    for idx in range(in_n_q):
         name = f"emb.{idx}.weight"
         model[name] = tch_model[name]
 
@@ -28,9 +38,14 @@ def import_model(in_path: Path, out_path: Path) -> None:
         if k.startswith("transformer"):
             model[k] = v
 
-    n_q_main = 8
-    print(f"only exporting the first {n_q_main}/{n_q} depformer layers")
-    for idx in range(n_q_main):
+    if max_out_n_q is not None:
+        exported_out_n_q = min(max_out_n_q, out_n_q)
+        print(f"only exporting the first {exported_out_n_q} depformer layers")
+    else:
+        print(f"exporting all {out_n_q} depformer layers")
+        exported_out_n_q = out_n_q
+
+    for idx in range(exported_out_n_q):
         base = f"depformer.{idx}."
         model[base + "linear_in.weight"] = tch_model[f"depformer_in.{idx}.weight"]
         model[base + "linear_out.weight"] = tch_model[f"linears.{idx}.weight"]
@@ -44,12 +59,12 @@ def import_model(in_path: Path, out_path: Path) -> None:
             # WARNING: note that this uses in_proj_weight vs out_proj.weight
             model[layer + "self_attn.in_proj_weight"] = (
                 tch_model[f"depformer.layers.{layer_idx}.self_attn.in_proj_weight"]
-                .chunk(n_q)[idx]
+                .chunk(out_n_q)[idx]
                 .clone()
             )
             model[layer + "self_attn.out_proj.weight"] = (
                 tch_model[f"depformer.layers.{layer_idx}.self_attn.out_proj.weight"]
-                .chunk(n_q)[idx]
+                .chunk(out_n_q)[idx]
                 .clone()
             )
             model[layer + "norm1.alpha"] = tch_model[
@@ -74,6 +89,11 @@ def main():
     )
     parser.add_argument("checkpoint", help="The checkpoint to be imported.")
     parser.add_argument("out", help="The safetensors out file.")
+    parser.add_argument(
+        "--max-out-n-q",
+        type=int,
+        help="limit the number of depformer layers that are exported",
+    )
     args = parser.parse_args()
 
     out_path = Path(args.out)
@@ -81,7 +101,7 @@ def main():
     if out_path.exists():
         print("file already exists")
     else:
-        import_model(args.checkpoint, out_path)
+        import_model(args.checkpoint, args.max_out_n_q, out_path)
     print(out_path)
 
 
