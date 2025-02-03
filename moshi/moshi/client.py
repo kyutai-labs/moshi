@@ -162,7 +162,7 @@ async def run(printer: AnyPrinter, args):
             without_proto = args.url
         uri = f"{proto}://{without_proto}/api/chat"
 
-    printer.log("info", "Connecting to {uri}.")
+    printer.log("info", f"Connecting to {uri}.")
     async with aiohttp.ClientSession() as session:
         async with session.ws_connect(uri) as ws:
             printer.log("info", "connected!")
