@@ -170,7 +170,7 @@ class Lm(nn.Module):
 
     def warmup(self):
         text, audio = self.sample(
-            mx.array([[32000]]),
+            mx.array([[self.cfg.text_out_vocab_size]]),
             [mx.array([[0]])] * 8,
             0,
             text_sampler=sampling.Sampler(),
@@ -195,7 +195,7 @@ def config1b_202412() -> LmConfig:
         bias_ff=False,
         bias_attn=False,
         layer_scale=None,
-        context=750,
+        context=3000,
         max_period=100000,
         use_conv_block=False,
         use_conv_bias=True,
@@ -241,7 +241,7 @@ def config1b_202412() -> LmConfig:
         text_in_vocab_size=48001,
         text_out_vocab_size=48000,
         audio_codebooks=16,
-        audio_delays=([0] + [1] * 7) * 2,
+        audio_delays=([0] + [2] * 7) * 2,
     )
 
 
@@ -256,7 +256,7 @@ def config1b_202412_16rvq() -> LmConfig:
         bias_ff=False,
         bias_attn=False,
         layer_scale=None,
-        context=750,
+        context=3000,
         max_period=100000,
         use_conv_block=False,
         use_conv_bias=True,
@@ -302,7 +302,7 @@ def config1b_202412_16rvq() -> LmConfig:
         text_in_vocab_size=48001,
         text_out_vocab_size=48000,
         audio_codebooks=32,
-        audio_delays=([0] + [1] * 15) * 2,
+        audio_delays=([0] + [2] * 15) * 2,
     )
 
 

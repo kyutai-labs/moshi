@@ -56,7 +56,7 @@ class LmGen:
             raise ValueError(f"reached max-steps {self.max_steps}")
 
         if self.step_idx == 0:
-            text_tokens = mx.array([[32000]])
+            text_tokens = mx.array([[self.model.cfg.text_out_vocab_size]])
         else:
             text_tokens = self.gen_sequence[:, 0, self.step_idx - 1][None]
         self.gen_sequence[:, 1 + self.main_codebooks :, self.step_idx] = (
