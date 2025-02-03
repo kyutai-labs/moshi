@@ -72,7 +72,7 @@ def main():
         with open(args.lm_config, "r") as fobj:
             lm_config = json.load(fobj)
     else:
-        lm_config = models.config_v0_1()
+        lm_config = models.config1b_202412()
 
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
@@ -108,10 +108,12 @@ def main():
 
     all_out_pcm = []
     start_time = time.time()
-    for idx in range(0, steps // 1920):
-        other_audio_tokens = audio_tokenizer.encode_step(in_pcms[idx * 1920:(idx + 1) * 1920])
+    log("info", f"steps to run: {steps}")
+    for idx in range(0, steps):
+        pcm_data = in_pcms[:, idx * 1920:(idx + 1) * 1920]
+        other_audio_tokens = audio_tokenizer.encode_step(pcm_data[None])
         other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[:, :, :8]
-        text_token = gen.step(other_audio_tokens)
+        text_token = gen.step(other_audio_tokens[0])
         text_token = text_token[0].item()
         audio_tokens = gen.last_audio_tokens()
         _text = None
