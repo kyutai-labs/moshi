@@ -107,6 +107,7 @@ class ServerState:
 
         async def opus_loop():
             all_pcm_data = None
+            skip_frames = 1
 
             while True:
                 if close:
@@ -126,6 +127,13 @@ class ServerState:
                     chunk = torch.from_numpy(chunk)
                     chunk = chunk.to(device=self.device)[None, None]
                     codes = self.mimi.encode(chunk)
+                    if skip_frames:
+                        # The first input audio frame is ignored, as from the point of
+                        # view of the model it is in the past. We still `mimi.encode` for simplicity,
+                        # however as the first encoded frame has a specific structure (due to the left padding),
+                        # we reset the streaming state of the encoder to reapply the padding on the next call.
+                        self.mimi.reset_streaming()
+                        skip_frames -= 1
                     for c in range(codes.shape[-1]):
                         tokens = self.lm_gen.step(codes[:, :, c: c + 1])
                         if tokens is None:
