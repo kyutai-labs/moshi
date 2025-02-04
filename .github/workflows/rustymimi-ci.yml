@@ -40,7 +40,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter --manifest-path rust/mimi-pyo3/Cargo.toml
+          args: --release --out dist --interpreter '3.8 3.9 3.10 3.11 3.12 3.13' --manifest-path rust/mimi-pyo3/Cargo.toml
           sccache: 'true'
           manylinux: auto
       - name: Upload wheels
@@ -72,7 +72,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter --manifest-path rust/mimi-pyo3/Cargo.toml
+          args: --release --out dist --interpreter '3.8 3.9 3.10 3.11 3.12 3.13' --manifest-path rust/mimi-pyo3/Cargo.toml
           sccache: 'true'
           manylinux: musllinux_1_2
       - name: Upload wheels
@@ -101,7 +101,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter --manifest-path rust/mimi-pyo3/Cargo.toml
+          args: --release --out dist --interpreter '3.8 3.9 3.10 3.11 3.12 3.13' --manifest-path rust/mimi-pyo3/Cargo.toml
           sccache: 'true'
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -128,7 +128,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter --manifest-path rust/mimi-pyo3/Cargo.toml
+          args: --release --out dist --interpreter '3.8 3.9 3.10 3.11 3.12 3.13' --manifest-path rust/mimi-pyo3/Cargo.toml
           sccache: 'true'
       - name: Upload wheels
         uses: actions/upload-artifact@v4
