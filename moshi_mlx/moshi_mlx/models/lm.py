@@ -28,6 +28,67 @@ class LmConfig:
     audio_codebooks: int
     audio_delays: list[int]
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "LmConfig":
+        transformer = TransformerConfig(
+            d_model=data["dim"],
+            num_heads=data["num_heads"],
+            num_layers=data["num_layers"],
+            dim_feedforward=4 * data["dim"],
+            causal=data["causal"],
+            norm_first=True,
+            bias_ff=False,
+            bias_attn=False,
+            layer_scale=data["layer_scale"],
+            context=data["context"],
+            max_period=data["max_period"],
+            use_conv_block=False,
+            use_conv_bias=True,
+            cross_attention=False,
+            gating=True,
+            norm="rms_norm",
+            positional_embedding=data["positional_embedding"],
+            conv_layout=False,
+            conv_kernel_size=3,
+            kv_repeat=1,
+            max_seq_len=4096,
+        )
+        depformer = DepFormerConfig(
+            transformer=TransformerConfig(
+                d_model=data["depformer_dim"],
+                num_heads=data["depformer_num_heads"],
+                num_layers=data["depformer_num_layers"],
+                dim_feedforward=data["depformer_dim_feedforward"],
+                causal=data["depformer_causal"],
+                norm_first=True,
+                bias_ff=False,
+                bias_attn=data["depformer_layer_scale"],
+                layer_scale=None,
+                context=data["depformer_context"],
+                max_period=data["depformer_max_period"],
+                use_conv_block=False,
+                use_conv_bias=True,
+                cross_attention=False,
+                gating=True,
+                norm="rms_norm",
+                positional_embedding=data["depformer_pos_emb"],
+                conv_layout=False,
+                conv_kernel_size=3,
+                kv_repeat=1,
+                max_seq_len=4096,
+            ),
+            num_slices=data["dep_q"],
+        )
+        return LmConfig(
+            transformer=transformer,
+            depformer=depformer,
+            text_in_vocab_size=data["text_card"] + 1,
+            text_out_vocab_size=data["text_card"],
+            audio_vocab_size=data["card"] + 1,
+            audio_delays=data["delays"][1:],  # the first delay is for the text token.
+            audio_codebooks=data["n_q"],
+        )
+
     @property
     def audio_eos_token(self) -> int:
         return self.audio_vocab_size - 2
