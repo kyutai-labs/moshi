@@ -1,3 +1,9 @@
+# Copyright (c) Kyutai, all rights reserved.
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+"""Convert a repo into a quantized one (PyTorch only). Need to run from a GPU."""
+
+
 import argparse
 from pathlib import Path
 import tempfile
@@ -17,7 +23,7 @@ def main():
     token = open('token.txt').read().strip()
     api = HfApi(token=token)
     repo = args.moshi_repo
-    new_repo = repo.rsplit('-', 1)[0] + '-q8-tmp'
+    new_repo = repo.rsplit('-', 1)[0] + '-q8'
     if not api.repo_exists(new_repo):
         api.create_repo(new_repo, repo_type='model')
         print("Repo created.")

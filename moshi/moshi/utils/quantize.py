@@ -1,3 +1,16 @@
+# Copyright (c) Kyutai, all rights reserved.
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Quantization based on bitsandbytes, supporting only 8 bits for now.
+We are taking from freedom from the intended use of bnb:
+
+- we are not replacing Linear with Linear8bitLt, but rely instead of the explicit use
+    of the `linear(module, x)` function.
+- for multi linears (e.g. per timestep weights in the Depth Transformer), we instead use the
+    `multi_linear` function.
+"""
+
 import bitsandbytes as bnb
 from bitsandbytes import functional as bnbF
 import torch
