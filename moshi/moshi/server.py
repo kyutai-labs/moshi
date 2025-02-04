@@ -23,7 +23,6 @@ import torch
 
 
 from .client_utils import make_log
-from .modules.transformer import quantize_transformer
 from .models import loaders, MimiModel, LMModel, LMGen
 
 
@@ -179,7 +178,6 @@ def main():
     parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
     parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
     parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
-    parser.add_argument("--quantize", action="store_true", help="Run with int8 weight and activations.")
     parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO,
                         help="HF repo to look into, defaults Moshiko. "
                              "Use this to select a different pre-trained model.")
@@ -226,10 +224,6 @@ def main():
         args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
     lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
     log("info", "moshi loaded")
-    if args.quantize:
-        # This will quantize a bf16 model, and a noop if already loaded from q8.
-        quantize_transformer(lm)
-        log("info", "moshi quantizated")
 
     state = ServerState(mimi, text_tokenizer, lm, args.device)
     log("info", "warming up the model")
