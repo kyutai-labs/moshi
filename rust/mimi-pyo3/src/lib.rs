@@ -6,6 +6,7 @@ use pyo3::prelude::*;
 
 use ::moshi as mm;
 use mm::{candle, candle_nn, conv, mimi, seanet, transformer};
+use std::sync::{mpsc, Mutex};
 
 trait PyRes<R> {
     #[allow(unused)]
@@ -140,8 +141,8 @@ impl Tokenizer {
                 codes.to_vec3::<u32>()
             })
             .w()?;
-        let codes = numpy::PyArray3::from_vec3_bound(py, &codes)?;
-        Ok(codes.into_py(py))
+        let codes = numpy::PyArray3::from_vec3(py, &codes)?;
+        Ok(codes.into_any().unbind())
     }
 
     fn encode_step(&mut self, pcm_data: numpy::PyReadonlyArray3<f32>) -> PyResult<PyObject> {
@@ -165,8 +166,8 @@ impl Tokenizer {
             .w()?;
         match codes {
             Some(codes) => {
-                let codes = numpy::PyArray3::from_vec3_bound(py, &codes)?;
-                Ok(codes.into_py(py))
+                let codes = numpy::PyArray3::from_vec3(py, &codes)?;
+                Ok(codes.into_any().unbind())
             }
             None => Ok(py.None()),
         }
@@ -186,8 +187,8 @@ impl Tokenizer {
                 pcm.to_vec3::<f32>()
             })
             .w()?;
-        let pcm = numpy::PyArray3::from_vec3_bound(py, &pcm)?;
-        Ok(pcm.into_py(py))
+        let pcm = numpy::PyArray3::from_vec3(py, &pcm)?;
+        Ok(pcm.into_any().unbind())
     }
 
     fn decode_step(
@@ -216,8 +217,8 @@ impl Tokenizer {
             .w()?;
         match pcm {
             Some(pcm) => {
-                let pcm = numpy::PyArray3::from_vec3_bound(py, &pcm)?;
-                Ok(pcm.into_py(py))
+                let pcm = numpy::PyArray3::from_vec3(py, &pcm)?;
+                Ok(pcm.into_any().unbind())
             }
             None => Ok(py.None()),
         }
@@ -232,10 +233,10 @@ impl Tokenizer {
 struct StreamTokenizer {
     #[allow(unused)]
     dtype: candle::DType,
-    encoder_rx: std::sync::mpsc::Receiver<Vec<Vec<u32>>>,
-    encoder_tx: std::sync::mpsc::Sender<Vec<f32>>,
-    decoder_rx: std::sync::mpsc::Receiver<Vec<f32>>,
-    decoder_tx: std::sync::mpsc::Sender<Vec<Vec<u32>>>,
+    encoder_rx: Mutex<mpsc::Receiver<Vec<Vec<u32>>>>,
+    encoder_tx: mpsc::Sender<Vec<f32>>,
+    decoder_rx: Mutex<mpsc::Receiver<Vec<f32>>>,
+    decoder_tx: mpsc::Sender<Vec<Vec<u32>>>,
 }
 
 #[pymethods]
@@ -255,10 +256,10 @@ impl StreamTokenizer {
         let cfg = mimi_cfg(max_seq_len);
         let mut e_mimi = mimi::Mimi::new(cfg, vb).w()?;
         let mut d_mimi = e_mimi.clone();
-        let (encoder_tx, e_rx) = std::sync::mpsc::channel::<Vec<f32>>();
-        let (decoder_tx, d_rx) = std::sync::mpsc::channel::<Vec<Vec<u32>>>();
-        let (d_tx, decoder_rx) = std::sync::mpsc::channel::<Vec<f32>>();
-        let (e_tx, encoder_rx) = std::sync::mpsc::channel::<Vec<Vec<u32>>>();
+        let (encoder_tx, e_rx) = mpsc::channel::<Vec<f32>>();
+        let (decoder_tx, d_rx) = mpsc::channel::<Vec<Vec<u32>>>();
+        let (d_tx, decoder_rx) = mpsc::channel::<Vec<f32>>();
+        let (e_tx, encoder_rx) = mpsc::channel::<Vec<Vec<u32>>>();
         std::thread::spawn(move || {
             while let Ok(pcm_data) = e_rx.recv() {
                 // Can't wait for try blocks to be a thing
@@ -293,7 +294,13 @@ impl StreamTokenizer {
                 }
             }
         });
-        Ok(Self { dtype, encoder_rx, encoder_tx, decoder_rx, decoder_tx })
+        Ok(Self {
+            dtype,
+            encoder_rx: Mutex::new(encoder_rx),
+            encoder_tx,
+            decoder_rx: Mutex::new(decoder_rx),
+            decoder_tx,
+        })
     }
 
     fn encode(&mut self, pcm_data: numpy::PyReadonlyArray1<f32>) -> PyResult<()> {
@@ -314,28 +321,28 @@ impl StreamTokenizer {
     }
 
     fn get_encoded(&mut self, py: Python) -> PyResult<PyObject> {
-        match self.encoder_rx.try_recv() {
+        match self.encoder_rx.lock().unwrap().try_recv() {
             Ok(codes) => {
-                let codes = numpy::PyArray2::from_vec2_bound(py, &codes)?;
-                Ok(codes.into_py(py))
+                let codes = numpy::PyArray2::from_vec2(py, &codes)?;
+                Ok(codes.into_any().unbind())
             }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            Err(mpsc::TryRecvError::Disconnected) => {
                 py_bail!("worker thread disconnected")
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => Ok(py.None()),
+            Err(mpsc::TryRecvError::Empty) => Ok(py.None()),
         }
     }
 
     fn get_decoded(&mut self, py: Python) -> PyResult<PyObject> {
-        match self.decoder_rx.try_recv() {
+        match self.decoder_rx.lock().unwrap().try_recv() {
             Ok(pcm) => {
-                let pcm = numpy::PyArray1::from_vec_bound(py, pcm);
-                Ok(pcm.into_py(py))
+                let pcm = numpy::PyArray1::from_vec(py, pcm);
+                Ok(pcm.into_any().unbind())
             }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            Err(mpsc::TryRecvError::Disconnected) => {
                 py_bail!("worker thread disconnected")
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => Ok(py.None()),
+            Err(mpsc::TryRecvError::Empty) => Ok(py.None()),
         }
     }
 }
