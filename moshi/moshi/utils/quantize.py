@@ -11,13 +11,12 @@ We are taking from freedom from the intended use of bnb:
     `multi_linear` function.
 """
 
-import bitsandbytes as bnb
-from bitsandbytes import functional as bnbF
 import torch
 from torch import nn
 
 
 def linear(module: nn.Module, x: torch.Tensor, name='weight') -> torch.Tensor:
+    import bitsandbytes as bnb  # type: ignore
     if is_quantized(module, name):
         state = bnb.MatmulLtState()
         state.CB = getattr(module, name)
@@ -44,6 +43,7 @@ def multi_linear(num_linear: int, module: nn.Module, x: torch.Tensor, offset: in
         offset (int): offset for the current time step, in particular for decoding, with
             time steps provided one by one.
     """
+    import bitsandbytes as bnb  # type: ignore
     B, T, C = x.shape
     ys: list[torch.Tensor] = []
     if is_quantized(module, name):
@@ -83,6 +83,7 @@ def is_quantized(module: nn.Module, name: str = 'weight'):
 
 
 def quantize_param(module: nn.Module, name: str = 'weight') -> None:
+    from bitsandbytes import functional as bnbF  # type: ignore
     if is_quantized(module, name):
         # Due to model casting, the type of SCB might be wrong, althought
         # that would only happen during the init. Let's recast it to float.
