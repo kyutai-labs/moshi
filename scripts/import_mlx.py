@@ -40,9 +40,6 @@ def import_model(
     model = {}
     for name in ["text_emb.weight", "text_linear.weight"]:
         model[name] = tch_model[name]
-    for name in tch_model.keys():
-        if name.startswith("condition_provider.conditioners"):
-            model[name] = tch_model[name]
     model["out_norm.weight"] = tch_model["out_norm.alpha"][0, 0]
     for idx in range(in_n_q):
         src_name = f"emb.{idx}.weight"
