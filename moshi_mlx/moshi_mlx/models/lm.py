@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import mlx.core as mx
 import mlx.nn as nn
 
+from ..modules.conditioner import LutConditionerConfig
 from ..modules.kv_cache import KVCache, RotatingKVCache
 from ..modules.transformer import Transformer, TransformerConfig
 from ..utils import sampling
@@ -27,6 +28,7 @@ class LmConfig:
     audio_vocab_size: int
     audio_codebooks: int
     audio_delays: list[int]
+    conditioners: dict[str, LutConditionerConfig]
 
     @classmethod
     def from_dict(cls, data: dict) -> "LmConfig":
@@ -79,6 +81,19 @@ class LmConfig:
             ),
             num_slices=data["dep_q"],
         )
+        conditioners = {}
+        if "conditioners" in data:
+            for _name, _cfg in data["conditioners"].items():
+                if _cfg["type"] != "lut":
+                    raise ValueError(f"unsupported conditioner type {_cfg['type']}")
+                _cfg = _cfg["lut"]
+                _cfg = LutConditionerConfig(
+                    n_bins=_cfg["n_bins"],
+                    dim=_cfg["dim"],
+                    tokenizer=_cfg["tokenizer"],
+                    possible_values=_cfg["possible_values"],
+                )
+                conditioners[_name] = _cfg
         return LmConfig(
             transformer=transformer,
             depformer=depformer,
@@ -87,6 +102,7 @@ class LmConfig:
             audio_vocab_size=data["card"] + 1,
             audio_delays=data["delays"][1:],  # the first delay is for the text token.
             audio_codebooks=data["n_q"],
+            conditioners=conditioners,
         )
 
     @property
@@ -303,6 +319,7 @@ def config1b_202412() -> LmConfig:
         text_out_vocab_size=48000,
         audio_codebooks=16,
         audio_delays=([0] + [2] * 7) * 2,
+        conditioners={},
     )
 
 
@@ -364,6 +381,7 @@ def config1b_202412_16rvq() -> LmConfig:
         text_out_vocab_size=48000,
         audio_codebooks=32,
         audio_delays=([0] + [2] * 15) * 2,
+        conditioners={},
     )
 
 
@@ -425,6 +443,7 @@ def config_v0_1() -> LmConfig:
         text_out_vocab_size=32000,
         audio_codebooks=16,
         audio_delays=([0] + [1] * 7) * 2,
+        conditioners={},
     )
 
 
@@ -464,4 +483,5 @@ def config_helium_1_preview_2b() -> LmConfig:
         text_out_vocab_size=48000,
         audio_codebooks=0,
         audio_delays=[],
+        conditioners={},
     )
