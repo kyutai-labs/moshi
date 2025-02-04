@@ -6,7 +6,7 @@ dependencies = [
     "numpy >= 1.26, < 2.2",
     "safetensors >= 0.4.0, < 0.5",
     "huggingface-hub >= 0.24, < 0.25",
-    "bitsandbytes >= 0.45, < 0.46",
+    "bitsandbytes >= 0.45, < 0.46; sys_platform == 'linux'",
     "einops == 0.7",
     "sentencepiece == 0.2",
     "sounddevice == 0.5",

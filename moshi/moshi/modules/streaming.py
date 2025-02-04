@@ -82,12 +82,17 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
 
     def _start_streaming(self, batch_size: int):
         def _start_streaming(name: str, module: StreamingModule):
+            assert module._streaming_state is None, f"Module {name} is already streaming!"
             module._streaming_state = module._init_streaming_state(batch_size)
+            if hasattr(module._streaming_state, '__enter__'):
+                module._streaming_state.__enter__()  # type: ignore
 
         self._apply_named_streaming(_start_streaming)
 
     def _stop_streaming(self):
         def _stop_streaming(name: str, module: StreamingModule):
+            if module._streaming_state is not None and hasattr(module._streaming_state, '__exit__'):
+                module._streaming_state.__exit__(None, None, None)  # type: ignore
             module._streaming_state = None
 
         self._apply_named_streaming(_stop_streaming)

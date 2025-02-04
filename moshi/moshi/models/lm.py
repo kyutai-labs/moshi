@@ -8,7 +8,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from dataclasses import dataclass
+from contextlib import ExitStack
+from dataclasses import dataclass, field
 from functools import partial
 import logging
 import typing as tp
@@ -16,7 +17,7 @@ import typing as tp
 import torch
 from torch import nn
 
-from ..conditioners import ConditionProvider, ConditionFuser, ConditionType
+from ..conditioners import ConditionProvider, ConditionFuser, ConditionTensors, ClassifierFreeGuidanceDropout
 from ..utils.sampling import sample_token
 from ..utils.compile import CUDAGraphed
 from ..utils import quantize
@@ -29,9 +30,6 @@ from ..modules.transformer import (
 
 
 logger = logging.getLogger(__name__)
-
-
-ConditionTensors = tp.Dict[str, ConditionType]
 
 
 class ScaledEmbedding(nn.Embedding):
@@ -277,8 +275,7 @@ class LMModel(StreamingContainer):
 
     def forward_text(
         self,
-        sequence: torch.Tensor,
-        condition_tensors: tp.Optional[ConditionTensors] = None,
+        sequence: torch.Tensor, sum_condition: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         B, K, S = sequence.shape
         assert (
@@ -293,10 +290,8 @@ class LMModel(StreamingContainer):
             input_ = audio_emb if input_ is None else input_ + audio_emb
         text_emb = self.text_emb(input_sequence[:, 0])
         input_ = text_emb if input_ is None else input_ + text_emb
-        if self.fuser is not None and condition_tensors is not None:
-            input_, cross_attention_src = self.fuser(input_, condition_tensors)
-            if cross_attention_src is not None:
-                raise ValueError("cross-attention is not supported")
+        if sum_condition is not None:
+            input_ = input_ + sum_condition
         transformer_out = self.transformer(input_)
 
         if self.out_norm:
@@ -347,11 +342,15 @@ class LMModel(StreamingContainer):
 
 @dataclass
 class _LMGenState:
+    batch_size: int
     cache: torch.Tensor
     initial: torch.Tensor
     graphed_main: CUDAGraphed
     graphed_depth: CUDAGraphed
+    condition_sum: torch.Tensor | None = None
     offset: int = 0
+    has_cfg: bool = False
+    exit_stack: ExitStack = field(default_factory=ExitStack)
 
     def reset(self):
         self.offset = 0
@@ -366,18 +365,22 @@ class LMGen(StreamingModule[_LMGenState]):
         temp_text: float = 0.7,
         top_k: int = 250,
         top_k_text: int = 25,
+        cfg_coef: float = 1.,
         check: bool = False,
-        condition_tensors: tp.Optional[ConditionTensors] = None,
+        condition_tensors: ConditionTensors | None = None,
+        null_condition_tensors: ConditionTensors | None = None,
     ):
         assert not lm_model.training, "generation shouldn't be used in training mode."
         super().__init__()
 
         self.lm_model = lm_model
+        self.lm_model.set_streaming_detached(True)
         self.use_sampling = use_sampling
         self.temp = temp
         self.temp_text = temp_text
         self.top_k = top_k
         self.top_k_text = top_k_text
+        self.cfg_coef = cfg_coef
         self.check = check
         self.max_delay = max(
             lm_model.delays
@@ -386,6 +389,12 @@ class LMGen(StreamingModule[_LMGenState]):
             lm_model.delays, device=lm_model.device, dtype=torch.long
         )
         self.condition_tensors = condition_tensors
+        self.null_condition_tensors = null_condition_tensors
+        if self.cfg_coef != 1.:
+            assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
+            assert self.condition_tensors, "Missing condition tensors for CFG."
+            if self.null_condition_tensors is None:
+                self.null_condition_tensors = ClassifierFreeGuidanceDropout(1.)(self.condition_tensors)
 
     def _init_streaming_state(self, batch_size: int) -> _LMGenState:
         lm_model = self.lm_model
@@ -397,11 +406,20 @@ class LMGen(StreamingModule[_LMGenState]):
             dtype=torch.long,
         )
 
+        if self.lm_model.fuser is None:
+            assert not self.condition_tensors
+            condition_sum = None
+        else:
+            assert self.condition_tensors is not None
+            condition_sum = self.lm_model.fuser.get_sum(self.condition_tensors)
+
         disable = lm_model.device.type != 'cuda'
         graphed_main = CUDAGraphed(lm_model.forward_text, disable=disable)
         graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
 
-        return _LMGenState(cache, initial, graphed_main, graphed_depth)
+        return _LMGenState(
+            cache, initial, graphed_main, graphed_depth,
+            condition_sum=condition_sum)
 
     @torch.no_grad()
     def step(self, input_tokens: torch.Tensor) -> torch.Tensor | None:
