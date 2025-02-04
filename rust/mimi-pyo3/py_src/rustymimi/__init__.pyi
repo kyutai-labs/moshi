@@ -13,7 +13,7 @@ def write_wav(filename, data, sample_rate):
     pass
 
 class StreamTokenizer:
-    def __init__(path, *, dtype="f32"):
+    def __init__(path, *, dtype="f32", max_seq_len=None):
         pass
 
     def decode(self, codes):
@@ -33,7 +33,7 @@ class StreamTokenizer:
         pass
 
 class Tokenizer:
-    def __init__(path, *, dtype="f32"):
+    def __init__(path, *, dtype="f32", max_seq_len=None):
         pass
 
     def decode(self, codes):
