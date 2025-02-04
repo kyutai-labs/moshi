@@ -141,8 +141,8 @@ impl Tokenizer {
                 codes.to_vec3::<u32>()
             })
             .w()?;
-        let codes = numpy::PyArray3::from_vec3_bound(py, &codes)?;
-        Ok(codes.into_py(py))
+        let codes = numpy::PyArray3::from_vec3(py, &codes)?;
+        Ok(codes.into_any().unbind())
     }
 
     fn encode_step(&mut self, pcm_data: numpy::PyReadonlyArray3<f32>) -> PyResult<PyObject> {
@@ -166,8 +166,8 @@ impl Tokenizer {
             .w()?;
         match codes {
             Some(codes) => {
-                let codes = numpy::PyArray3::from_vec3_bound(py, &codes)?;
-                Ok(codes.into_py(py))
+                let codes = numpy::PyArray3::from_vec3(py, &codes)?;
+                Ok(codes.into_any().unbind())
             }
             None => Ok(py.None()),
         }
@@ -187,8 +187,8 @@ impl Tokenizer {
                 pcm.to_vec3::<f32>()
             })
             .w()?;
-        let pcm = numpy::PyArray3::from_vec3_bound(py, &pcm)?;
-        Ok(pcm.into_py(py))
+        let pcm = numpy::PyArray3::from_vec3(py, &pcm)?;
+        Ok(pcm.into_any().unbind())
     }
 
     fn decode_step(
@@ -217,8 +217,8 @@ impl Tokenizer {
             .w()?;
         match pcm {
             Some(pcm) => {
-                let pcm = numpy::PyArray3::from_vec3_bound(py, &pcm)?;
-                Ok(pcm.into_py(py))
+                let pcm = numpy::PyArray3::from_vec3(py, &pcm)?;
+                Ok(pcm.into_any().unbind())
             }
             None => Ok(py.None()),
         }
@@ -323,8 +323,8 @@ impl StreamTokenizer {
     fn get_encoded(&mut self, py: Python) -> PyResult<PyObject> {
         match self.encoder_rx.lock().unwrap().try_recv() {
             Ok(codes) => {
-                let codes = numpy::PyArray2::from_vec2_bound(py, &codes)?;
-                Ok(codes.into_py(py))
+                let codes = numpy::PyArray2::from_vec2(py, &codes)?;
+                Ok(codes.into_any().unbind())
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 py_bail!("worker thread disconnected")
@@ -336,8 +336,8 @@ impl StreamTokenizer {
     fn get_decoded(&mut self, py: Python) -> PyResult<PyObject> {
         match self.decoder_rx.lock().unwrap().try_recv() {
             Ok(pcm) => {
-                let pcm = numpy::PyArray1::from_vec_bound(py, pcm);
-                Ok(pcm.into_py(py))
+                let pcm = numpy::PyArray1::from_vec(py, pcm);
+                Ok(pcm.into_any().unbind())
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 py_bail!("worker thread disconnected")
