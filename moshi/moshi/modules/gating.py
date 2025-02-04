@@ -7,6 +7,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from ..utils.compile import torch_compile_lazy
+from ..utils import quantize
 
 
 @torch_compile_lazy
@@ -32,7 +33,7 @@ class ActivationGating(nn.Module):
 
     _fsdp_final = True
 
-    def __init__(self, dim: int, dim_feedforward: int, activation, **factory_kwargs):
+    def __init__(self, dim: int, dim_feedforward: int, activation, quantized: bool = False, **factory_kwargs):
         super().__init__()
         # We should have 8 d^2 param, instead we will have
         # 2 * h * d + h * d = 3 h * d = 8 d^2
@@ -46,6 +47,14 @@ class ActivationGating(nn.Module):
         self.activation = activation
 
     def forward(self, x: torch.Tensor):
+        if quantize.is_quantized(self.linear_in):
+            x = quantize.linear(self.linear_in, x)
+            B, T, _ = x.shape
+            x = x.view(B, T, 2, -1)
+            x = self.activation(x[..., 0, :]) * x[..., 1, :]
+            x = quantize.linear(self.linear_out, x)
+            return x
+
         return gating_forward_kernel(
             self.linear_in.weight, self.linear_out.weight, self.activation, x
         )

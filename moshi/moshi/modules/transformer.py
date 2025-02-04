@@ -19,9 +19,18 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 from ..utils.compile import no_compile
+from ..utils import quantize
 from .gating import make_gating
 from .rope import RotaryEmbedding
 from .streaming import StreamingModule, StreamingContainer
+
+
+def quantize_transformer(module: torch.nn.Module):
+    for child in module.modules():
+        if isinstance(child, torch.nn.Linear):
+            quantize.quantize_linear(child)
+        elif isinstance(child, StreamingMultiheadAttention):
+            quantize.quantize_param(child, 'in_proj_weight')
 
 
 class LayerNormF32(nn.LayerNorm):
@@ -150,33 +159,6 @@ def create_sin_embedding(
     )  # avoid sync point
     phase = positions / (max_period_tensor ** (adim / (half_dim - 1)))
     return torch.cat([torch.cos(phase), torch.sin(phase)], dim=-1)
-
-
-def multi_linear(
-    num_linear: int,
-    weight: torch.Tensor,
-    x: torch.Tensor,
-    offset: int,
-):
-    """Utility to apply a multi linear layer to the given input. A multi linear layer
-    applies a different set of weight for each time step.
-
-    Args:
-        num_linear (int): Number of possible time steps and so number of linears.
-        weight (torch.Tensor): Weight tensor, with shape `[num_linear * chout, chin]`.
-        x (torch.Tensor): Input tensor, with shape `[B, T, C]`.
-        offset (int): offset for the current time step, in particular for decoding, with
-            time steps provided one by one.
-    """
-    B, T, C = x.shape
-    ys = []
-    chout, chin = weight.shape
-    weight = weight.view(num_linear, -1, chin)
-    for t in range(T):
-        y = F.linear(x[:, t], weight[t + offset])
-        ys.append(y)
-    out = torch.stack(ys, 1)
-    return out
 
 
 def set_attention_context(model: nn.Module, context: tp.Optional[int] = None) -> None:
@@ -355,7 +337,11 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             capacity = self.context
         device = self.in_proj_weight.device
         # TODO: the following estimation will not work great with FSDP.
-        dtype = self.in_proj_weight.dtype
+        if quantize.is_quantized(self, 'in_proj_weight'):
+            # We are running with quantization
+            dtype = torch.float16
+        else:
+            dtype = self.in_proj_weight.dtype
         dim_per_head = self.embed_dim // self.num_heads
         kv_cache = RingKVCache(
             batch_size, self.num_heads, dim_per_head, capacity, device, dtype
@@ -386,11 +372,10 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             offset_cpu = state.offset_cpu
 
         if self.weights_per_step:
-            projected = multi_linear(
-                self.weights_per_step, self.in_proj_weight, query, offset_cpu
-            )
+            projected = quantize.multi_linear(
+                self.weights_per_step, self, query, offset_cpu, name='in_proj_weight')
         else:
-            projected = nn.functional.linear(query, self.in_proj_weight)
+            projected = quantize.linear(self, query, 'in_proj_weight')
         q, k, v = rearrange(
             projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
         )
@@ -414,9 +399,9 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
         x = rearrange(x, "b h t d -> b t (h d)")
         if self.weights_per_step:
-            x = multi_linear(self.weights_per_step, self.out_proj.weight, x, offset_cpu)
+            x = quantize.multi_linear(self.weights_per_step, self.out_proj, x, offset_cpu)
         else:
-            x = self.out_proj(x)
+            x = quantize.linear(self.out_proj, x)
         if state is not None:
             state.offset.add_(T)
             state.offset_cpu += T
@@ -558,7 +543,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         if self.gating is None:
             assert self.linear1 is not None
             assert self.linear2 is not None
-            update = self.linear2(self.activation(self.linear1(x)))
+            update = quantize.linear(self.linear2, self.activation(quantize.linear(self.linear1, x)))
         else:
             if self.weights_per_step:
                 assert isinstance(self.gating, nn.ModuleList)
@@ -570,7 +555,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
                 update = torch.cat(ys, dim=1)
             else:
                 update = self.gating(x)
-        return x_orig + self.layer_scale_2(update)
+        return x_orig.to(update) + self.layer_scale_2(update)
 
     def _sa_block(self, x: torch.Tensor):
         if self.skip_self_attn:
@@ -578,7 +563,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         x_orig = x
         x = self.norm1(x)
         update = self.self_attn(x, x, x)
-        return x_orig + self.layer_scale_1(update)
+        return x_orig.to(update) + self.layer_scale_1(update)
 
     def forward(self, x: torch.Tensor):
         with ExitStack() as stack:
@@ -634,6 +619,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         positional_scale: float = 1.0,
         betas: tp.Optional[tp.Tuple[float, float]] = None,
         layer_class: tp.Type[StreamingTransformerLayer] = StreamingTransformerLayer,
+        quantize: bool = False,
         device=None,
         dtype=None,
         **kwargs,
@@ -666,6 +652,9 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
                     **kwargs,
                 )
             )
+            if quantize:
+                # Quantizing layers one by one to avoid taking too much space during init.
+                quantize_transformer(self.layers[-1])
 
     def _init_streaming_state(self, batch_size: int) -> _TransformerState:
         device = next(self.parameters()).device
@@ -674,6 +663,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
     def forward(self, x: torch.Tensor, *args, **kwargs):
         B, T, C = x.shape
 
+        dtype_input = x.dtype
         state = self._streaming_state
         if state is None:
             offset = torch.zeros(1, dtype=torch.long, device=x.device)
@@ -693,7 +683,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
 
         if state is not None:
             state.offset.add_(T)
-        return x
+        return x.to(dtype_input)
 
 
 class ProjectedTransformer(StreamingContainer):
