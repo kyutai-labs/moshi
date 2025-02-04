@@ -31,8 +31,6 @@ jobs:
             target: x86
           - runner: ubuntu-latest
             target: aarch64
-          - runner: ubuntu-latest
-            target: armv7
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
