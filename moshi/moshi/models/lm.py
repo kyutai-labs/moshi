@@ -201,6 +201,7 @@ class LMModel(StreamingContainer):
         )
         self.condition_provider = condition_provider
         self.fuser = fuser
+        self.to(device=device, dtype=dtype)
         if quantize:
             quantize_transformer(self)
 

@@ -25,7 +25,7 @@ def linear(module: nn.Module, x: torch.Tensor, name='weight') -> torch.Tensor:
         state.SCB = getattr(module, name + '_scb')
         assert isinstance(state.SCB, torch.Tensor)
         state.has_fp16_weights = False
-        y = bnb.matmul(x.half(), state.CB, state=state)
+        y = bnb.matmul(x.half().contiguous(), state.CB, state=state)
         assert isinstance(y, torch.Tensor)
         return y
     else:
@@ -69,7 +69,7 @@ def multi_linear(num_linear: int, module: nn.Module, x: torch.Tensor, offset: in
             state.CB = CB
             state.SCB = weight_scb[t + offset]
             state.has_fp16_weights = False
-            y = bnb.matmul(x[:, t].half(), CB, state=state)
+            y = bnb.matmul(x[:, t].half().contiguous(), CB, state=state)
             assert isinstance(y, torch.Tensor)
         ys.append(y)
     out = torch.stack(ys, 1)

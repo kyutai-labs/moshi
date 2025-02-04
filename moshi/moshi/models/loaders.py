@@ -163,11 +163,11 @@ def get_moshi_lm(filename: str | Path,
         device=device,
         dtype=dtype,
         quantize=quantize,
-        **lm_kwargs,
-    ).to(device=device, dtype=dtype)
+        **lm_kwargs)
     model.eval()
     if _is_safetensors(filename):
         load_model(model, filename, strict=strict)
+        pass
     else:
         pkg = torch.load(
             filename,

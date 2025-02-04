@@ -654,6 +654,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
             )
             if quantize:
                 # Quantizing layers one by one to avoid taking too much space during init.
+                self.layers[-1].to(device=device, dtype=dtype)
                 quantize_transformer(self.layers[-1])
 
     def _init_streaming_state(self, batch_size: int) -> _TransformerState:
