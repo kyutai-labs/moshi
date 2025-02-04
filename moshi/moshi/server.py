@@ -229,7 +229,11 @@ def main():
 
     log("info", "loading moshi")
     if args.moshi_weight is None:
-        args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
+        if args.hf_repo.endswith('-q8'):
+            moshi_name = loaders.MOSHI_Q8_NAME
+        else:
+            moshi_name = loaders.MOSHI_NAME
+        args.moshi_weight = hf_hub_download(args.hf_repo, moshi_name)
     lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
     log("info", "moshi loaded")
 

@@ -14,11 +14,13 @@ from .lm import LMModel
 from ..modules import SEANetEncoder, SEANetDecoder, transformer
 from ..quantization import SplitResidualVectorQuantizer
 
+
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
 
 TEXT_TOKENIZER_NAME = 'tokenizer_spm_32k_3.model'
 MOSHI_NAME = 'model.safetensors'
+MOSHI_Q8_NAME = 'model.q8.safetensors'
 MIMI_NAME = 'tokenizer-e351c8d8-checkpoint125.safetensors'
 DEFAULT_REPO = 'kyutai/moshiko-pytorch-bf16'
 
@@ -145,6 +147,7 @@ def get_mimi(filename: str | Path,
 def get_moshi_lm(filename: str | Path,
                  device: torch.device | str = 'cpu',
                  lm_kwargs: tp.Optional[tp.Dict] = None,
+                 quantize: bool | None = None,
                  strict: bool = True) -> LMModel:
     dtype = torch.bfloat16
     if lm_kwargs is None:
@@ -154,14 +157,17 @@ def get_moshi_lm(filename: str | Path,
         del lm_kwargs["conditioners"]
     if "fuser" in lm_kwargs:
         lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
+    if quantize is None:
+        quantize = '.q8.' in str(filename)
     model = LMModel(
         device=device,
         dtype=dtype,
-        **lm_kwargs,
-    ).to(device=device, dtype=dtype)
+        quantize=quantize,
+        **lm_kwargs)
     model.eval()
     if _is_safetensors(filename):
         load_model(model, filename, strict=strict)
+        pass
     else:
         pkg = torch.load(
             filename,
