@@ -71,7 +71,7 @@ def main():
         tokenizer = hf_hub_download(args.hf_repo, lm_config["tokenizer_name"])
     tokenizer = hf_get(tokenizer)
 
-    lm_config = models.LmConfig.from_dict(lm_config)
+    lm_config = models.LmConfig.from_config_dict(lm_config)
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if moshi_weights.endswith(".q4.safetensors"):

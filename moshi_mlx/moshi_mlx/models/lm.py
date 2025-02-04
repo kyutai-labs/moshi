@@ -31,7 +31,7 @@ class LmConfig:
     conditioners: dict[str, LutConditionerConfig]
 
     @classmethod
-    def from_dict(cls, data: dict) -> "LmConfig":  # noqa: F811
+    def from_config_dict(cls, data: dict) -> "LmConfig":
         transformer = TransformerConfig(
             d_model=data["dim"],
             num_heads=data["num_heads"],
