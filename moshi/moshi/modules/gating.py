@@ -48,6 +48,7 @@ class ActivationGating(nn.Module):
 
     def forward(self, x: torch.Tensor):
         if quantize.is_quantized(self.linear_in):
+            assert quantize.is_quantized(self.linear_out)
             x = quantize.linear(self.linear_in, x)
             B, T, _ = x.shape
             x = x.view(B, T, 2, -1)

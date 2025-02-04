@@ -26,7 +26,7 @@ from .streaming import StreamingModule, StreamingContainer
 
 
 def quantize_transformer(module: torch.nn.Module):
-    for child in module.modules():
+    for name, child in module.named_modules():
         if isinstance(child, torch.nn.Linear):
             quantize.quantize_linear(child)
         elif isinstance(child, StreamingMultiheadAttention):

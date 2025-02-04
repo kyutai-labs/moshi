@@ -24,8 +24,9 @@ def linear(module: nn.Module, x: torch.Tensor, name='weight') -> torch.Tensor:
         assert isinstance(state.CB, torch.Tensor)
         state.SCB = getattr(module, name + '_scb')
         assert isinstance(state.SCB, torch.Tensor)
+        assert state.SCB.dtype == torch.float, state.SCB.dtype
         state.has_fp16_weights = False
-        y = bnb.matmul(x.half().contiguous(), state.CB, state=state)
+        y = bnb.matmul(x.half(), state.CB, state=state)
         assert isinstance(y, torch.Tensor)
         return y
     else:
@@ -59,6 +60,7 @@ def multi_linear(num_linear: int, module: nn.Module, x: torch.Tensor, offset: in
         assert isinstance(weight, torch.Tensor)
         assert weight_scb.shape == (chout,), (weight_scb, chout)
         weight_scb = weight_scb.view(num_linear, -1)
+        assert weight_scb.dtype == torch.float, weight_scb.dtype
 
     for t in range(T):
         if weight_scb is None:
@@ -69,7 +71,7 @@ def multi_linear(num_linear: int, module: nn.Module, x: torch.Tensor, offset: in
             state.CB = CB
             state.SCB = weight_scb[t + offset]
             state.has_fp16_weights = False
-            y = bnb.matmul(x[:, t].half().contiguous(), CB, state=state)
+            y = bnb.matmul(x[:, t].half(), CB, state=state)
             assert isinstance(y, torch.Tensor)
         ys.append(y)
     out = torch.stack(ys, 1)
@@ -82,8 +84,14 @@ def is_quantized(module: nn.Module, name: str = 'weight'):
 
 def quantize_param(module: nn.Module, name: str = 'weight') -> None:
     if is_quantized(module, name):
+        # Due to model casting, the type of SCB might be wrong, althought
+        # that would only happen during the init. Let's recast it to float.
+        SCB = getattr(module, name + '_scb')
+        if SCB.dtype != torch.float:
+            setattr(module, name + '_scb', nn.Parameter(SCB.to(torch.float), requires_grad=False))
         return
     weight = getattr(module, name)
+    assert weight.data.dtype.is_floating_point
     CB, SCB, _ = bnbF.int8_vectorwise_quant(weight.data.to(torch.float16))
     setattr(module, name, nn.Parameter(CB, requires_grad=False))
     setattr(module, name + '_scb', nn.Parameter(SCB, requires_grad=False))
