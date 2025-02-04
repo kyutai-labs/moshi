@@ -99,6 +99,13 @@ def import_model(
             model[layer + "gating.linear_out.weight"] = tch_model[
                 f"depformer.layers.{layer_idx}.gating.{idx}.linear_out.weight"
             ]
+    if "condition_provider.conditioners.description.embed.weight" in tch_model:
+        e = tch_model["condition_provider.conditioners.description.embed.weight"]
+        w = tch_model["condition_provider.conditioners.description.output_proj.weight"]
+        # 4 is very_good
+        e = e[4:5] @ w.T
+        print(f"adding the very_good conditioning {e.shape} to {model['text_emb.weight'].shape}")
+        model["text_emb.weight"] += e
 
     save_file(model, out_path)
 
