@@ -45,35 +45,33 @@ def main():
     parser.add_argument("outfile", type=str, help="Output audio file in wav format.")
     args = parser.parse_args()
 
+    mx.random.seed(299792458)
+
+    lm_config = args.lm_config
+    if lm_config is None:
+        lm_config = hf_hub_download(args.hf_repo, "config.json")
+
+    log("info", f"loading config from {args.lm_config}")
+    with open(hf_get(lm_config), "r") as fobj:
+        lm_config = json.load(fobj)
+    print(lm_config)
+
     mimi_weights = args.mimi_weights
     if mimi_weights is None:
-        mimi_weights = hf_hub_download(
-            args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors"
-        )
+        mimi_weights = hf_hub_download(args.hf_repo, lm_config["mimi_name"])
     mimi_weights = hf_get(mimi_weights)
 
     moshi_weights = args.moshi_weights
     if moshi_weights is None:
-        moshi_weights = hf_hub_download(
-            args.hf_repo, "model.q8.safetensors"
-        )
+        moshi_weights = hf_hub_download(args.hf_repo, lm_config["moshi_name"])
     moshi_weights = hf_get(moshi_weights)
 
     tokenizer = args.tokenizer
     if tokenizer is None:
-        tokenizer = hf_hub_download(
-            args.hf_repo, "tokenizer_spm_48k_multi6_2.model"
-        )
+        tokenizer = hf_hub_download(args.hf_repo, lm_config["tokenizer_name"])
     tokenizer = hf_get(tokenizer)
 
-    mx.random.seed(299792458)
-    if args.lm_config is not None:
-        log("info", f"loading config from {args.lm_config}")
-        with open(args.lm_config, "r") as fobj:
-            lm_config = json.load(fobj)
-    else:
-        lm_config = models.config1b_202412()
-
+    lm_config = models.LmConfig.from_dict(lm_config)
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if moshi_weights.endswith(".q4.safetensors"):
