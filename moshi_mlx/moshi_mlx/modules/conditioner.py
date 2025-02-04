@@ -37,3 +37,7 @@ class LutConditioner(nn.Module):
             raise ValueError(f"unknown value {value}, possible-values: {self.possible_values}")
         idx = mx.array([idx])
         return self.output_proj(self.embed(idx))
+
+class ConditionProvider(nn.Module):
+    def __init__(self, output_dim: int, cfg: dict[str, LutConditionerConfig]):
+        self.conditioners = { name: LutConditioner(output_dim, c) for name, c in cfg.items() }

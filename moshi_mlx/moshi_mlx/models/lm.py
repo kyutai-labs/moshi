@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import mlx.core as mx
 import mlx.nn as nn
 
-from ..modules.conditioner import LutConditionerConfig
+from ..modules.conditioner import LutConditionerConfig, ConditionProvider
 from ..modules.kv_cache import KVCache, RotatingKVCache
 from ..modules.transformer import Transformer, TransformerConfig
 from ..utils import sampling
@@ -209,6 +209,9 @@ class Lm(nn.Module):
             ].transformer.make_cache()
         else:
             self.depformer_cache = []
+
+        if len(cfg.conditioners) > 0:
+            self.condition_provider = ConditionProvider(cfg.transformer.d_model, cfg.conditioners)
 
     def __call__(
         self,
