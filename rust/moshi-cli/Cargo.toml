@@ -23,7 +23,7 @@ log = "0.4.20"
 futures-util = "0.3.30"
 serde_json = "1.0.115"
 tokio-tungstenite = { version = "0.21.0", features = ["rustls", "native-tls"] }
-opus = "0.3.0"
+opus = "0.4.0"
 ogg = { version = "0.9.1", features = ["async"] }
 rustls = "0.23.5"
 native-tls = "0.2.11"
