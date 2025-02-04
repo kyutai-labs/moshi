@@ -85,7 +85,7 @@ class LmConfig:
             text_in_vocab_size=data["text_card"] + 1,
             text_out_vocab_size=data["text_card"],
             audio_vocab_size=data["card"] + 1,
-            audio_delays=data["delays"][1:], # the first delay is for the text token.
+            audio_delays=data["delays"][1:],  # the first delay is for the text token.
             audio_codebooks=data["n_q"],
         )
 
