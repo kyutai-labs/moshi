@@ -13,7 +13,7 @@ Streaming module API that should be implemented by all Streaming components,
 """
 
 import abc
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
 import itertools
 import math
@@ -22,15 +22,23 @@ from torch import nn
 import torch
 
 
-class Resetable(tp.Protocol):
+class State:
+    """Base State for streaming, requires to be resetable and also support the context
+    protocol. The state will be entered when """
     def reset(self) -> None:
         pass
 
+    def __enter__(self) -> None:
+        pass
 
-State = tp.TypeVar("State", bound=Resetable)
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        pass
 
 
-class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
+StateT = tp.TypeVar("StateT", bound=State)
+
+
+class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
     """Common API for streaming components.
 
     Each streaming component has a streaming state, `self._streaming_state`, which is None by default.
@@ -46,7 +54,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
     """
     def __init__(self) -> None:
         super().__init__()
-        self._streaming_state: State | None = None
+        self._streaming_state: StateT | None = None
         self._streaming_detached: bool = False
 
     @property
@@ -80,12 +88,11 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
 
         _handle_module("", self)
 
-    def _start_streaming(self, batch_size: int):
+    def _start_streaming(self, batch_size: int, exit_stack: ExitStack):
         def _start_streaming(name: str, module: StreamingModule):
-            assert module._streaming_state is None, f"Module {name} is already streaming!"
+            assert module._streaming_state is None, f"{name} is already streaming!"
             module._streaming_state = module._init_streaming_state(batch_size)
-            if hasattr(module._streaming_state, '__enter__'):
-                module._streaming_state.__enter__()  # type: ignore
+            exit_stack.enter_context(module._streaming_state)
 
         self._apply_named_streaming(_start_streaming)
 
@@ -98,20 +105,21 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
         self._apply_named_streaming(_stop_streaming)
 
     @abc.abstractmethod
-    def _init_streaming_state(self, batch_size: int) -> State: ...
+    def _init_streaming_state(self, batch_size: int) -> StateT: ...
 
     def streaming_forever(self, batch_size: int):
-        self._start_streaming(batch_size)
+        self.streaming(batch_size).__enter__()
 
     @contextmanager
     def streaming(self, batch_size: int):
         """Context manager to enter streaming mode. Reset streaming state on exit."""
 
-        self._start_streaming(batch_size)
-        try:
-            yield
-        finally:
-            self._stop_streaming()
+        with ExitStack() as exit_stack:
+            self._start_streaming(batch_size, exit_stack)
+            try:
+                yield
+            finally:
+                self._stop_streaming()
 
     def reset_streaming(self):
         """Reset the streaming state."""
@@ -152,21 +160,13 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[State]):
             raise RuntimeError(f"Some states were not consumed: {list(state.keys())}")
 
 
-@dataclass
-class _NullState:
-    pass
-
-    def reset(self) -> None:
-        pass
-
-
-class StreamingContainer(StreamingModule[_NullState]):
-    def _init_streaming_state(self, batch_size: int) -> _NullState:
-        return _NullState()
+class StreamingContainer(StreamingModule[State]):
+    def _init_streaming_state(self, batch_size: int) -> State:
+        return State()
 
 
 @dataclass
-class _StreamingAddState:
+class _StreamingAddState(State):
     previous_x: torch.Tensor | None = None
     previous_y: torch.Tensor | None = None
 
@@ -196,7 +196,7 @@ class StreamingAdd(StreamingModule[_StreamingAddState]):
 
 
 @dataclass
-class _StreamingConvState:
+class _StreamingConvState(State):
     previous: torch.Tensor | None = None
 
     def reset(self):
@@ -246,7 +246,7 @@ class RawStreamingConv1d(nn.Conv1d, StreamingModule[_StreamingConvState]):
 
 
 @dataclass
-class _StreamingConvTrState:
+class _StreamingConvTrState(State):
     partial: torch.Tensor | None = None
 
     def reset(self):

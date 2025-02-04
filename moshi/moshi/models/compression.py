@@ -91,12 +91,9 @@ class CompressionModel(StreamingModule[State]):
 
 
 @dataclass
-class _MimiState:
+class _MimiState(State):
     graphed_tr_enc: CUDAGraphed | None
     graphed_tr_dec: CUDAGraphed | None
-
-    def reset(self):
-        pass
 
 
 class MimiModel(CompressionModel[_MimiState]):
