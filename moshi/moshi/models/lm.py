@@ -291,7 +291,7 @@ class LMModel(StreamingContainer):
         text_emb = self.text_emb(input_sequence[:, 0])
         input_ = text_emb if input_ is None else input_ + text_emb
         if sum_condition is not None:
-            input_ = input_ + sum_condition
+            input_ = input_ + sum_condition.to(input_)
         transformer_out = self.transformer(input_)
 
         if self.out_norm:
@@ -396,7 +396,6 @@ class LMGen(StreamingModule[_LMGenState]):
         if self.cfg_coef != 1.:
             assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
             assert self.condition_tensors, "Missing condition tensors for CFG."
-            assert set(self.condition_tensors.keys()) == set(self.null_condition_tensors.keys())
 
     def _init_streaming_state(self, batch_size: int) -> _LMGenState:
         lm_model = self.lm_model
@@ -425,6 +424,8 @@ class LMGen(StreamingModule[_LMGenState]):
 
         if self.cfg_coef != 1.:
             batch_size *= 2
+            if state.condition_sum is not None:
+                assert state.condition_sum.shape[0] == batch_size, "CFG requires 2x more conditions."
         state.exit_stack.enter_context(self.lm_model.streaming(batch_size))
         return state
 
@@ -439,7 +440,7 @@ class LMGen(StreamingModule[_LMGenState]):
 
         assert input_tokens.dim() == 3, "Shape should be [B, K, T]."
         B, Ki, S = input_tokens.shape
-        assert B == state.batch_size
+        assert B == state.batch_size, f"Got a batch size {B}, expected {state.batch_size}"
         assert S == 1, "Only support being given steps one by one."
         needed_tokens = lm_model.num_codebooks - lm_model.dep_q - 1
         assert (
@@ -474,7 +475,7 @@ class LMGen(StreamingModule[_LMGenState]):
             assert (input_[:, :1] <= lm_model.text_card).all()
 
         if self.cfg_coef != 1.:
-            input_ = input_.repeat(2)
+            input_ = input_.repeat(2, 1, 1)
         transformer_out, text_logits = state.graphed_main(input_, state.condition_sum)
         if self.cfg_coef != 1.:
             logits, logits_null = text_logits.chunk(2)
@@ -515,15 +516,20 @@ class LMGen(StreamingModule[_LMGenState]):
         text_token: torch.Tensor,
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
-        (B,) = text_token.shape
+        B, = text_token.shape
+        B_cfg = B
+        if self.cfg_coef != 1.:
+            B_cfg = 2 * B
         prev_token = text_token
         lm_model = self.lm_model
         depformer_tokens: list[torch.Tensor] = []
         assert not lm_model.depformer.is_streaming
-        with lm_model.depformer.streaming(B):
+        with lm_model.depformer.streaming(B_cfg):
             assert lm_model.depformer.is_streaming
             for cb_index in range(lm_model.dep_q):
                 input_ = prev_token[:, None, None]
+                if self.cfg_coef != 1.:
+                    input_ = input_.repeat(2, 1, 1)
                 logits = lm_model.forward_depformer(cb_index, input_, transformer_out)
                 if self.cfg_coef != 1.:
                     logits, logits_null = logits.chunk(2)

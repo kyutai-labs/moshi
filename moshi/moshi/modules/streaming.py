@@ -13,7 +13,7 @@ Streaming module API that should be implemented by all Streaming components,
 """
 
 import abc
-from contextlib import contextmanager, ExitStack
+from contextlib import ExitStack
 from dataclasses import dataclass
 import itertools
 import math
@@ -91,15 +91,14 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
     def _start_streaming(self, batch_size: int, exit_stack: ExitStack):
         def _start_streaming(name: str, module: StreamingModule):
             assert module._streaming_state is None, f"{name} is already streaming!"
-            module._streaming_state = module._init_streaming_state(batch_size)
-            exit_stack.enter_context(module._streaming_state)
+            state = module._init_streaming_state(batch_size)
+            exit_stack.enter_context(state)
+            module._streaming_state = state
 
         self._apply_named_streaming(_start_streaming)
 
-    def _stop_streaming(self):
+    def _stop_streaming(self) -> None:
         def _stop_streaming(name: str, module: StreamingModule):
-            if module._streaming_state is not None and hasattr(module._streaming_state, '__exit__'):
-                module._streaming_state.__exit__(None, None, None)  # type: ignore
             module._streaming_state = None
 
         self._apply_named_streaming(_stop_streaming)
@@ -110,16 +109,13 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
     def streaming_forever(self, batch_size: int):
         self.streaming(batch_size).__enter__()
 
-    @contextmanager
-    def streaming(self, batch_size: int):
+    def streaming(self, batch_size: int) -> ExitStack:
         """Context manager to enter streaming mode. Reset streaming state on exit."""
 
-        with ExitStack() as exit_stack:
-            self._start_streaming(batch_size, exit_stack)
-            try:
-                yield
-            finally:
-                self._stop_streaming()
+        exit_stack = ExitStack()
+        self._start_streaming(batch_size, exit_stack)
+        exit_stack.callback(self._stop_streaming)
+        return exit_stack
 
     def reset_streaming(self):
         """Reset the streaming state."""
