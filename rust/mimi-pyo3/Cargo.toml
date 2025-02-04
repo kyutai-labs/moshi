@@ -14,6 +14,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1"
-numpy = "0.22.0"
-pyo3 = "0.22.0"
+numpy = "0.23.0"
+pyo3 = "0.23.0"
 moshi = { path = "../moshi-core", version = "0.4.0" }
