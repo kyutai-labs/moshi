@@ -30,14 +30,14 @@ from ..quantization import (
     ResidualVectorQuantizer,
 )
 from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
-from ..modules.streaming import StreamingModule, State
+from ..modules.streaming import StreamingModule, State, StateT
 from ..utils.compile import no_compile, CUDAGraphed
 
 
 logger = logging.getLogger()
 
 
-class CompressionModel(StreamingModule[State]):
+class CompressionModel(StreamingModule[StateT]):
     """Base API for all compression model that aim at being used as audio tokenizers
     with a language model.
     """
@@ -91,12 +91,9 @@ class CompressionModel(StreamingModule[State]):
 
 
 @dataclass
-class _MimiState:
+class _MimiState(State):
     graphed_tr_enc: CUDAGraphed | None
     graphed_tr_dec: CUDAGraphed | None
-
-    def reset(self):
-        pass
 
 
 class MimiModel(CompressionModel[_MimiState]):

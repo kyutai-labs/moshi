@@ -22,7 +22,7 @@ from ..utils.compile import no_compile
 from ..utils import quantize
 from .gating import make_gating
 from .rope import RotaryEmbedding
-from .streaming import StreamingModule, StreamingContainer
+from .streaming import StreamingModule, StreamingContainer, State
 
 
 def quantize_transformer(module: torch.nn.Module):
@@ -261,7 +261,7 @@ class RingKVCache:
 
 
 @dataclass
-class _MHAState:
+class _MHAState(State):
     kv_cache: RingKVCache
     offset: torch.Tensor
     offset_cpu: int
@@ -409,7 +409,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
 
 @dataclass
-class _LayerState:
+class _LayerState(State):
     offset_cpu: int
 
     def reset(self):
@@ -578,7 +578,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
 
 
 @dataclass
-class _TransformerState:
+class _TransformerState(State):
     offset: torch.Tensor
 
     def reset(self):

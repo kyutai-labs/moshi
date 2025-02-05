@@ -20,6 +20,7 @@ from ..modules.transformer import create_sin_embedding
 
 logger = logging.getLogger(__name__)
 TextCondition = tp.Optional[str]  # a text condition can be a string or None (if doesn't exist)
+ConditionTensors = dict[str, 'ConditionType']
 
 
 def stack_and_pad_audio(wavs: tp.List[torch.Tensor], max_len: tp.Optional[int] = None):
@@ -512,50 +513,60 @@ class ConditionFuser(nn.Module):
         for fuse_method, conditions in fuse2cond.items():
             for condition in conditions:
                 self.cond2fuse[condition] = fuse_method
+                if fuse_method in ['cross', 'prepend']:
+                    raise RuntimeError("only `sum` conditionings are supported for now.")
 
-    def forward(
-        self,
-        input: torch.Tensor,
-        conditions: tp.Dict[str, ConditionType]
-    ) -> tp.Tuple[torch.Tensor, tp.Optional[torch.Tensor]]:
-        """Fuse the conditions to the provided model input.
+    @property
+    def has_conditions(self) -> bool:
+        return bool(self.cond2fuse)
 
-        Args:
-            input (torch.Tensor): Transformer input.
-            conditions (dict[str, ConditionType]): Dict of conditions.
-        Returns:
-            tuple[torch.Tensor, torch.Tensor]: The first tensor is the transformer input
-                after the conditions have been fused. The second output tensor is the tensor
-                used for cross-attention or None if no cross attention inputs exist.
-        """
-        B, T, _ = input.shape
+    @property
+    def has_prepend(self) -> bool:
+        """Is there a conditioning that needs to be prepending to the Transformer sequence."""
+        return bool(self.fuse2cond['prepend'])
 
-        first_step = True
-        assert set(conditions.keys()).issubset(set(self.cond2fuse.keys())), \
-            f"given conditions contain unknown attributes for fuser, " \
-            f"expected {self.cond2fuse.keys()}, got {conditions.keys()}"
-        cross_attention_output = None
-        for cond_type, (cond, cond_mask) in conditions.items():
-            op = self.cond2fuse[cond_type]
-            if op == 'sum':
-                input += cond
-            elif op == 'prepend':
-                if first_step:
-                    input = torch.cat([cond, input], dim=1)
-            elif op == 'cross':
-                if cross_attention_output is not None:
-                    cross_attention_output = torch.cat([cross_attention_output, cond], dim=1)
-                else:
-                    cross_attention_output = cond
+    def get_cross(self, conditions: ConditionTensors) -> torch.Tensor | None:
+        """Return the tensor to be provided for the cross attention."""
+        cross = None
+        for name in self.fuse2cond['cross']:
+            cond, _ = conditions[name]
+            if cross is None:
+                cross = cond
             else:
-                raise ValueError(f"unknown op ({op})")
+                cross = torch.cat([cross, cond], dim=1)
 
-        if self.cross_attention_pos_emb and cross_attention_output is not None:
+        if self.cross_attention_pos_emb and cross is not None:
             positions = torch.arange(
-                cross_attention_output.shape[1],
-                device=cross_attention_output.device
+                cross.shape[1],
+                device=cross.device
             ).view(1, -1, 1)
-            pos_emb = create_sin_embedding(positions, cross_attention_output.shape[-1]).to(cross_attention_output.dtype)
-            cross_attention_output = cross_attention_output + self.cross_attention_pos_emb_scale * pos_emb
+            pos_emb = create_sin_embedding(positions, cross.shape[-1]).to(cross.dtype)
+            cross = cross + self.cross_attention_pos_emb_scale * pos_emb
+        return cross
 
-        return input, cross_attention_output
+    def get_sum(self, conditions: ConditionTensors) -> torch.Tensor | None:
+        """Return the tensor to be provided as an extra sum offset shared for each step."""
+        sum = None
+        for name in self.fuse2cond['sum']:
+            cond, _ = conditions[name]
+            assert cond.shape[1] == 1, cond.shape
+            if sum is None:
+                sum = cond
+            else:
+                sum = sum + cond
+        return sum
+
+    def get_prepend(self, conditions: ConditionTensors) -> torch.Tensor | None:
+        """Return the tensor to be prepended to the transformer."""
+        prepend = None
+        for name in self.fuse2cond['prepend']:
+            cond, _ = conditions[name]
+            if prepend is None:
+                prepend = cond
+            else:
+                prepend = torch.cat([cond, prepend], dim=1)
+        if prepend is not None:
+            sum = self.get_sum(conditions)
+            if sum is not None:
+                prepend = prepend + sum
+        return prepend

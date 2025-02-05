@@ -18,7 +18,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils import weight_norm
 
-from .streaming import RawStreamingConv1d, RawStreamingConvTranspose1d, StreamingModule
+from .streaming import RawStreamingConv1d, RawStreamingConvTranspose1d, StreamingModule, State
 
 
 CONV_NORMALIZATIONS = frozenset(["none", "weight_norm"])
@@ -157,7 +157,7 @@ class NormConvTranspose1d(nn.Module):
 
 
 @dataclass
-class _StreamingConv1dState:
+class _StreamingConv1dState(State):
     padding_to_add: int
     original_padding_to_add: int
 
@@ -255,7 +255,7 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
 
 
 @dataclass
-class _StreamingConvTr1dState:
+class _StreamingConvTr1dState(State):
     pass
 
     def reset(self):

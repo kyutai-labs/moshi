@@ -17,7 +17,7 @@ import sphn
 
 
 from .client_utils import make_log
-from .conditioners import ConditionAttributes
+from .conditioners import ConditionAttributes, ClassifierFreeGuidanceDropout
 from .models import loaders, MimiModel, LMModel, LMGen
 
 
@@ -54,15 +54,18 @@ class InferenceState:
     lm_gen: LMGen
 
     def __init__(self, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
-                 lm: LMModel, batch_size: int, device: str | torch.device):
+                 lm: LMModel, batch_size: int, cfg_coef: float, device: str | torch.device):
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
         condition_tensors = None
         if lm.condition_provider is not None:
-            conditions = ConditionAttributes(text={"description": "very_good"}, wav={})
-            prepared = lm.condition_provider.prepare([conditions])
+            conditions = [ConditionAttributes(text={"description": "very_good"}, wav={})] * batch_size
+            if cfg_coef != 1.:
+                # Extending the conditions with the negatives for the CFG.
+                conditions += ClassifierFreeGuidanceDropout(1.)(conditions)
+            prepared = lm.condition_provider.prepare(conditions)
             condition_tensors = lm.condition_provider(prepared)
-        self.lm_gen = LMGen(lm, condition_tensors=condition_tensors)
+        self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors)
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
         self.mimi.streaming_forever(batch_size)
@@ -109,6 +112,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size to be used for inference.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
     parser.add_argument("--lm-config", type=str, help="The LM config as a json file.")
+    parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
     parser.add_argument("infile", type=str, help="Input audio file.")
     parser.add_argument("outfile", type=str, help="Output audio file in wav format.")
 
@@ -129,11 +133,6 @@ def main():
     mimi = loaders.get_mimi(hf_get(args.mimi_weight), args.device, num_codebooks=num_codebooks)
     log("info", "mimi loaded")
 
-    log("info", f"loading input file {args.infile}")
-    in_pcms, _ = sphn.read(args.infile, sample_rate=mimi.sample_rate)
-    in_pcms = torch.from_numpy(in_pcms).to(device=args.device)
-    in_pcms = in_pcms[None, 0:1].expand(args.batch_size, -1, -1)
-
     if args.tokenizer is None:
         args.tokenizer = hf_hub_download(args.hf_repo, loaders.TEXT_TOKENIZER_NAME)
     text_tokenizer = sentencepiece.SentencePieceProcessor(hf_get(args.tokenizer))  # type: ignore
@@ -148,7 +147,12 @@ def main():
     lm = loaders.get_moshi_lm(hf_get(args.moshi_weight), args.device, lm_kwargs=lm_kwargs)
     log("info", "moshi loaded")
 
-    state = InferenceState(mimi, text_tokenizer, lm, args.batch_size, args.device)
+    log("info", f"loading input file {args.infile}")
+    in_pcms, _ = sphn.read(args.infile, sample_rate=mimi.sample_rate)
+    in_pcms = torch.from_numpy(in_pcms).to(device=args.device)
+    in_pcms = in_pcms[None, 0:1].expand(args.batch_size, -1, -1)
+
+    state = InferenceState(mimi, text_tokenizer, lm, args.batch_size, args.cfg_coef, args.device)
     out_pcms, out_text_tokens = state.run(in_pcms)
     log("info", f"out-pcm: {out_pcms.shape}, out-text: {out_text_tokens.shape}")
 

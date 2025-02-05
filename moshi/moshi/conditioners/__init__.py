@@ -6,4 +6,4 @@
 Modules to help doing generations under some fixed conditions.
 """
 
-from .base import (ConditionType, ConditionAttributes, ConditionFuser, ConditionProvider, BaseConditioner, WavCondition)
+from .base import (ConditionType, ConditionAttributes, ConditionFuser, ConditionProvider, BaseConditioner, WavCondition, ConditionTensors, ClassifierFreeGuidanceDropout)
