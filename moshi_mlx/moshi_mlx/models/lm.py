@@ -164,6 +164,7 @@ class DepFormer(nn.Module):
         sampler: sampling.Sampler,
         text_token: mx.array,
         cache: list[KVCache] | list[RotatingKVCache],
+        cfg_coef: float = 1.,
     ) -> mx.array:
         tokens = []
         last_token = text_token
@@ -171,12 +172,21 @@ class DepFormer(nn.Module):
         for c in cache:
             c.reset()
         for slice_idx, slice in enumerate(self.slices):
+            # TODO(laurent): this hardcodes the number of RVQs at 8!
             last_token = (
                 last_token if step_idx > 0 or slice_idx in (0, 1, 9) else mx.array(2048)
             )
+            last_token = last_token.reshape(1, 1)
+
+            if cfg_coef != 1:
+                last_token = mx.tile(last_token, 2)
             xs = slice.linear_in(main_transformer_out) + slice.emb(last_token)
             xs = slice.transformer(xs, cache=cache)
             logits = slice.linear_out(xs)
+            if cfg_coef != 1:
+                l1, l2 = logits.split(2, axis=0)
+                logits = cfg_coef * l1 - (cfg_coef - 1) * l2
+
             last_token, _ = sampler(logits[0])
             tokens.append(last_token)
         tokens = mx.concatenate(tokens)
@@ -239,15 +249,23 @@ class Lm(nn.Module):
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
         ct: ConditionTensor | None = None,
+        cfg_coef: float = 1.,
     ) -> tuple[mx.array, mx.array]:
         xs = self.text_emb(text_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             xs = xs + emb(token_ids)
         if ct is not None:
             xs = xs + ct.tensor
+
+        if cfg_coef != 1:
+            xs = mx.tile(xs, 2)
         transformer_out = self.transformer(xs, cache=self.transformer_cache)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
+        if cfg_coef != 1:
+            l1, l2 = text_logits.split(2, axis=0)
+            text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
+
         text_token, _ = text_sampler(text_logits[:, 0])
         audio_tokens = self.depformer.sample(
             transformer_out,
@@ -255,12 +273,14 @@ class Lm(nn.Module):
             audio_sampler,
             text_token,
             self.depformer_cache,
+            cfg_coef=cfg_coef,
         )
         return text_token, audio_tokens
 
     def warmup(self, ct: ConditionTensor | None):
         text, audio = self.sample(
             mx.array([[self.cfg.text_out_vocab_size]]),
+            # TODO(laurent): this hardcodes the number of RVQs at 8!
             [mx.array([[0]])] * 8,
             0,
             text_sampler=sampling.Sampler(),

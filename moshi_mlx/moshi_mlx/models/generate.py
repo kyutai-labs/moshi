@@ -18,6 +18,7 @@ class LmGen:
         max_steps: int,
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
+        cfg_coef: float = 1.,
         check: bool = False,
     ):
         self.model: Lm = model
@@ -36,6 +37,7 @@ class LmGen:
         self.audio_delays = self.model.cfg.audio_delays
         self.max_delay = max(self.audio_delays)
         self.main_codebooks = self.model.cfg.depformer.num_slices
+        self.cfg_coef = cfg_coef
 
     @property
     def zero_token(self) -> int:
@@ -85,7 +87,8 @@ class LmGen:
             self.step_idx,
             self.text_sampler,
             self.audio_sampler,
-            ct,
+            ct=ct,
+            cfg_coef=self.cfg_coef,
         )
         assert text_tokens.shape == (1,), "invalid output text-token shape"
         assert audio_tokens.shape == (8,), "invalid output audio-token shape"
