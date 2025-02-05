@@ -350,9 +350,12 @@ class _LMGenState(State):
     condition_sum: torch.Tensor | None = None
     offset: int = 0
     exit_stack: ExitStack = field(default_factory=ExitStack)
+    reset_callback: tp.Callable[[], None] | None = None
 
     def reset(self):
         self.offset = 0
+        if self.reset_callback is not None:
+            self.reset_callback()
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -427,6 +430,7 @@ class LMGen(StreamingModule[_LMGenState]):
             if state.condition_sum is not None:
                 assert state.condition_sum.shape[0] == batch_size, "CFG requires 2x more conditions."
         state.exit_stack.enter_context(self.lm_model.streaming(batch_size))
+        state.reset_callback = self.lm_model.reset_streaming
         return state
 
     @torch.no_grad()
