@@ -134,12 +134,14 @@ class CheckpointInfo:
         lm_config: config for instantiating the LM model.
             Can be None if the original Moshi 7B config should be used.
         raw_config: raw config, including original keys not intended for the LM.
+        model_type: indicate the intended use, should be `moshi` or `hibiki`.
     """
     moshi_weights: Path
     mimi_weights: Path
     tokenizer: Path
     lm_config: dict | None = None
     raw_config: dict | None = None
+    model_type: str = 'moshi'
 
     @staticmethod
     def from_hf_repo(hf_repo: str,
@@ -169,12 +171,14 @@ class CheckpointInfo:
             tokenizer_name = TEXT_TOKENIZER_NAME
             lm_config = None
             raw_config = None
+            model_type = 'moshi'
         else:
             raw_config = json.loads(Path(config_path).read_text())
             lm_config = dict(raw_config)
             moshi_name = lm_config.pop('moshi_name', MOSHI_NAME)
             mimi_name = lm_config.pop('mimi_name', MIMI_NAME)
             tokenizer_name = lm_config.pop('tokenizer_name', TEXT_TOKENIZER_NAME)
+            model_type = lm_config.pop('model_type', 'moshi')
 
         if moshi_weights is None:
             moshi_weights_final = hf_get(moshi_name, hf_repo)
@@ -193,7 +197,7 @@ class CheckpointInfo:
 
         return CheckpointInfo(
             moshi_weights_final, mimi_weights_final, tokenizer_final,
-            lm_config, raw_config)
+            lm_config, raw_config, model_type)
 
     def get_mimi(self, device: torch.device | str = 'cpu') -> MimiModel:
         if self.lm_config is None:
