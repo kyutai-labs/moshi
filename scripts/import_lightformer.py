@@ -8,8 +8,6 @@ from safetensors.torch import save_file
 
 import torch
 
-DEPFORMER_LAYERS = 6
-
 
 def import_model(
     in_path: Path,
@@ -49,7 +47,7 @@ def import_model(
         del model[f"linears.{dep_idx}.weight"]
     for real_idx in range(kept_weights, num_weights):
         model.pop(f"depformer_in.{real_idx}.weight")
-        for idx in range(DEPFORMER_LAYERS):
+        for idx in range(cfg.transformer_lm.depformer_num_layers):
             model.pop(f"depformer.layers.{idx}.gating.{real_idx}.linear_in.weight")
             model.pop(f"depformer.layers.{idx}.gating.{real_idx}.linear_out.weight")
 
