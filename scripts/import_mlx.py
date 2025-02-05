@@ -82,7 +82,7 @@ def import_model(
 
     max_df_steps = out_n_q
     if weights_per_step_schedule is not None:
-        max_df_steps = len(weights_per_step_schedule)
+        max_df_steps = max(weights_per_step_schedule) + 1
 
     for idx in range(exported_out_n_q):
         if weights_per_step_schedule is not None:
