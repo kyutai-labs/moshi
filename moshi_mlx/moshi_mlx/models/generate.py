@@ -84,14 +84,13 @@ class LmGen:
         text_tokens, audio_tokens = self.model.sample(
             text_tokens,
             audio_tokens,
-            self.step_idx,
             self.text_sampler,
             self.audio_sampler,
             ct=ct,
             cfg_coef=self.cfg_coef,
         )
         assert text_tokens.shape == (1,), "invalid output text-token shape"
-        assert audio_tokens.shape == (8,), "invalid output audio-token shape"
+        assert audio_tokens.shape == (self.model.cfg.generated_codebooks,), "invalid output audio-token shape"
 
         self.gen_sequence[:, 0, self.step_idx] = text_tokens
         for cb_idx, delay in enumerate(self.audio_delays[: self.main_codebooks]):
