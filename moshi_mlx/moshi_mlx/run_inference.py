@@ -91,14 +91,14 @@ def main():
     log("info", f"loading the audio tokenizer {mimi_weights}")
     audio_tokenizer = rustymimi.Tokenizer(mimi_weights)  # type: ignore
 
-    log("info", "warming up the model")
-    model.warmup()
-    log("info", "done warming up the model")
-
     if model.condition_provider is not None:
         ct = model.condition_provider.condition_tensor("description", "very_good")
     else:
         ct = None
+
+    log("info", "warming up the model")
+    model.warmup(ct)
+    log("info", "done warming up the model")
 
     steps = np.shape(in_pcms)[-1] // 1920
     gen = models.LmGen(

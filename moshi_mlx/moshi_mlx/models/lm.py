@@ -253,13 +253,14 @@ class Lm(nn.Module):
         )
         return text_token, audio_tokens
 
-    def warmup(self):
+    def warmup(self, ct: ConditionTensor | None):
         text, audio = self.sample(
             mx.array([[self.cfg.text_out_vocab_size]]),
             [mx.array([[0]])] * 8,
             0,
             text_sampler=sampling.Sampler(),
             audio_sampler=sampling.Sampler(),
+            ct=ct,
         )
         if text.sum().item() == 42:
             raise ValueError(42)
