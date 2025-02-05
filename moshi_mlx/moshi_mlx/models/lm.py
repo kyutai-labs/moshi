@@ -179,7 +179,7 @@ class DepFormer(nn.Module):
             last_token = last_token.reshape(1, 1)
 
             if cfg_coef != 1:
-                last_token = mx.tile(last_token, 2)
+                last_token = mx.tile(last_token, (2, 1))
             xs = slice.linear_in(main_transformer_out) + slice.emb(last_token)
             xs = slice.transformer(xs, cache=cache)
             logits = slice.linear_out(xs)
@@ -258,7 +258,7 @@ class Lm(nn.Module):
             xs = xs + ct.tensor
 
         if cfg_coef != 1:
-            xs = mx.tile(xs, 2)
+            xs = mx.tile(xs, (2, 1, 1))
         transformer_out = self.transformer(xs, cache=self.transformer_cache)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
