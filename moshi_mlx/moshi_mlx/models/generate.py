@@ -6,6 +6,7 @@ from typing import Optional
 
 import mlx.core as mx
 
+from ..modules.conditioner import ConditionTensor
 from ..models import Lm
 from ..utils import sampling
 
@@ -51,7 +52,7 @@ class LmGen:
         return -2
 
     # Runs one step of inference and return the generated text token.
-    def step(self, other_audio_tokens: mx.array) -> mx.array:
+    def step(self, other_audio_tokens: mx.array, ct: ConditionTensor | None = None) -> mx.array:
         if self.step_idx >= self.max_steps:
             raise ValueError(f"reached max-steps {self.max_steps}")
 
@@ -84,6 +85,7 @@ class LmGen:
             self.step_idx,
             self.text_sampler,
             self.audio_sampler,
+            ct,
         )
         assert text_tokens.shape == (1,), "invalid output text-token shape"
         assert audio_tokens.shape == (8,), "invalid output audio-token shape"

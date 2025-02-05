@@ -19,6 +19,7 @@ class LutConditionerConfig:
     tokenizer: str
     possible_values: dict[str, int]
 
+
 class LutConditioner(nn.Module):
     def __init__(self, output_dim: int, cfg: LutConditionerConfig):
         super().__init__()
@@ -38,6 +39,16 @@ class LutConditioner(nn.Module):
         idx = mx.array([idx])
         return self.output_proj(self.embed(idx))
 
+@dataclass
+class ConditionTensor:
+    tensor: mx.array
+
 class ConditionProvider(nn.Module):
     def __init__(self, output_dim: int, cfg: dict[str, LutConditionerConfig]):
         self.conditioners = { name: LutConditioner(output_dim, c) for name, c in cfg.items() }
+
+    def condition_tensor(self, name: str, value: str) -> ConditionTensor:
+        if name not in self.conditioners:
+            raise ValueError(f"unsupported conditioner {name}")
+        tensor = self.conditioners[name].condition(value)
+        return ConditionTensor(tensor)

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import mlx.core as mx
 import mlx.nn as nn
 
-from ..modules.conditioner import LutConditionerConfig, ConditionProvider
+from ..modules.conditioner import LutConditionerConfig, ConditionProvider, ConditionTensor
 from ..modules.kv_cache import KVCache, RotatingKVCache
 from ..modules.transformer import Transformer, TransformerConfig
 from ..utils import sampling
@@ -212,6 +212,8 @@ class Lm(nn.Module):
 
         if len(cfg.conditioners) > 0:
             self.condition_provider = ConditionProvider(cfg.transformer.d_model, cfg.conditioners)
+        else:
+            self.condition_provider = None
 
     def __call__(
         self,
@@ -231,10 +233,13 @@ class Lm(nn.Module):
         step_idx: int,
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
+        ct: ConditionTensor | None = None,
     ) -> tuple[mx.array, mx.array]:
         xs = self.text_emb(text_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             xs = xs + emb(token_ids)
+        if ct is not None:
+            xs = xs + ct.tensor
         transformer_out = self.transformer(xs, cache=self.transformer_cache)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
