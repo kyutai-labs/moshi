@@ -61,13 +61,19 @@ def main():
         print(f"Checkpoint size: {size:.1f}GB")
         old_name, old_ext = info.moshi_weights.name.rsplit('.', 1)
         new_name = old_name + '.q8.' + old_ext
-        api.upload_file(
-            path_or_fileobj=file.name,
-            path_in_repo=new_name,
-            repo_id=new_repo,
-            repo_type="model")
+        if False:
+            api.upload_file(
+                path_or_fileobj=file.name,
+                path_in_repo=new_name,
+                repo_id=new_repo,
+                repo_type="model")
     config = json.load(open(hf_hub_download(repo, 'config.json')))
     config['moshi_name'] = new_name
+    config['quantize'] = True
+    if not config['mimi_name'].startswith('hf://'):
+        config['mimi_name'] = f'hf://{repo}/{config["mimi_name"]}'
+    if not config['tokenizer_name'].startswith('hf://'):
+        config['tokenizer_name'] = f'hf://{repo}/{config["tokenizer_name"]}'
     with tempfile.NamedTemporaryFile(mode='w') as file:
         json.dump(config, file, indent=2)
         file.flush()

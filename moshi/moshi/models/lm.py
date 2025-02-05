@@ -64,7 +64,7 @@ class ScaledEmbedding(nn.Embedding):
             y = self.norm(y)
         y = torch.where(is_zero[..., None], zero, y)
         if self.low_rank is not None:
-            y = self.low_rank(y)
+            y = quantize.linear(self.low_rank, y)
         return y
 
 
