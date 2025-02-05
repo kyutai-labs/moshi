@@ -24,6 +24,7 @@ import torch
 
 from .client_utils import log
 from .models import loaders, MimiModel, LMModel, LMGen
+from .run_inference import get_condition_tensors
 
 
 def seed_all(seed):
@@ -39,16 +40,19 @@ def seed_all(seed):
 
 @dataclass
 class ServerState:
+    model_type: str
     mimi: MimiModel
     text_tokenizer: sentencepiece.SentencePieceProcessor
     lm_gen: LMGen
     lock: asyncio.Lock
 
-    def __init__(self, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
-                 lm: LMModel, device: str | torch.device):
+    def __init__(self, model_type: str, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
+                 lm: LMModel, cfg_coef: float, device: str | torch.device):
+        self.model_type = model_type
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
-        self.lm_gen = LMGen(lm)
+        condition_tensors = get_condition_tensors(model_type, lm, batch_size=1, cfg_coef=cfg_coef)
+        self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors)
 
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
@@ -185,6 +189,7 @@ def main():
     parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO,
                         help="HF repo to look into, defaults Moshiko. "
                              "Use this to select a different pre-trained model.")
+    parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
     parser.add_argument(
         "--ssl",
@@ -226,7 +231,7 @@ def main():
     lm = checkpoint_info.get_moshi(device=args.device)
     log("info", "moshi loaded")
 
-    state = ServerState(mimi, text_tokenizer, lm, args.device)
+    state = ServerState(checkpoint_info.model_type, mimi, text_tokenizer, lm, args.cfg_coef, args.device)
     log("info", "warming up the model")
     state.warmup()
     app = web.Application()

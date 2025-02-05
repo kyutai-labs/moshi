@@ -15,7 +15,7 @@ import sphn
 
 
 from .client_utils import log
-from .conditioners import ConditionAttributes, ClassifierFreeGuidanceDropout
+from .conditioners import ConditionAttributes, ConditionTensors
 from .models import loaders, MimiModel, LMModel, LMGen
 
 
@@ -30,24 +30,34 @@ def seed_all(seed):
     torch.backends.cudnn.benchmark = False
 
 
+def get_condition_tensors(model_type: str, lm: LMModel, batch_size: int, cfg_coef: float) -> ConditionTensors:
+    condition_tensors = {}
+    if lm.condition_provider is not None:
+        conditions: list[ConditionAttributes] | None = None
+        if model_type == 'hibiki':
+            conditions = [ConditionAttributes(text={"description": "very_good"}, wav={})] * batch_size
+            if cfg_coef != 1.:
+                # Extending the conditions with the negatives for the CFG.
+                conditions += [ConditionAttributes(text={"description": "very_bad"}, wav={})] * batch_size
+        else:
+            raise RuntimeError(f"Model expects conditioning but model type {model_type} is not supported.")
+        assert conditions is not None
+        prepared = lm.condition_provider.prepare(conditions)
+        condition_tensors = lm.condition_provider(prepared)
+    return condition_tensors
+
+
 @dataclass
 class InferenceState:
     mimi: MimiModel
     text_tokenizer: sentencepiece.SentencePieceProcessor
     lm_gen: LMGen
 
-    def __init__(self, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
+    def __init__(self, model_type: str, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
                  lm: LMModel, batch_size: int, cfg_coef: float, device: str | torch.device):
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
-        condition_tensors = None
-        if lm.condition_provider is not None:
-            conditions = [ConditionAttributes(text={"description": "very_good"}, wav={})] * batch_size
-            if cfg_coef != 1.:
-                # Extending the conditions with the negatives for the CFG.
-                conditions += ClassifierFreeGuidanceDropout(1.)(conditions)
-            prepared = lm.condition_provider.prepare(conditions)
-            condition_tensors = lm.condition_provider(prepared)
+        condition_tensors = get_condition_tensors(model_type, lm, batch_size, cfg_coef)
         self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors)
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
@@ -118,7 +128,9 @@ def main():
     in_pcms = torch.from_numpy(in_pcms).to(device=args.device)
     in_pcms = in_pcms[None, 0:1].expand(args.batch_size, -1, -1)
 
-    state = InferenceState(mimi, text_tokenizer, lm, args.batch_size, args.cfg_coef, args.device)
+    state = InferenceState(
+        checkpoint_info.model_type, mimi, text_tokenizer, lm,
+        args.batch_size, args.cfg_coef, args.device)
     out_pcms, out_text_tokens = state.run(in_pcms)
     log("info", f"out-pcm: {out_pcms.shape}, out-text: {out_text_tokens.shape}")
 

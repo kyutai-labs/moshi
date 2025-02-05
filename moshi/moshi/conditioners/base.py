@@ -213,7 +213,6 @@ class BaseConditioner(nn.Module, tp.Generic[Prepared]):
             mask = torch.zeros_like(cond[..., 0], dtype=torch.bool)
 
         cond = quantize.linear(self.output_proj, cond)
-        print(cond.dtype, cond, cond.std())
 
         maskf = mask.float()[..., None]
         if self.learnt_padding is not None:
