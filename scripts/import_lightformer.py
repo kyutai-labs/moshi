@@ -38,13 +38,13 @@ def import_model(
         out_proj_key = f"depformer.layers.{idx}.self_attn.out_proj.weight"
         out_proj = model[out_proj_key]
         out_proj = out_proj.view(num_weights, -1, *out_proj.shape[1:])
-        model[in_proj_key] = in_proj[:kept_weights].view(-1, *in_proj.shape[2:]).contiguous()
         model[out_proj_key] = out_proj[:kept_weights].view(-1, *out_proj.shape[2:]).contiguous()
-        model[out_proj_key] = out_proj[: out_proj.shape[0] // 2]
 
     # For mimi inference, we trim the depformer layer that are unused.
     for dep_idx in range(out_n_q - 1, in_n_q - 1):
         del model[f"depformer_emb.{dep_idx}.weight"]
+        if cfg.transformer_lm.depformer_low_rank_embeddings:
+            del model[f"depformer_emb.{dep_idx}.low_rank.weight"]
     for dep_idx in range(out_n_q, in_n_q):
         del model[f"linears.{dep_idx}.weight"]
     for real_idx in range(kept_weights, num_weights):
