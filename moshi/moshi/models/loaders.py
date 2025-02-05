@@ -146,9 +146,12 @@ class CheckpointInfo:
                      tokenizer: Path | str | None = None,
                      config_path: Path | str | None = None) -> 'CheckpointInfo':
         """Downloads the checkpoints from the given repo, along with its config.
+
         Extra overrides are possible for each of Moshi, Mimi, or the text tokenizer,
         which should be either a Path to a local file or a string representing a path
         to a local file or starting with `hf://` for pointing to a file in another repo.
+
+        Finally, a `config_path` can be provided to override the config from the repository.
         """
         if config_path is None:
             try:
