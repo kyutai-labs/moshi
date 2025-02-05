@@ -98,9 +98,9 @@ def import_model(
             if "depformer_text_emb.low_rank.weight" in tch_model:
                 model[base + "emb.low_rank.weight"] = tch_model["depformer_text_emb.low_rank.weight"].clone()
         else:
-            model[base + "emb.weight"] = tch_model[f"depformer_emb.{tch_idx-1}.weight"].clone()
+            model[base + "emb.weight"] = tch_model[f"depformer_emb.{idx-1}.weight"].clone()
             if f"depformer_emb.{tch_idx-1}.low_rank.weight" in tch_model:
-                model[base + "emb.low_rank.weight"] = tch_model[f"depformer_emb.{tch_idx-1}.low_rank.weight"].clone()
+                model[base + "emb.low_rank.weight"] = tch_model[f"depformer_emb.{idx-1}.low_rank.weight"].clone()
 
         for layer_idx in range(depformer_layers):
             layer = base + f"transformer.layers.{layer_idx}."
