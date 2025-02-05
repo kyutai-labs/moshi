@@ -14,14 +14,20 @@ from safetensors.torch import save_file
 from moshi.models import loaders
 from moshi.modules.transformer import quantize_transformer
 
+
+def get_api():
+    token = input("Write token? ").strip()
+    api = HfApi(token=token)
+    return api
+
+
 def main():
     parser = argparse.ArgumentParser('export_quantized')
     parser.add_argument('moshi_repo')
 
     args = parser.parse_args()
+    api = get_api()
 
-    token = open('token.txt').read().strip()
-    api = HfApi(token=token)
     repo = args.moshi_repo
     new_repo = repo.rsplit('-', 1)[0] + '-q8'
     if not api.repo_exists(new_repo):
