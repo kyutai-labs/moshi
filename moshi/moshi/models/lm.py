@@ -63,6 +63,8 @@ class ScaledEmbedding(nn.Embedding):
         if self.norm is not None:
             y = self.norm(y)
         y = torch.where(is_zero[..., None], zero, y)
+        if self.low_rank is not None:
+            y = self.low_rank(y)
         return y
 
 

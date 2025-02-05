@@ -26,7 +26,9 @@ def import_model(
         schedule = list(range(in_n_q))
 
     num_weights = max(schedule) + 1
+    schedule = schedule[:out_n_q]
     kept_weights = max(schedule) + 1
+    print(f"Number of dep weights: {num_weights}, keeping {kept_weights}")
 
     for idx in range(cfg.transformer_lm.depformer_num_layers):
         in_proj_key = f"depformer.layers.{idx}.self_attn.in_proj_weight"

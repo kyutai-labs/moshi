@@ -483,6 +483,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
                 context=context,
                 rope=rope,
                 weights_per_step=weights_per_step,
+                weights_per_step_schedule=weights_per_step_schedule,
                 **attn_kwargs,  # type: ignore
                 **factory_kwargs,  # type: ignore
             )  # type: ignore
