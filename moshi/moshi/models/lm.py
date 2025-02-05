@@ -483,7 +483,7 @@ class LMGen(StreamingModule[_LMGenState]):
         transformer_out, text_logits = state.graphed_main(input_, state.condition_sum)
         if self.cfg_coef != 1.:
             logits, logits_null = text_logits.chunk(2)
-            text_logits = logits + (logits - logits_null) * self.cfg_coef
+            text_logits = logits_null + (logits - logits_null) * self.cfg_coef
         # Shape of text_logits should be [B, K_text=1, T=1, Card_text]
         text_token = sample_token(
             text_logits.float(),
@@ -537,7 +537,7 @@ class LMGen(StreamingModule[_LMGenState]):
                 logits = lm_model.forward_depformer(cb_index, input_, transformer_out)
                 if self.cfg_coef != 1.:
                     logits, logits_null = logits.chunk(2)
-                    logits = logits + (logits - logits_null) * self.cfg_coef
+                    logits = logits_null + (logits - logits_null) * self.cfg_coef
                 next_token = sample_token(
                     logits.float(),
                     self.use_sampling,
