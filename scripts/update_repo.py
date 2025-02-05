@@ -67,10 +67,10 @@ def main():
         new_config[name] = filename
         changes = True
 
-    with tempfile.NamedTemporaryFile(mode='w') as file:
-        json.dump(new_config, file, indent=2)
-        file.flush()
-        if changes:
+    if changes:
+        with tempfile.NamedTemporaryFile(mode='w') as file:
+            json.dump(new_config, file, indent=2)
+            file.flush()
             api.upload_file(
                 path_or_fileobj=file.name,
                 path_in_repo='config.json',
