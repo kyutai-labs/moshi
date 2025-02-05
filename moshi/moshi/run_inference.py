@@ -4,36 +4,19 @@
 
 import argparse
 from dataclasses import dataclass
-import json
 from pathlib import Path
 import random
 import time
 
-from huggingface_hub import hf_hub_download
 import numpy as np
 import sentencepiece
 import torch
 import sphn
 
 
-from .client_utils import make_log
+from .client_utils import log
 from .conditioners import ConditionAttributes, ClassifierFreeGuidanceDropout
 from .models import loaders, MimiModel, LMModel, LMGen
-
-
-def log(level: str, msg: str):
-    print(make_log(level, msg))
-
-
-def hf_get(filename: str) -> str:
-    if filename.startswith("hf://"):
-        parts = filename[5:].split("/")
-        repo_name = parts[0] + "/" + parts[1]
-        filename = "/".join(parts[2:])
-        log("info", f"retrieving {filename} from hf repo {repo_name}")
-        return hf_hub_download(repo_name, filename)
-    else:
-        return filename
 
 
 def seed_all(seed):
@@ -111,7 +94,7 @@ def main():
                              "Use this to select a different pre-trained model.")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size to be used for inference.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
-    parser.add_argument("--lm-config", type=str, help="The LM config as a json file.")
+    parser.add_argument("--config", "--lm-config", dest="config", type=str, help="The config as a json file.")
     parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
     parser.add_argument("infile", type=str, help="Input audio file.")
     parser.add_argument("outfile", type=str, help="Output audio file in wav format.")
@@ -119,32 +102,15 @@ def main():
     args = parser.parse_args()
     seed_all(42424242)
 
-    lm_kwargs = None
-    num_codebooks = 8
-    if args.lm_config is not None:
-        log("info", f"loading config from {args.lm_config}")
-        with open(args.lm_config, "r") as fobj:
-            lm_kwargs = json.load(fobj)
-            num_codebooks = lm_kwargs.get("dep_q", num_codebooks)
-
+    log("info", "retrieving checkpoint")
+    checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
+        args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer, args.config)
     log("info", "loading mimi")
-    if args.mimi_weight is None:
-        args.mimi_weight = hf_hub_download(args.hf_repo, loaders.MIMI_NAME)
-    mimi = loaders.get_mimi(hf_get(args.mimi_weight), args.device, num_codebooks=num_codebooks)
+    mimi = checkpoint_info.get_mimi(device=args.device)
     log("info", "mimi loaded")
-
-    if args.tokenizer is None:
-        args.tokenizer = hf_hub_download(args.hf_repo, loaders.TEXT_TOKENIZER_NAME)
-    text_tokenizer = sentencepiece.SentencePieceProcessor(hf_get(args.tokenizer))  # type: ignore
-
+    text_tokenizer = checkpoint_info.get_text_tokenizer()
     log("info", "loading moshi")
-    if args.moshi_weight is None:
-        if args.hf_repo.endswith('-q8'):
-            moshi_name = loaders.MOSHI_Q8_NAME
-        else:
-            moshi_name = loaders.MOSHI_NAME
-        args.moshi_weight = hf_hub_download(args.hf_repo, moshi_name)
-    lm = loaders.get_moshi_lm(hf_get(args.moshi_weight), args.device, lm_kwargs=lm_kwargs)
+    lm = checkpoint_info.get_moshi(device=args.device)
     log("info", "moshi loaded")
 
     log("info", f"loading input file {args.infile}")
