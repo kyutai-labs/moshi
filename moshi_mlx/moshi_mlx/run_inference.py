@@ -90,7 +90,8 @@ def main():
     in_pcms, _ = sphn.read(args.infile, sample_rate=24000)
 
     log("info", f"loading the audio tokenizer {mimi_weights}")
-    audio_tokenizer = rustymimi.Tokenizer(mimi_weights)  # type: ignore
+    generated_codebooks = lm_config.generated_codebooks
+    audio_tokenizer = rustymimi.Tokenizer(mimi_weights, num_codebooks=generated_codebooks)  # type: ignore
 
     if model.condition_provider is not None:
         ct = model.condition_provider.condition_tensor("description", "very_good")
@@ -110,7 +111,6 @@ def main():
         cfg_coef=args.cfg_coef,
         check=False,
     )
-    generated_codebooks = lm_config.generated_codebooks
 
     all_out_pcm = []
     start_time = time.time()
