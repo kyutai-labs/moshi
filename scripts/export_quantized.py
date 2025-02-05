@@ -28,7 +28,9 @@ def main():
         api.create_repo(new_repo, repo_type='model')
         print("Repo created.")
 
-    to_copy = ['README.md', 'tokenizer-e351c8d8-checkpoint125.safetensors', 'tokenizer_spm_32k_3.model']
+    to_copy = [
+        'README.md', 'tokenizer-e351c8d8-checkpoint125.safetensors',
+        'tokenizer_spm_32k_3.model', 'config.json']
     for file in to_copy:
         if not api.file_exists(new_repo, file):
             print("File", file, "is missing")
