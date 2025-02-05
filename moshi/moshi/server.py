@@ -22,12 +22,8 @@ import sphn
 import torch
 
 
-from .client_utils import make_log
+from .client_utils import log
 from .models import loaders, MimiModel, LMModel, LMGen
-
-
-def log(level: str, msg: str):
-    print(make_log(level, msg))
 
 
 def seed_all(seed):
@@ -217,24 +213,17 @@ def main():
         else:
             tunnel_token = args.gradio_tunnel_token
 
+    log("info", "retrieving checkpoint")
+    checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
+        args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer)
     log("info", "loading mimi")
-    if args.mimi_weight is None:
-        args.mimi_weight = hf_hub_download(args.hf_repo, loaders.MIMI_NAME)
-    mimi = loaders.get_mimi(args.mimi_weight, args.device)
+    mimi = checkpoint_info.get_mimi(device=args.device)
     log("info", "mimi loaded")
 
-    if args.tokenizer is None:
-        args.tokenizer = hf_hub_download(args.hf_repo, loaders.TEXT_TOKENIZER_NAME)
-    text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)  # type: ignore
+    text_tokenizer = checkpoint_info.get_text_tokenizer()
 
     log("info", "loading moshi")
-    if args.moshi_weight is None:
-        if args.hf_repo.endswith('-q8'):
-            moshi_name = loaders.MOSHI_Q8_NAME
-        else:
-            moshi_name = loaders.MOSHI_NAME
-        args.moshi_weight = hf_hub_download(args.hf_repo, moshi_name)
-    lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
+    lm = checkpoint_info.get_moshi(device=args.device)
     log("info", "moshi loaded")
 
     state = ServerState(mimi, text_tokenizer, lm, args.device)

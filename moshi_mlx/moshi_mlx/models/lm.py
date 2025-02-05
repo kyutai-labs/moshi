@@ -30,6 +30,16 @@ class LmConfig:
     audio_delays: list[int]
     conditioners: dict[str, LutConditionerConfig]
 
+    @property
+    def generated_codebooks(self):
+        if self.depformer is None:
+            return 0
+        return self.depformer.num_slices
+
+    @property
+    def other_codebooks(self):
+        return self.audio_codebooks - self.generated_codebooks
+
     @classmethod
     def from_config_dict(cls, data: dict) -> "LmConfig":
         transformer = TransformerConfig(
@@ -159,19 +169,28 @@ class DepFormer(nn.Module):
         sampler: sampling.Sampler,
         text_token: mx.array,
         cache: list[KVCache] | list[RotatingKVCache],
+        cfg_coef: float = 1.,
     ) -> mx.array:
         tokens = []
         last_token = text_token
         # The cache is shared between the depformer slices but not persisted between sample calls.
         for c in cache:
             c.reset()
-        for slice_idx, slice in enumerate(self.slices):
-            last_token = (
-                last_token if step_idx > 0 or slice_idx in (0, 1, 9) else mx.array(2048)
-            )
+        for slice in self.slices:
+            # The 2048 tokens should be teacher forced on the first slices. However as delays
+            # are non-decreasing in the number of slices, this is actually not necessary as
+            # the generated tokens will end up not being used.
+            last_token = last_token.reshape(1, 1)
+
+            if cfg_coef != 1:
+                last_token = mx.tile(last_token, (2, 1))
             xs = slice.linear_in(main_transformer_out) + slice.emb(last_token)
             xs = slice.transformer(xs, cache=cache)
             logits = slice.linear_out(xs)
+            if cfg_coef != 1:
+                l1, l2 = logits.split(2, axis=0)
+                logits = cfg_coef * l1 - (cfg_coef - 1) * l2
+
             last_token, _ = sampler(logits[0])
             tokens.append(last_token)
         tokens = mx.concatenate(tokens)
@@ -234,15 +253,23 @@ class Lm(nn.Module):
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
         ct: ConditionTensor | None = None,
+        cfg_coef: float = 1.,
     ) -> tuple[mx.array, mx.array]:
         xs = self.text_emb(text_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             xs = xs + emb(token_ids)
         if ct is not None:
             xs = xs + ct.tensor
+
+        if cfg_coef != 1:
+            xs = mx.tile(xs, (2, 1, 1))
         transformer_out = self.transformer(xs, cache=self.transformer_cache)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
+        if cfg_coef != 1:
+            l1, l2 = text_logits.split(2, axis=0)
+            text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
+
         text_token, _ = text_sampler(text_logits[:, 0])
         audio_tokens = self.depformer.sample(
             transformer_out,
@@ -250,13 +277,14 @@ class Lm(nn.Module):
             audio_sampler,
             text_token,
             self.depformer_cache,
+            cfg_coef=cfg_coef,
         )
         return text_token, audio_tokens
 
     def warmup(self, ct: ConditionTensor | None):
         text, audio = self.sample(
             mx.array([[self.cfg.text_out_vocab_size]]),
-            [mx.array([[0]])] * 8,
+            [mx.array([[0]])] * self.cfg.other_codebooks,
             0,
             text_sampler=sampling.Sampler(),
             audio_sampler=sampling.Sampler(),
