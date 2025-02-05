@@ -120,7 +120,6 @@ def main():
 
     state = InferenceState(mimi, text_tokenizer, lm, args.batch_size, args.cfg_coef, args.device)
     out_pcms, out_text_tokens = state.run(in_pcms)
-    print(out_text_tokens)
     log("info", f"out-pcm: {out_pcms.shape}, out-text: {out_text_tokens.shape}")
 
     if args.batch_size == 1:
