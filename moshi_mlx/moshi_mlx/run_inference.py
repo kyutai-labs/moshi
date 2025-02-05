@@ -108,6 +108,7 @@ def main():
         audio_sampler=utils.Sampler(top_k=250),
         check=False,
     )
+    generated_codebooks = lm_config.generated_codebooks()
 
     all_out_pcm = []
     start_time = time.time()
@@ -115,7 +116,7 @@ def main():
     for idx in range(0, steps):
         pcm_data = in_pcms[:, idx * 1920:(idx + 1) * 1920]
         other_audio_tokens = audio_tokenizer.encode_step(pcm_data[None, 0:1])
-        other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[:, :, :8]
+        other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[:, :, :generated_codebooks]
         text_token = gen.step(other_audio_tokens[0], ct)
         text_token = text_token[0].item()
         audio_tokens = gen.last_audio_tokens()

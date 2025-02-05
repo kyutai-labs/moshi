@@ -30,6 +30,11 @@ class LmConfig:
     audio_delays: list[int]
     conditioners: dict[str, LutConditionerConfig]
 
+    def generated_codebooks(self):
+        if self.depformer is None:
+            return 0
+        return self.depformer.num_slices
+
     @classmethod
     def from_config_dict(cls, data: dict) -> "LmConfig":
         transformer = TransformerConfig(
