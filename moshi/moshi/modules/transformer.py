@@ -285,6 +285,8 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         rope (`RotaryEmbedding`, optional): Rope embedding to use.
         weights_per_step (int): use different weights per time step. If non zero, should correspond to the
             number of possible time steps.
+        weights_per_step_schedule (list[int] | None): if provided, some steps will share weights when
+            `weights_per_step` is True, e.g. step `I` will use weights `schedule[I]`.
         device (torch.device, optional): Device on which to initialize.
         dtype (torch.dtype, optional): dtype to use.
     """
@@ -299,6 +301,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         context: tp.Optional[int] = None,
         rope: tp.Optional[RotaryEmbedding] = None,
         weights_per_step: int = 0,
+        weights_per_step_schedule: list[int] | None = None,
         device=None,
         dtype=None,
     ):
@@ -310,13 +313,18 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         self.context = context
         self.rope = rope
         self.num_heads = num_heads
+        self.weights_per_step = weights_per_step
+        self.weights_per_step_schedule = weights_per_step_schedule
 
         out_dim = embed_dim
         out_dim = 3 * embed_dim
         mult = 1
-        self.weights_per_step = weights_per_step
         if weights_per_step:
-            mult = weights_per_step
+            if weights_per_step_schedule:
+                assert len(weights_per_step_schedule) == weights_per_step
+                mult = max(weights_per_step_schedule) + 1
+            else:
+                mult = weights_per_step
         in_proj = nn.Linear(embed_dim, mult * out_dim, bias=False, **factory_kwargs)
         # We try to follow the default PyTorch MHA convention, to easily compare results.
         self.in_proj_weight = in_proj.weight
@@ -373,7 +381,8 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
         if self.weights_per_step:
             projected = quantize.multi_linear(
-                self.weights_per_step, self, query, offset_cpu, name='in_proj_weight')
+                self.weights_per_step, self.weights_per_step_schedule,
+                self, query, offset_cpu, name='in_proj_weight')
         else:
             projected = quantize.linear(self, query, 'in_proj_weight')
         q, k, v = rearrange(
@@ -399,7 +408,9 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
         x = rearrange(x, "b h t d -> b t (h d)")
         if self.weights_per_step:
-            x = quantize.multi_linear(self.weights_per_step, self.out_proj, x, offset_cpu)
+            x = quantize.multi_linear(
+                self.weights_per_step, self.weights_per_step_schedule,
+                self.out_proj, x, offset_cpu)
         else:
             x = quantize.linear(self.out_proj, x)
         if state is not None:
@@ -432,6 +443,8 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         gating (str): if provided, replaces FFN with special gating, like GLU, GSiGLU etc.
         weights_per_step (int): use different weights per time step. If non zero, should correspond to the
             number of possible time steps.
+        weights_per_step_schedule (list[int] | None): if provided, some steps will share weights when
+            `weights_per_step` is True, e.g. step `I` will use weights `schedule[I]`.
         skip_self_attn: If true, skips the self attention module and the norm
         device (torch.device, optional): Device on which to initialize.
         dtype (torch.dtype, optional): dtype to use.
@@ -451,6 +464,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         layer_scale: tp.Optional[float] = None,
         gating: str = "none",
         weights_per_step: int = 0,
+        weights_per_step_schedule: list[int] | None = None,
         activation=F.gelu,
         skip_self_attn: bool = False,
         device=None,
@@ -476,17 +490,24 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         self.norm2 = create_norm_fn(norm, d_model, **factory_kwargs)
         # Redefine feedforward layers to expose bias parameter
         self.weights_per_step = weights_per_step
+        self.weights_per_step_schedule = weights_per_step_schedule
         self.gating: tp.Optional[nn.Module] = None
         self.linear1: tp.Optional[nn.Module] = None
         self.linear2: tp.Optional[nn.Module] = None
         self.activation = activation
         self.skip_self_attn = skip_self_attn
 
+        num_weights = 1
+        if weights_per_step is not None:
+            num_weights = weights_per_step
+            if weights_per_step_schedule is not None:
+                assert len(weights_per_step_schedule) == weights_per_step
+                num_weights = max(weights_per_step_schedule) + 1
         if isinstance(dim_feedforward, list):
             assert dim_feedforward
-            assert len(dim_feedforward) == weights_per_step, (
+            assert len(dim_feedforward) == num_weights, (
                 "Length of dim_feedforward must match weights_per_step,"
-                f" got {len(dim_feedforward)} != {weights_per_step}"
+                f" got {len(dim_feedforward)} != {num_weights}"
             )
         if gating == "none":
             assert (
@@ -506,7 +527,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
             self.linear2 = None
             if weights_per_step:
                 if isinstance(dim_feedforward, int):
-                    dim_feedforward = [dim_feedforward] * weights_per_step
+                    dim_feedforward = [dim_feedforward] * num_weights
                 assert isinstance(dim_feedforward, list), dim_feedforward
                 self.gating = nn.ModuleList(
                     [
@@ -550,7 +571,10 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
                 B, T, D = x.shape
                 ys = []
                 for t in range(T):
-                    y = self.gating[offset + t](x[:, t : t + 1])
+                    linear_index = offset + t
+                    if self.weights_per_step_schedule:
+                        linear_index = self.weights_per_step_schedule[linear_index]
+                    y = self.gating[linear_index](x[:, t:t + 1])
                     ys.append(y)
                 update = torch.cat(ys, dim=1)
             else:

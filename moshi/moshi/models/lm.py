@@ -38,15 +38,22 @@ class ScaledEmbedding(nn.Embedding):
     Args:
         norm (bool): if True, uses a layer norm after the embedding.
         zero_idx (int): special value indicating that the output should be exactly 0.
+        low_rank (int | None): if provided, uses low rank embedding with a linear layer to reach
+            the desired dimension. Quite efficient for reducing the number of weights for very large vocabs.
     """
 
-    def __init__(self, *args, norm: bool = False, zero_idx: int = -1, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, num_embeddings: int, embedding_dim: int,
+                 *args, norm: bool = False, zero_idx: int = -1,
+                 low_rank: int | None = None, **kwargs):
+        super().__init__(num_embeddings, low_rank or embedding_dim, *args, **kwargs)
         self.norm = None
         if norm:
             self.norm = create_norm_fn("layer_norm", self.embedding_dim)
         assert zero_idx < 0, "Please use negative values for the zero_idx."
         self.zero_idx = zero_idx
+        self.low_rank = None
+        if low_rank is not None:
+            self.low_rank = nn.Linear(low_rank, embedding_dim, bias=False)
 
     def forward(self, input, *args, **kwargs):
         is_zero = input == self.zero_idx
@@ -77,6 +84,8 @@ class LMModel(StreamingContainer):
         depformer_multi_linear (bool): if True, uses one linear layer per codebook to project the
             output of the main transformer to the Depformer latent space.
         depformer_dim_feedforward (int| list[int]| None): If None, defaults to hidden_scale * depformer_dim.
+        depformer_weights_per_step_schedule (list[int] | None): mapping `CODEBOOK_INDEX -> WEIGHT_INDEX`, allowing
+        depformer_low_rank_embeddings (int | None): if provided, uses low rank embeddings, with a linear
         existing_text_padding_id (bool): if True, will use a different token for the initial text token, and
             the text padding token.
         same_initial (bool): if True, uses the same initial tokens for both text and audio mode.
@@ -100,6 +109,8 @@ class LMModel(StreamingContainer):
         depformer_dim_feedforward: int | list[int] | None = None,
         depformer_multi_linear: bool = False,
         depformer_weights_per_step: bool = False,
+        depformer_weights_per_step_schedule: list[int] | None = None,
+        depformer_low_rank_embeddings: int | None = None,
         depformer_pos_emb: str = "sin",
         existing_text_padding_id: tp.Optional[int] = None,
         context: tp.Optional[int] = None,
@@ -120,6 +131,9 @@ class LMModel(StreamingContainer):
         self.dim = dim
         self.existing_text_padding_id = existing_text_padding_id
         self.context = context
+        self.depformer_weights_per_step_schedule = depformer_weights_per_step_schedule
+        if depformer_weights_per_step_schedule is not None:
+            assert len(depformer_weights_per_step_schedule) == dep_q
         kwargs["context"] = context
         EmbeddingFactory = partial(
             ScaledEmbedding,
@@ -166,13 +180,17 @@ class LMModel(StreamingContainer):
             kwargs_dep["weights_per_step"] = dep_q
         if depformer_multi_linear:
             # One linear layer per codebook to project different informations from the main model.
+            num_in = dep_q
+            if depformer_weights_per_step_schedule:
+                num_in = max(depformer_weights_per_step_schedule) + 1
             self.depformer_in = nn.ModuleList(
-                [nn.Linear(dim, depformer_dim, bias=False) for _ in range(dep_q)]
+                [nn.Linear(dim, depformer_dim, bias=False) for _ in range(num_in)]
             )
         else:
             self.depformer_in = nn.ModuleList(
                 [nn.Linear(dim, depformer_dim, bias=False)]
             )
+        EmbeddingFactory = partial(EmbeddingFactory, low_rank=depformer_low_rank_embeddings)
         # Only using up to dep_q - 1 because the last codebook is never an input to Depformer.
         self.depformer_emb = nn.ModuleList(
             [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
@@ -184,6 +202,7 @@ class LMModel(StreamingContainer):
             d_model=depformer_dim,
             dim_feedforward=depformer_dim_feedforward,
             norm=norm,
+            weights_per_step_schedule=depformer_weights_per_step_schedule,
             quantize=quantize,
             device=device,
             dtype=dtype,
@@ -320,7 +339,10 @@ class LMModel(StreamingContainer):
         last_token_input: tp.Optional[torch.Tensor] = None
         depformer_input = transformer_out
         if self.depformer_multi_linear:
-            depformer_input = quantize.linear(self.depformer_in[depformer_cb_index], depformer_input)
+            in_index = depformer_cb_index
+            if self.depformer_weights_per_step_schedule is not None:
+                in_index = self.depformer_weights_per_step_schedule[in_index]
+            depformer_input = quantize.linear(self.depformer_in[in_index], depformer_input)
         else:
             depformer_input = quantize.linear(self.depformer_in[0], depformer_input)
         if depformer_cb_index == 0:
