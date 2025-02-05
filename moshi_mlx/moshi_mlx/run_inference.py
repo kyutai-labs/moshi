@@ -71,7 +71,7 @@ def main():
         tokenizer = hf_hub_download(args.hf_repo, lm_config["tokenizer_name"])
     tokenizer = hf_get(tokenizer)
 
-    lm_config = models.LmConfig.from_dict(lm_config)
+    lm_config = models.LmConfig.from_config_dict(lm_config)
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if moshi_weights.endswith(".q4.safetensors"):
@@ -91,8 +91,13 @@ def main():
     log("info", f"loading the audio tokenizer {mimi_weights}")
     audio_tokenizer = rustymimi.Tokenizer(mimi_weights)  # type: ignore
 
+    if model.condition_provider is not None:
+        ct = model.condition_provider.condition_tensor("description", "very_good")
+    else:
+        ct = None
+
     log("info", "warming up the model")
-    model.warmup()
+    model.warmup(ct)
     log("info", "done warming up the model")
 
     steps = np.shape(in_pcms)[-1] // 1920
@@ -111,7 +116,7 @@ def main():
         pcm_data = in_pcms[:, idx * 1920:(idx + 1) * 1920]
         other_audio_tokens = audio_tokenizer.encode_step(pcm_data[None, 0:1])
         other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[:, :, :8]
-        text_token = gen.step(other_audio_tokens[0])
+        text_token = gen.step(other_audio_tokens[0], ct)
         text_token = text_token[0].item()
         audio_tokens = gen.last_audio_tokens()
         _text = None
