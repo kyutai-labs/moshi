@@ -84,7 +84,6 @@ class LmGen:
         text_tokens, audio_tokens = self.model.sample(
             text_tokens,
             audio_tokens,
-            self.step_idx,
             self.text_sampler,
             self.audio_sampler,
             ct=ct,

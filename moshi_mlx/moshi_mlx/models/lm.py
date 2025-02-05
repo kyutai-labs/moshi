@@ -165,7 +165,6 @@ class DepFormer(nn.Module):
     def sample(
         self,
         main_transformer_out: mx.array,
-        step_idx: int,
         sampler: sampling.Sampler,
         text_token: mx.array,
         cache: list[KVCache] | list[RotatingKVCache],
@@ -249,7 +248,6 @@ class Lm(nn.Module):
         self,
         text_token_ids: mx.array,
         audio_token_ids: list[mx.array],
-        step_idx: int,
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
         ct: ConditionTensor | None = None,
@@ -273,7 +271,6 @@ class Lm(nn.Module):
         text_token, _ = text_sampler(text_logits[:, 0])
         audio_tokens = self.depformer.sample(
             transformer_out,
-            step_idx,
             audio_sampler,
             text_token,
             self.depformer_cache,
@@ -285,7 +282,6 @@ class Lm(nn.Module):
         text, audio = self.sample(
             mx.array([[self.cfg.text_out_vocab_size]]),
             [mx.array([[0]])] * self.cfg.other_codebooks,
-            0,
             text_sampler=sampling.Sampler(),
             audio_sampler=sampling.Sampler(),
             ct=ct,
