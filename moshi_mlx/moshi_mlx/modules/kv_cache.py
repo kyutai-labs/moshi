@@ -51,6 +51,8 @@ class KVCache:
 
     def reset(self):
         self.offset = 0
+        self.keys = None
+        self.values = None
 
     @property
     def state(self):
@@ -149,6 +151,8 @@ class RotatingKVCache:
     def reset(self):
         self.offset = 0
         self._idx = 0
+        self.keys = None
+        self.values = None
 
     @property
     def state(self):

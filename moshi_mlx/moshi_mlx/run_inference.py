@@ -41,6 +41,7 @@ def main():
     parser.add_argument("--hf-repo", type=str, default="kyutai/moshiko-mlx-q8")
     parser.add_argument("--lm-config", type=str, help="The LM config as a json file.")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--cfg-coef", type=float, default=1.)
     parser.add_argument("infile", type=str, help="Input audio file.")
     parser.add_argument("outfile", type=str, help="Output audio file in wav format.")
     args = parser.parse_args()
@@ -106,8 +107,10 @@ def main():
         max_steps=steps,
         text_sampler=utils.Sampler(top_k=25),
         audio_sampler=utils.Sampler(top_k=250),
+        cfg_coef=args.cfg_coef,
         check=False,
     )
+    generated_codebooks = lm_config.generated_codebooks()
 
     all_out_pcm = []
     start_time = time.time()
@@ -115,7 +118,7 @@ def main():
     for idx in range(0, steps):
         pcm_data = in_pcms[:, idx * 1920:(idx + 1) * 1920]
         other_audio_tokens = audio_tokenizer.encode_step(pcm_data[None, 0:1])
-        other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[:, :, :8]
+        other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[:, :, :generated_codebooks]
         text_token = gen.step(other_audio_tokens[0], ct)
         text_token = text_token[0].item()
         audio_tokens = gen.last_audio_tokens()
