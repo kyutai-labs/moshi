@@ -104,8 +104,8 @@ def main():
     gen = models.LmGen(
         model=model,
         max_steps=steps,
-        text_sampler=utils.Sampler(),
-        audio_sampler=utils.Sampler(),
+        text_sampler=utils.Sampler(top_p=0.999),
+        audio_sampler=utils.Sampler(top_p=0.999),
         check=False,
     )
 
