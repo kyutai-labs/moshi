@@ -2,9 +2,15 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 """Retrieves the pretrained models for Moshi and Mimi."""
+from dataclasses import dataclass
+import json
 from pathlib import Path
+import warnings
 
+from huggingface_hub import hf_hub_download
+from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_model
+import sentencepiece
 import torch
 import typing as tp
 
@@ -102,6 +108,102 @@ _lm_kwargs = {
 }
 
 
+def hf_get(filename: str | Path) -> Path:
+    if isinstance(filename, Path):
+        return filename
+    if filename.startswith("hf://"):
+        parts = filename[5:].split("/")
+        repo_name = parts[0] + "/" + parts[1]
+        filename = "/".join(parts[2:])
+        return Path(hf_hub_download(repo_name, filename))
+    else:
+        return Path(filename)
+
+
+@dataclass
+class CheckpointInfo:
+    """
+    Contains the paths to each sub model, along with some extra configuration.
+
+    Args:
+        moshi_weights: path to the checkpoint for the Moshi LM.
+        mimi_weights: path to the checkpoint for the Mimi audio tokenizer.
+        tokenizer: path to the text tokenizer.
+        lm_config: config for instantiating the LM model.
+            Can be None if the original Moshi 7B config should be used.
+        raw_config: raw config, including original keys not intended for the LM.
+    """
+    moshi_weights: Path
+    mimi_weights: Path
+    tokenizer: Path
+    lm_config: dict | None = None
+    raw_config: dict | None = None
+
+    @staticmethod
+    def from_hf_repo(hf_repo: str,
+                     moshi_weights: Path | str | None = None,
+                     mimi_weights: Path | str | None = None,
+                     tokenizer: Path | str | None = None,
+                     config_path: Path | str | None = None) -> 'CheckpointInfo':
+        """Downloads the checkpoints from the given repo, along with its config.
+        Extra overrides are possible for each of Moshi, Mimi, or the text tokenizer,
+        which should be either a Path to a local file or a string representing a path
+        to a local file or starting with `hf://` for pointing to a file in another repo.
+        """
+        if config_path is None:
+            try:
+                config_path = hf_hub_download(hf_repo, 'config.json')
+            except EntryNotFoundError:
+                # No config.json, which might indicate legacy repository.
+                warnings.warn(f"Repository {hf_repo} contains no config.json. "
+                              "Assuming this is a Moshi 7B. Support for such repository "
+                              "might be removed in the future.")
+        if config_path is None:
+            moshi_name = MOSHI_NAME
+            mimi_name = MIMI_NAME
+            tokenizer_name = TEXT_TOKENIZER_NAME
+            lm_config = None
+            raw_config = None
+        else:
+            raw_config = json.loads(Path(config_path).read_text())
+            lm_config = dict(raw_config)
+            moshi_name = lm_config.pop('moshi_name', MOSHI_NAME)
+            mimi_name = lm_config.pop('mimi_name', MIMI_NAME)
+            tokenizer_name = lm_config.pop('tokenizer_name', TEXT_TOKENIZER_NAME)
+
+        if moshi_weights is None:
+            moshi_weights_final = Path(hf_hub_download(hf_repo, moshi_name))
+        else:
+            moshi_weights_final = hf_get(moshi_weights)
+
+        if mimi_weights is None:
+            mimi_weights_final = Path(hf_hub_download(hf_repo, mimi_name))
+        else:
+            mimi_weights_final = hf_get(mimi_weights)
+
+        if tokenizer is None:
+            tokenizer_final = Path(hf_hub_download(hf_repo, tokenizer_name))
+        else:
+            tokenizer_final = hf_get(tokenizer)
+
+        return CheckpointInfo(
+            moshi_weights_final, mimi_weights_final, tokenizer_final,
+            lm_config, raw_config)
+
+    def get_mimi(self, device: torch.device | str = 'cpu') -> MimiModel:
+        if self.lm_config is None:
+            num_codebooks = 8
+        else:
+            num_codebooks = self.lm_config['dep_q']
+        return get_mimi(self.mimi_weights, num_codebooks=num_codebooks, device=device)
+
+    def get_moshi(self, strict: bool = True, device: torch.device | str = 'cpu') -> LMModel:
+        return get_moshi_lm(self.moshi_weights, lm_kwargs=self.lm_config, device=device, strict=strict)
+
+    def get_text_tokenizer(self) -> sentencepiece.SentencePieceProcessor:
+        return sentencepiece.SentencePieceProcessor(str(self.tokenizer))  # type: ignore
+
+
 def _is_safetensors(path: Path | str) -> bool:
     return Path(path).suffix in (".safetensors", ".sft", ".sfts")
 
@@ -147,7 +249,6 @@ def get_mimi(filename: str | Path,
 def get_moshi_lm(filename: str | Path,
                  device: torch.device | str = 'cpu',
                  lm_kwargs: tp.Optional[tp.Dict] = None,
-                 quantize: bool | None = None,
                  strict: bool = True) -> LMModel:
     dtype = torch.bfloat16
     if lm_kwargs is None:
@@ -157,17 +258,13 @@ def get_moshi_lm(filename: str | Path,
         del lm_kwargs["conditioners"]
     if "fuser" in lm_kwargs:
         lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
-    if quantize is None:
-        quantize = '.q8.' in str(filename)
     model = LMModel(
         device=device,
         dtype=dtype,
-        quantize=quantize,
         **lm_kwargs)
     model.eval()
     if _is_safetensors(filename):
         load_model(model, filename, strict=strict)
-        pass
     else:
         pkg = torch.load(
             filename,
