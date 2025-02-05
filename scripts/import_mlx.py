@@ -11,6 +11,7 @@ from safetensors.torch import save_file, load_file
 def import_model(
     in_path: Path,
     out_path: Path,
+    weights_per_step_schedule: list[int] | None = None,
     silent: bool = False,
     max_out_n_q: int | None = None,
 ) -> None:
@@ -37,6 +38,15 @@ def import_model(
     if not silent:
         print(f"in_n_q: {in_n_q}, out_n_q: {out_n_q}")
 
+    depformer_layers: int | None = None
+    for idx in range(999):
+        if f"depformer.layers.{idx}.self_attn.in_proj_weight" not in tch_model:
+            depformer_layers = idx
+            break
+    assert depformer_layers is not None
+    if not silent:
+        print(f"depformer layers: {depformer_layers}")
+
     model = {}
     for name in ["text_emb.weight", "text_linear.weight"]:
         model[name] = tch_model[name]
@@ -50,8 +60,7 @@ def import_model(
         model[dst_name] = tch_model[src_name]
 
     for k, v in sorted(tch_model.items()):
-        if not silent:
-            print(k, v.shape, v.dtype)
+        # print(k, v.shape, v.dtype)
         if k.startswith("transformer"):
             if k.endswith(".alpha"):
                 v = v[0, 0]
@@ -65,7 +74,11 @@ def import_model(
         print(f"only exporting the first {exported_out_n_q} depformer layers")
     else:
         exported_out_n_q = out_n_q
-    for idx in range(exported_out_n_q):
+
+    if weights_per_step_schedule is None:
+        weights_per_step_schedule = list(range(exported_out_n_q))
+
+    for idx, weight_idx in enumerate(weights_per_step_schedule):
         base = f"depformer.slices.{idx}."
         model[base + "linear_in.weight"] = tch_model[f"depformer_in.{idx}.weight"]
         model[base + "linear_out.weight"] = tch_model[f"linears.{idx}.weight"]
@@ -74,7 +87,7 @@ def import_model(
         else:
             model[base + "emb.weight"] = tch_model[f"depformer_emb.{idx-1}.weight"]
 
-        for layer_idx in range(6):
+        for layer_idx in range(depformer_layers):
             layer = base + f"transformer.layers.{layer_idx}."
             # WARNING: note that this uses in_proj_weight vs out_proj.weight
             model[layer + "self_attn.in_proj.weight"] = (
