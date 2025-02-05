@@ -32,12 +32,14 @@ def linear(module: nn.Module, x: torch.Tensor, name='weight') -> torch.Tensor:
         return nn.functional.linear(x, getattr(module, name))
 
 
-def multi_linear(num_linear: int, module: nn.Module, x: torch.Tensor, offset: int, name='weight') -> torch.Tensor:
+def multi_linear(num_steps: int, schedule: list[int] | None,
+                 module: nn.Module, x: torch.Tensor, offset: int, name='weight') -> torch.Tensor:
     """Utility to apply a multi linear layer to the given input. A multi linear layer
     applies a different set of weight for each time step.
 
     Args:
-        num_linear (int): Number of possible time steps and so number of linears.
+        num_steps (int): Number of possible time steps.
+        schedule (list[int] or None): schedule for weight sharing.
         weight (torch.Tensor): Weight tensor, with shape `[num_linear * chout, chin]`.
         x (torch.Tensor): Input tensor, with shape `[B, T, C]`.
         offset (int): offset for the current time step, in particular for decoding, with
@@ -54,6 +56,10 @@ def multi_linear(num_linear: int, module: nn.Module, x: torch.Tensor, offset: in
         weight_scb = None
     assert isinstance(weight, torch.Tensor)
 
+    num_linear = num_steps
+    if schedule is not None:
+        num_linear = max(schedule) + 1
+
     chout, chin = weight.shape
     weight = weight.view(num_linear, -1, chin)
     if weight_scb is not None:
@@ -63,13 +69,16 @@ def multi_linear(num_linear: int, module: nn.Module, x: torch.Tensor, offset: in
         assert weight_scb.dtype == torch.float, weight_scb.dtype
 
     for t in range(T):
+        linear_index = t + offset
+        if schedule is not None:
+            linear_index = schedule[linear_index]
         if weight_scb is None:
-            y = nn.functional.linear(x[:, t], weight[t + offset])
+            y = nn.functional.linear(x[:, t], weight[linear_index])
         else:
             state = bnb.MatmulLtState()
-            CB = weight[t + offset]
+            CB = weight[linear_index]
             state.CB = CB
-            state.SCB = weight_scb[t + offset]
+            state.SCB = weight_scb[linear_index]
             state.has_fp16_weights = False
             y = bnb.matmul(x[:, t].half(), CB, state=state)
             assert isinstance(y, torch.Tensor)

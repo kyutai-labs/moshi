@@ -108,7 +108,7 @@ _lm_kwargs = {
 }
 
 
-def hf_get(filename: str | Path) -> Path:
+def hf_get(filename: str | Path, hf_repo: str | None = None) -> Path:
     if isinstance(filename, Path):
         return filename
     if filename.startswith("hf://"):
@@ -116,6 +116,8 @@ def hf_get(filename: str | Path) -> Path:
         repo_name = parts[0] + "/" + parts[1]
         filename = "/".join(parts[2:])
         return Path(hf_hub_download(repo_name, filename))
+    elif hf_repo is not None:
+        return Path(hf_hub_download(hf_repo, filename))
     else:
         return Path(filename)
 
@@ -175,17 +177,17 @@ class CheckpointInfo:
             tokenizer_name = lm_config.pop('tokenizer_name', TEXT_TOKENIZER_NAME)
 
         if moshi_weights is None:
-            moshi_weights_final = Path(hf_hub_download(hf_repo, moshi_name))
+            moshi_weights_final = hf_get(moshi_name, hf_repo)
         else:
             moshi_weights_final = hf_get(moshi_weights)
 
         if mimi_weights is None:
-            mimi_weights_final = Path(hf_hub_download(hf_repo, mimi_name))
+            mimi_weights_final = hf_get(mimi_name, hf_repo)
         else:
             mimi_weights_final = hf_get(mimi_weights)
 
         if tokenizer is None:
-            tokenizer_final = Path(hf_hub_download(hf_repo, tokenizer_name))
+            tokenizer_final = hf_get(tokenizer_name, hf_repo)
         else:
             tokenizer_final = hf_get(tokenizer)
 

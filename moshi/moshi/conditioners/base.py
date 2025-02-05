@@ -16,6 +16,7 @@ import torch
 from torch import nn
 
 from ..modules.transformer import create_sin_embedding
+from ..utils import quantize
 
 
 logger = logging.getLogger(__name__)
@@ -173,8 +174,7 @@ class BaseConditioner(nn.Module, tp.Generic[Prepared]):
         self.output_proj: nn.Module
         if force_linear or dim != output_dim:
             self.output_proj = nn.Linear(dim, output_dim, bias=output_bias, device=device)
-            if output_bias:
-                self.output_proj.bias.data.zero_()
+            assert not output_bias
         else:
             self.output_proj = nn.Identity()
         self.learnt_padding: tp.Optional[torch.Tensor]
@@ -212,10 +212,8 @@ class BaseConditioner(nn.Module, tp.Generic[Prepared]):
             cond = torch.zeros(B, T, C, device=cond.device, dtype=cond.dtype)
             mask = torch.zeros_like(cond[..., 0], dtype=torch.bool)
 
-        dtype = cond.dtype
-        for weight in self.output_proj.parameters():
-            dtype = weight.dtype
-        cond = self.output_proj(cond.to(dtype))
+        cond = quantize.linear(self.output_proj, cond)
+        print(cond.dtype, cond, cond.std())
 
         maskf = mask.float()[..., None]
         if self.learnt_padding is not None:
