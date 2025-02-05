@@ -17,6 +17,8 @@ from ..utils import sampling
 class DepFormerConfig:
     transformer: TransformerConfig
     num_slices: int
+    weights_per_step_schedule: list[int] | None = None
+    low_rank_embeddings: int | None = None
 
 
 @dataclass
@@ -90,6 +92,8 @@ class LmConfig:
                 max_seq_len=4096,
             ),
             num_slices=data["dep_q"],
+            weights_per_step_schedule=data.get("depformer_weights_per_step_schedule", None),
+            low_rank_embeddings=data.get("depformer_low_rank_embeddings", None)
         )
         conditioners = {}
         if "conditioners" in data:
@@ -124,21 +128,40 @@ class LmConfig:
         return self.audio_vocab_size - 1
 
 
+class LowRankEmbeddings(nn.Module):
+    def __init__(
+        self,
+        in_vocab_size: int,
+        dim: int,
+        low_rank_dim: int,
+    ):
+        super().__init__()
+        scale = (1.0 / low_rank_dim) ** 0.5
+        self.weight = mx.random.normal(shape=(in_vocab_size, low_rank_dim), scale=scale)
+        self.low_rank = nn.Linear(low_rank_dim, dim, bias=False)
+
+    def __call__(self, x: mx.array) -> mx.array:
+        return self.low_rank(self.weight[x])
+
+
 class DepFormerSlice(nn.Module):
     def __init__(
         self,
         in_vocab_size: int,
         out_vocab_size: int,
         main_transformer_dim: int,
-        cfg: TransformerConfig,
+        cfg: DepFormerConfig,
     ):
         super().__init__()
 
-        dim = cfg.d_model
-        self.emb = nn.Embedding(in_vocab_size, dim)
+        dim = cfg.transformer.d_model
+        if cfg.low_rank_embeddings is None:
+            self.emb = nn.Embedding(in_vocab_size, dim)
+        else:
+            self.emb = LowRankEmbeddings(in_vocab_size, dim, cfg.low_rank_embeddings)
         self.linear_in = nn.Linear(main_transformer_dim, dim, bias=False)
         self.linear_out = nn.Linear(dim, out_vocab_size, bias=False)
-        self.transformer = Transformer(cfg)
+        self.transformer = Transformer(cfg.transformer)
 
     def __call__(self, _: mx.array) -> mx.array:
         raise ValueError("not implemented")
@@ -155,7 +178,7 @@ class DepFormer(nn.Module):
                 in_vs,
                 cfg.audio_vocab_size - 1,
                 main_transformer_dim=cfg.transformer.d_model,
-                cfg=cfg.depformer.transformer,
+                cfg=cfg.depformer,
             )
             self.slices.append(slice)
 
