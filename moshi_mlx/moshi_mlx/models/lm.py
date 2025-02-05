@@ -30,10 +30,15 @@ class LmConfig:
     audio_delays: list[int]
     conditioners: dict[str, LutConditionerConfig]
 
+    @property
     def generated_codebooks(self):
         if self.depformer is None:
             return 0
         return self.depformer.num_slices
+
+    @property
+    def other_codebooks(self):
+        return self.audio_codebooks - self.generated_codebooks
 
     @classmethod
     def from_config_dict(cls, data: dict) -> "LmConfig":
@@ -171,11 +176,10 @@ class DepFormer(nn.Module):
         # The cache is shared between the depformer slices but not persisted between sample calls.
         for c in cache:
             c.reset()
-        for slice_idx, slice in enumerate(self.slices):
-            # TODO(laurent): this hardcodes the number of RVQs at 8!
-            last_token = (
-                last_token if step_idx > 0 or slice_idx in (0, 1, 9) else mx.array(2048)
-            )
+        for slice in self.slices:
+            # The 2048 tokens should be teacher forced on the first slices. However as delays
+            # are non-decreasing in the number of slices, this is actually not necessary as
+            # the generated tokens will end up not being used.
             last_token = last_token.reshape(1, 1)
 
             if cfg_coef != 1:
@@ -280,8 +284,7 @@ class Lm(nn.Module):
     def warmup(self, ct: ConditionTensor | None):
         text, audio = self.sample(
             mx.array([[self.cfg.text_out_vocab_size]]),
-            # TODO(laurent): this hardcodes the number of RVQs at 8!
-            [mx.array([[0]])] * 8,
+            [mx.array([[0]])] * self.cfg.other_codebooks,
             0,
             text_sampler=sampling.Sampler(),
             audio_sampler=sampling.Sampler(),

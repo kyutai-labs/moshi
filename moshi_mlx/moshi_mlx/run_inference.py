@@ -110,7 +110,7 @@ def main():
         cfg_coef=args.cfg_coef,
         check=False,
     )
-    generated_codebooks = lm_config.generated_codebooks()
+    generated_codebooks = lm_config.generated_codebooks
 
     all_out_pcm = []
     start_time = time.time()
