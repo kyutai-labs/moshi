@@ -8,15 +8,20 @@ import argparse
 from pathlib import Path
 from safetensors.torch import save_file
 
+import omegaconf
 import torch
 
 
 def import_model(
-    in_path: Path,
-    out_path: Path,
+    in_path: str,
+    out_path: str,
 ) -> None:
     pkg = torch.load(in_path, map_location=torch.device("cpu"))
-    cfg = pkg['xp.cfg']
+    if 'xp.cfg' in pkg:
+        cfg = pkg['xp.cfg']
+    else:
+        cfg = omegaconf.OmegaConf.load(Path(in_path).parent / '.hydra/config.yaml')
+
     model = pkg["fsdp_best_state"]["model"]
 
     # Asumming same size of both streams n_q.
