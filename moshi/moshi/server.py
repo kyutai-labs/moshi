@@ -230,7 +230,7 @@ def main():
     text_tokenizer = checkpoint_info.get_text_tokenizer()
 
     log("info", "loading moshi")
-    lm = checkpoint_info.get_moshi(device=args.device).to(dtype=args.dtype)
+    lm = checkpoint_info.get_moshi(device=args.device, dtype=args.dtype)
     log("info", "moshi loaded")
 
     state = ServerState(checkpoint_info.model_type, mimi, text_tokenizer, lm, args.cfg_coef, args.device,

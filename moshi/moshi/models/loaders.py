@@ -212,8 +212,11 @@ class CheckpointInfo:
             num_codebooks = self.lm_config['dep_q']
         return get_mimi(self.mimi_weights, num_codebooks=num_codebooks, device=device)
 
-    def get_moshi(self, strict: bool = True, device: torch.device | str = 'cpu') -> LMModel:
-        model = get_moshi_lm(self.moshi_weights, lm_kwargs=self.lm_config, device=device, strict=strict)
+    def get_moshi(self, strict: bool = True, device: torch.device | str = 'cpu',
+                  dtype: torch.dtype = torch.bfloat16) -> LMModel:
+        model = get_moshi_lm(
+            self.moshi_weights, lm_kwargs=self.lm_config,
+            device=device, dtype=dtype, strict=strict)
         if self.model_type == 'hibiki':
             # Sometime the model samples the EOS (2) too early, which we want to ignore.
             # We keep generating if the input file is not finished, and this is a way
@@ -268,10 +271,10 @@ def get_mimi(filename: str | Path,
 
 
 def get_moshi_lm(filename: str | Path,
-                 device: torch.device | str = 'cpu',
                  lm_kwargs: tp.Optional[tp.Dict] = None,
+                 device: torch.device | str = 'cpu',
+                 dtype: torch.dtype = torch.bfloat16,
                  strict: bool = True) -> LMModel:
-    dtype = torch.bfloat16
     if lm_kwargs is None:
         lm_kwargs = _lm_kwargs
     if "conditioners" in lm_kwargs:
