@@ -13,7 +13,8 @@ pub struct Args {
 }
 
 pub fn run(args: &Args, dev: &Device) -> Result<()> {
-    let dtype = if dev.is_cuda() { candle::DType::BF16 } else { candle::DType::F32 };
+    let dtype = dev.bf16_default_to_f32();
+    tracing::info!(?dtype, ?dev);
 
     tracing::info!("loading the audio input");
     let (in_pcm, in_pcm_len) = {
