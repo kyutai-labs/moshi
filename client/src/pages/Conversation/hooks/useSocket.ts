@@ -28,8 +28,7 @@ export const useSocket = ({
 
   const onConnect = useCallback(() => {
     console.log("connected, now waiting for handshake.");
-    // setIsConnected(true);
-  }, [setIsConnected]);
+  }, []);
 
   const onDisconnect = useCallback(() => {
     console.log("disconnected");
@@ -63,12 +62,11 @@ export const useSocket = ({
     ws.addEventListener("close", onDisconnect);
     ws.addEventListener("message", onMessageEvent);
     setSocket(ws);
-    console.log("Socket created", ws);
+    console.log("Socket to created to", uri);
     lastMessageTime.current = Date.now();
   }, [uri, onMessage, onDisconnectProp]);
 
   const stop = useCallback(() => {
-      setIsConnected(false);
       if (onDisconnectProp) {
         onDisconnectProp();
       }

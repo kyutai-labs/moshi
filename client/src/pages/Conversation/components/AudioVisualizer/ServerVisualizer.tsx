@@ -5,13 +5,12 @@ import { useSocketContext } from "../../SocketContext";
 type AudioVisualizerProps = {
   analyser: AnalyserNode | null;
   parent: RefObject<HTMLElement>;
-  imageUrl: string | undefined;
   copyCanvasRef?: RefObject<HTMLCanvasElement>;
 };
 
 const MAX_INTENSITY = 255;
 
-export const ServerVisualizer: FC<AudioVisualizerProps> = ({ analyser, parent, imageUrl, copyCanvasRef }) => {
+export const ServerVisualizer: FC<AudioVisualizerProps> = ({ analyser, parent, copyCanvasRef }) => {
   const [canvasWidth, setCanvasWidth] = useState(parent.current ? Math.min(parent.current.clientWidth, parent.current.clientHeight) : 0);
   const requestRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -19,7 +18,7 @@ export const ServerVisualizer: FC<AudioVisualizerProps> = ({ analyser, parent, i
   const { isConnected } = useSocketContext();
 
 
-  const draw = useCallback((width: number, centerX: number, centerY: number, audioData: Uint8Array, imageUrl: string | undefined, ctx: CanvasRenderingContext2D) => {
+  const draw = useCallback((width: number, centerX: number, centerY: number, audioData: Uint8Array, ctx: CanvasRenderingContext2D) => {
     const maxCircleWidth = Math.floor(width * 0.95);
     const averageIntensity = Math.sqrt(
       audioData.reduce((acc, curr) => acc + curr * curr, 0) / audioData.length,
@@ -32,18 +31,9 @@ export const ServerVisualizer: FC<AudioVisualizerProps> = ({ analyser, parent, i
     const relIntensity = intensity / MAX_INTENSITY;
     const radius = ((isConnected ? 0.3 + 0.7 * relIntensity : relIntensity) * maxCircleWidth) / 2;
     // Draw a circle with radius based on intensity
-    if (imageUrl == undefined) {
-      ctx.clearRect(centerX - width / 2, centerY - width / 2, width, width);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0)';
-      ctx.fillRect(centerX - width / 2, centerY - width / 2, width, width);
-    } else {
-      const img = new Image()
-      img.src = imageUrl;
-      img.onload = function () {
-        ctx.drawImage(img, centerX - width / 2, centerY - width / 2, width, width);
-      };
-      console.log(img.src);
-    }
+    ctx.clearRect(centerX - width / 2, centerY - width / 2, width, width);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+    ctx.fillRect(centerX - width / 2, centerY - width / 2, width, width);
     ctx.beginPath();
     //ctx.fillStyle = "#39e3a7";
     ctx.fillStyle = 'rgba(57, 227, 167, 0.5)';
@@ -92,14 +82,11 @@ export const ServerVisualizer: FC<AudioVisualizerProps> = ({ analyser, parent, i
     }
     const centerX = width / 2;
     const centerY = width / 2;
-    // Hack: For the image, we display it using CSS  background-image
-    // in the main image, but we display it via canvas so that 
-    // it is in the video export
-    draw(width, centerX, centerY, audioData, undefined, ctx);
+    draw(width, centerX, centerY, audioData, ctx);
     if (copyCanvasRef?.current) {
       const copyCtx = copyCanvasRef.current.getContext("2d");
       if (copyCtx) {
-        draw(150, 125, 125, audioData, imageUrl, copyCtx);
+        draw(150, 125, 125, audioData, copyCtx);
       }
     }
   }, [analyser, isConnected, canvasWidth, parent, copyCanvasRef]);

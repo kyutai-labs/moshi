@@ -58,7 +58,8 @@
 }
 
 .presentation {
-  max-width: 450px;
+  max-width: 500px;
+  max-height: 300px;
 }
 
 .presentation>p {

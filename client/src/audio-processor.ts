@@ -70,7 +70,7 @@ class MoshiProcessor extends AudioWorkletProcessor {
       this.port.postMessage({
         totalAudioPlayed: this.totalAudioPlayed,
         actualAudioPlayed: this.actualAudioPlayed,
-        delay: event.data.micDuration - this.timeInStream,
+        delay: this.currentSamples() / sampleRate,
         minDelay: this.minDelay,
         maxDelay: this.maxDelay,
       });

@@ -5,7 +5,6 @@ type MediaContextType = {
   audioContext: MutableRefObject<AudioContext>;
   audioStreamDestination: MutableRefObject<MediaStreamAudioDestinationNode>;
   worklet: MutableRefObject<AudioWorkletNode>;
-  micDuration: MutableRefObject<number>;
   actualAudioPlayed: MutableRefObject<number>;
 };
 

@@ -1,90 +1,34 @@
-import { FC, MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FC, MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 import { useSocket } from "./hooks/useSocket";
 import { SocketContext } from "./SocketContext";
 import { ServerAudio } from "./components/ServerAudio/ServerAudio";
-import { UserAudio } from "./components/UserAudio/UserAudio";
 import { Button } from "../../components/Button/Button";
 import { ServerAudioStats } from "./components/ServerAudio/ServerAudioStats";
 import { AudioStats } from "./hooks/useServerAudio";
 import { TextDisplay } from "./components/TextDisplay/TextDisplay";
 import { MediaContext } from "./MediaContext";
 import { ServerInfo } from "./components/ServerInfo/ServerInfo";
-import { ModelParamsValues, useModelParams } from "./hooks/useModelParams";
-import { ModelParams } from "./components/ModelParams/ModelParams";
 import fixWebmDuration from "webm-duration-fix";
 import canvasLogo from "./canvas-logo.png";
 import { getMimeType, getExtension } from "./getMimeType";
 
 type ConversationProps = {
-  workerAddr: string;
-  workerAuthId?: string;
-  sessionAuthId?: string;
-  sessionId?: number;
-  email?: string;
   audioContext: MutableRefObject<AudioContext>;
   worklet: MutableRefObject<AudioWorkletNode>;
   onConversationEnd?: () => void;
-  isBypass?: boolean;
-} & Partial<ModelParamsValues>;
+};
 
 
-const buildURL = ({
-  workerAddr,
-  params,
-  workerAuthId,
-  email,
-  textSeed,
-  audioSeed,
-}: {
-  workerAddr: string;
-  params: ModelParamsValues;
-  workerAuthId?: string;
-  email?: string;
-  textSeed: number;
-  audioSeed: number;
-}) => {
-  if (workerAddr == "same" || workerAddr == "") {
-    workerAddr = window.location.hostname + ":" + window.location.port;
-    console.log("Overriding workerAddr to", workerAddr);
-  }
-  const wsProtocol = (window.location.protocol === 'https:') ? 'wss' : 'ws';
-  const url = new URL(`${wsProtocol}://${workerAddr}/api/chat`);
-  if (workerAuthId) {
-    url.searchParams.append("worker_auth_id", workerAuthId);
-  }
-  if (email) {
-    url.searchParams.append("email", email);
-  }
-  url.searchParams.append("text_temperature", params.textTemperature.toString());
-  url.searchParams.append("text_topk", params.textTopk.toString());
-  url.searchParams.append("audio_temperature", params.audioTemperature.toString());
-  url.searchParams.append("audio_topk", params.audioTopk.toString());
-  url.searchParams.append("pad_mult", params.padMult.toString());
-  url.searchParams.append("text_seed", textSeed.toString());
-  url.searchParams.append("audio_seed", audioSeed.toString());
-  url.searchParams.append("repetition_penalty_context", params.repetitionPenaltyContext.toString());
-  url.searchParams.append("repetition_penalty", params.repetitionPenalty.toString());
-  // Add image params if given
-  if (params.imageUrl != undefined) {
-    url.searchParams.append("image_url", params.imageUrl.toString());
-    url.searchParams.append("image_resolution", params.imageResolution.toString());
-  }
-  console.log(url.toString());
+const buildURL = ({}: {}) => {
+  const url = new URL(`wss://192.168.1.10:8998/api/chat`);
+  console.log("URL is", url.toString());
   return url.toString();
 };
 
 
 export const Conversation: FC<ConversationProps> = ({
-  workerAddr,
-  workerAuthId,
   audioContext,
   worklet,
-  sessionAuthId,
-  sessionId,
-  onConversationEnd,
-  isBypass = false,
-  email,
-  ...params
 }) => {
   const getAudioStats = useRef<() => AudioStats>(() => ({
     playedAudioDuration: 0,
@@ -104,28 +48,18 @@ export const Conversation: FC<ConversationProps> = ({
   const [videoURL, setVideoURL] = useState<string>("");
   const [audioURL, setAudioURL] = useState<string>("");
   const [isOver, setIsOver] = useState(false);
-  const modelParams = useModelParams(params);
-  const micDuration = useRef<number>(0);
   const actualAudioPlayed = useRef<number>(0);
   const textContainerRef = useRef<HTMLDivElement>(null);
-  const textSeed = useMemo(() => Math.round(1000000 * Math.random()), []);
-  const audioSeed = useMemo(() => Math.round(1000000 * Math.random()), []);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const logoRef = useRef<HTMLImageElement>(null);
   const [isLogoLoaded, setIsLogoLoaded] = useState(false);
 
   const WSURL = buildURL({
-    workerAddr,
-    params: modelParams,
-    workerAuthId,
-    email: email,
-    textSeed: textSeed,
-    audioSeed: audioSeed,
   });
 
   const onDisconnect = useCallback(() => {
     setIsOver(true);
-    console.log("on disconnect!");
+    console.log("Now is over.");
     stopRecording();
   }, [setIsOver]);
 
@@ -158,7 +92,7 @@ export const Conversation: FC<ConversationProps> = ({
     return () => {
       stop();
     };
-  }, [start, workerAuthId]);
+  }, [start]);
 
   useEffect(() => {
 
@@ -197,7 +131,7 @@ export const Conversation: FC<ConversationProps> = ({
       return;
     }
     console.log(Date.now() % 1000, "Starting recording");
-    console.log("Starting recording");
+    console.log("Starting recording for output audio/video.");
     if (canvasRef.current) {
       // Note: Attaching a track from this stream to the existing MediaRecorder
       // rather than creating a new MediaRecorder for the canvas stream
@@ -235,7 +169,7 @@ export const Conversation: FC<ConversationProps> = ({
   }, [isRecording, setVideoURL, setVideoURL, worklet, audioStreamDestination, mediaRecorder, audioRecorder, canvasRef]);
 
   const stopRecording = useCallback(() => {
-    console.log("Stopping recording");
+    console.log("Stopping recording for audio/video.");
     console.log("isRecording", isRecording)
     if (!isRecording.current) {
       return;
@@ -262,31 +196,15 @@ export const Conversation: FC<ConversationProps> = ({
           audioContext,
           worklet,
           audioStreamDestination,
-          micDuration,
           actualAudioPlayed,
         }
       }>
         <div>
           <div className="main-grid h-screen max-h-screen w-screen p-4 max-w-96 md:max-w-screen-lg m-auto">
             <div className="controls text-center flex justify-center items-center gap-2">
-              {isOver && !isBypass && (
+              {isOver && (
                 <Button
                   onClick={() => {
-                    // Reload the page to reset the conversation on iOS
-                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-                    if (onConversationEnd && !isIOS) {
-                      onConversationEnd();
-                      return;
-                    }
-                    localStorage.setItem("textTemperature", modelParams.textTemperature.toString());
-                    localStorage.setItem("textTopk", modelParams.textTopk.toString());
-                    localStorage.setItem("audioTemperature", modelParams.audioTemperature.toString());
-                    localStorage.setItem("audioTopk", modelParams.audioTopk.toString());
-                    localStorage.setItem("padMult", modelParams.padMult.toString());
-                    localStorage.setItem("repetitionPenalty", modelParams.repetitionPenalty.toString());
-                    localStorage.setItem("repetitionPenaltyContext", modelParams.repetitionPenaltyContext.toString());
-                    localStorage.setItem("imageResolution", modelParams.imageResolution.toString());
-                    localStorage.setItem("isImageMode", (modelParams.imageUrl != undefined).toString());
                     document.location.reload();
                   }}
                 >
@@ -295,7 +213,7 @@ export const Conversation: FC<ConversationProps> = ({
               )
               }
               {
-                (!isOver || isBypass) && (
+                !isOver && isConnected && (
                   <Button
                     onClick={() => {
                       audioContext.current.resume();
@@ -306,23 +224,20 @@ export const Conversation: FC<ConversationProps> = ({
                   </Button>
                 )
               }
+              {
+                !isOver && !isConnected && (
+                  <p>Connecting...</p>
+                )
+              }
               <div className={`h-4 w-4 rounded-full ${isConnected ? 'bg-green-700' : 'bg-red-700'}`} />
             </div>
-            <div className="relative player h-full max-h-full w-full justify-between gap-3 border-2 border-white md:p-12"
-              style={{
-                backgroundImage: `url(${params.imageUrl})`,
-                backgroundSize: '70%',
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'center 10%',
-              }} >
+            <div className="relative player h-full max-h-full w-full justify-between gap-3 border-2 border-white md:p-12">
               <ServerAudio
-                imageUrl={params.imageUrl}
                 copyCanvasRef={canvasRef}
                 setGetAudioStats={(callback: () => AudioStats) =>
                   (getAudioStats.current = callback)
                 }
               />
-              <UserAudio copyCanvasRef={canvasRef} />
               <div className="pt-8 text-sm flex justify-center items-center flex-col download-links"
                 style={{
                   minHeight: 80,
@@ -335,7 +250,7 @@ export const Conversation: FC<ConversationProps> = ({
               </div>
             </div>
             <div className="scrollbar player-text border-2 border-white " ref={textContainerRef}>
-              <TextDisplay containerRef={textContainerRef} displayColor={params.displayColor} />
+              <TextDisplay containerRef={textContainerRef} />
             </div>
             <div className="player-stats hidden md:block">
               <ServerAudioStats getAudioStats={getAudioStats} />
@@ -343,7 +258,6 @@ export const Conversation: FC<ConversationProps> = ({
           </div>
           <div className="max-w-96 md:max-w-screen-lg p-4 m-auto text-center">
             <ServerInfo />
-            {!workerAuthId && <ModelParams {...modelParams} isConnected={isConnected} isImageMode={params.imageUrl != undefined} />}
           </div>
           <canvas height={380} width={380} className="hidden" ref={canvasRef} />
           <img src={canvasLogo} ref={logoRef} className="hidden" onLoad={() => {

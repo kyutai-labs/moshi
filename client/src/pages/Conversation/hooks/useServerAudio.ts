@@ -27,7 +27,7 @@ type WorkletStats = {
 
 export const useServerAudio = ({setGetAudioStats}: useServerAudioArgs) => {
   const { socket  } = useSocketContext();
-  const {startRecording, stopRecording, audioContext, worklet, micDuration, actualAudioPlayed } =
+  const {startRecording, stopRecording, audioContext, worklet, actualAudioPlayed } =
     useMediaContext();
   const analyser = useRef(audioContext.current.createAnalyser());
   worklet.current.connect(analyser.current);
@@ -46,7 +46,7 @@ export const useServerAudio = ({setGetAudioStats}: useServerAudioArgs) => {
   const onDecode = useCallback(
     async (data: Float32Array) => {
       receivedDuration.current += data.length / audioContext.current.sampleRate;
-      worklet.current.port.postMessage({frame: data, type: "audio", micDuration: micDuration.current});
+      worklet.current.port.postMessage({frame: data, type: "audio"});
     },
     [],
   );
@@ -84,7 +84,7 @@ export const useServerAudio = ({setGetAudioStats}: useServerAudioArgs) => {
   let midx = 0;
   const decodeAudio = useCallback((data: Uint8Array) => {
     if (midx < 5) {
-      console.log(Date.now() % 1000, "Got NETWORK message", micDuration.current - workletStats.current.actualAudioPlayed, midx++);
+      console.log(Date.now() % 1000, "Got NETWORK message", workletStats.current.actualAudioPlayed, midx++);
     }
     decoderWorker.current.postMessage(
       {
