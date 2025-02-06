@@ -2,13 +2,16 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 """Retrieves the pretrained models for Moshi and Mimi."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import warnings
 
 from huggingface_hub import hf_hub_download
-from huggingface_hub.utils import EntryNotFoundError
+try:
+    from huggingface_hub.errors import EntryNotFoundError
+except ImportError:
+    from huggingface_hub.utils import EntryNotFoundError  # pyright: ignore
 from safetensors.torch import load_model
 import sentencepiece
 import torch
@@ -142,6 +145,7 @@ class CheckpointInfo:
     lm_config: dict | None = None
     raw_config: dict | None = None
     model_type: str = 'moshi'
+    lm_gen_config: dict = field(default_factory=dict)
 
     @staticmethod
     def from_hf_repo(hf_repo: str,
@@ -172,6 +176,7 @@ class CheckpointInfo:
             lm_config = None
             raw_config = None
             model_type = 'moshi'
+            lm_gen_config = {}
         else:
             raw_config = json.loads(Path(config_path).read_text())
             lm_config = dict(raw_config)
@@ -179,6 +184,7 @@ class CheckpointInfo:
             mimi_name = lm_config.pop('mimi_name', MIMI_NAME)
             tokenizer_name = lm_config.pop('tokenizer_name', TEXT_TOKENIZER_NAME)
             model_type = lm_config.pop('model_type', 'moshi')
+            lm_gen_config = lm_config.pop('lm_gen_config', {})
 
         if moshi_weights is None:
             moshi_weights_final = hf_get(moshi_name, hf_repo)
@@ -197,7 +203,7 @@ class CheckpointInfo:
 
         return CheckpointInfo(
             moshi_weights_final, mimi_weights_final, tokenizer_final,
-            lm_config, raw_config, model_type)
+            lm_config, raw_config, model_type, lm_gen_config)
 
     def get_mimi(self, device: torch.device | str = 'cpu') -> MimiModel:
         if self.lm_config is None:
@@ -207,7 +213,13 @@ class CheckpointInfo:
         return get_mimi(self.mimi_weights, num_codebooks=num_codebooks, device=device)
 
     def get_moshi(self, strict: bool = True, device: torch.device | str = 'cpu') -> LMModel:
-        return get_moshi_lm(self.moshi_weights, lm_kwargs=self.lm_config, device=device, strict=strict)
+        model = get_moshi_lm(self.moshi_weights, lm_kwargs=self.lm_config, device=device, strict=strict)
+        if self.model_type == 'hibiki':
+            # Sometime the model samples the EOS (2) too early, which we want to ignore.
+            # We keep generating if the input file is not finished, and this is a way
+            # to implicitely replace early EOS with PAD.
+            model.text_emb.weight.data[2] = model.text_emb.weight.data[3]
+        return model
 
     def get_text_tokenizer(self) -> sentencepiece.SentencePieceProcessor:
         return sentencepiece.SentencePieceProcessor(str(self.tokenizer))  # type: ignore

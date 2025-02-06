@@ -47,12 +47,12 @@ class ServerState:
     lock: asyncio.Lock
 
     def __init__(self, model_type: str, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
-                 lm: LMModel, cfg_coef: float, device: str | torch.device):
+                 lm: LMModel, cfg_coef: float, device: str | torch.device, **kwargs):
         self.model_type = model_type
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
         condition_tensors = get_condition_tensors(model_type, lm, batch_size=1, cfg_coef=cfg_coef)
-        self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors)
+        self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors, **kwargs)
 
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
@@ -233,7 +233,8 @@ def main():
     lm = checkpoint_info.get_moshi(device=args.device).to(dtype=args.dtype)
     log("info", "moshi loaded")
 
-    state = ServerState(checkpoint_info.model_type, mimi, text_tokenizer, lm, args.cfg_coef, args.device)
+    state = ServerState(checkpoint_info.model_type, mimi, text_tokenizer, lm, args.cfg_coef, args.device,
+                        **checkpoint_info.lm_gen_config)
     log("info", "warming up the model")
     state.warmup()
     app = web.Application()

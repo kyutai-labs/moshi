@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 import random
+import sys
 import time
 
 import numpy as np
@@ -15,7 +16,7 @@ import torch
 import sphn
 
 
-from .client_utils import log
+from .client_utils import log, AnyPrinter, Printer, RawPrinter
 from .conditioners import ConditionAttributes, ConditionTensors
 from .models import loaders, MimiModel, LMModel, LMGen
 
@@ -55,17 +56,22 @@ class InferenceState:
     lm_gen: LMGen
 
     def __init__(self, model_type: str, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
-                 lm: LMModel, batch_size: int, cfg_coef: float, device: str | torch.device):
+                 lm: LMModel, batch_size: int, cfg_coef: float, device: str | torch.device, **kwargs):
         self.model_type = model_type
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
         condition_tensors = get_condition_tensors(model_type, lm, batch_size, cfg_coef)
-        self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors)
+        self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors, **kwargs)
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
         self.batch_size = batch_size
         self.mimi.streaming_forever(batch_size)
         self.lm_gen.streaming_forever(batch_size)
+        self.printer: AnyPrinter
+        if sys.stdout.isatty():
+            self.printer = Printer()
+        else:
+            self.printer = RawPrinter()
 
     def run(self, in_pcms: torch.Tensor) -> list[tuple[torch.Tensor, torch.Tensor]]:
         """Returns a list of tupel `(text_tokens, audio_tokens)`"""
@@ -76,7 +82,7 @@ class InferenceState:
         # for the EOS on the output text stream to be emitted, as indication that the model is done.
         eos_reached: list[bool] = [False] * self.batch_size
         need_eos_input: bool = True
-        log("info", "starting the inference loop")
+        self.printer.log("info", "starting the inference loop")
         device = self.lm_gen.lm_model.device
         start_time = time.time()
         ntokens = 0
@@ -85,6 +91,7 @@ class InferenceState:
         chunks = deque([
             chunk for chunk in in_pcms.split(self.frame_size, dim=2)
             if chunk.shape[-1] == self.frame_size])
+        self.printer.print_header()
         while not all(eos_reached):
             if chunks:
                 chunk = chunks.popleft()
@@ -120,13 +127,22 @@ class InferenceState:
                 if eos_reached[b]:
                     continue
                 elif one_text.item() == self.text_tokenizer.eos_id():
-                    eos_reached[b] = True
+                    if need_eos_input:
+                        # We sampled the EOS before the end of the file! Not possible.
+                        self.printer.log("warning", "EOS sampled too early.")
+                    else:
+                        eos_reached[b] = True
 
                 out_text_tokens_per_item[b].append(one_text)
                 out_pcms_per_item[b].append(one_pcm)
+                if b == 0:
+                    if one_text.item() not in [0, 3]:
+                        text = self.text_tokenizer.id_to_piece(one_text.item())  # pyright: ignore
+                        text = text.replace("▁", " ")
+                        self.printer.print_token(text)
             ntokens += 1
         dt = time.time() - start_time
-        log("info", f"processed {ntokens} steps in {dt:.0f}s, {1000 * dt / ntokens:.2f}ms/step")
+        self.printer.log("info", f"processed {ntokens} steps in {dt:.0f}s, {1000 * dt / ntokens:.2f}ms/step")
         out = [
             (torch.cat(one_texts, dim=0), torch.cat(one_pcms, dim=1))
             for one_texts, one_pcms in zip(out_text_tokens_per_item, out_pcms_per_item)
@@ -152,7 +168,7 @@ def main():
     parser.add_argument("outfile", type=str, help="Output audio file in wav format.")
 
     args = parser.parse_args()
-    seed_all(42424242)
+    seed_all(4242)
 
     log("info", "retrieving checkpoint")
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
@@ -172,7 +188,7 @@ def main():
 
     state = InferenceState(
         checkpoint_info.model_type, mimi, text_tokenizer, lm,
-        args.batch_size, args.cfg_coef, args.device)
+        args.batch_size, args.cfg_coef, args.device, **checkpoint_info.lm_gen_config)
     out_items = state.run(in_pcms)
 
     outfile = Path(args.outfile)

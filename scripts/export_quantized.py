@@ -25,6 +25,7 @@ def get_api():
 def main():
     parser = argparse.ArgumentParser('export_quantized')
     parser.add_argument('hf_repo')
+    parser.add_argument('new_hf_repo', nargs='?', default=None)
 
     args = parser.parse_args()
     api = get_api()
@@ -38,7 +39,10 @@ def main():
     print("Quantizing model.")
     quantize_transformer(model)
 
-    new_repo = repo.rsplit('-', 1)[0] + '-q8'
+    if args.new_hf_repo is None:
+        new_repo = repo.rsplit('-', 1)[0] + '-q8'
+    else:
+        new_repo = args.new_hf_repo
     if not api.repo_exists(new_repo):
         api.create_repo(new_repo, repo_type='model')
         print("Repo created.")
@@ -61,12 +65,11 @@ def main():
         print(f"Checkpoint size: {size:.1f}GB")
         old_name, old_ext = info.moshi_weights.name.rsplit('.', 1)
         new_name = old_name + '.q8.' + old_ext
-        if False:
-            api.upload_file(
-                path_or_fileobj=file.name,
-                path_in_repo=new_name,
-                repo_id=new_repo,
-                repo_type="model")
+        api.upload_file(
+            path_or_fileobj=file.name,
+            path_in_repo=new_name,
+            repo_id=new_repo,
+            repo_type="model")
     config = json.load(open(hf_hub_download(repo, 'config.json')))
     config['moshi_name'] = new_name
     config['quantize'] = True

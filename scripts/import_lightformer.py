@@ -8,22 +8,27 @@ import argparse
 from pathlib import Path
 from safetensors.torch import save_file
 
+import omegaconf
 import torch
 
 
 def import_model(
-    in_path: Path,
-    out_path: Path,
+    in_path: str,
+    out_path: str,
 ) -> None:
     pkg = torch.load(in_path, map_location=torch.device("cpu"))
-    cfg = pkg['xp.cfg']
+    if 'xp.cfg' in pkg:
+        cfg = pkg['xp.cfg']
+    else:
+        cfg = omegaconf.OmegaConf.load(Path(in_path).parent / '.hydra/config.yaml')
+
     model = pkg["fsdp_best_state"]["model"]
 
     # Asumming same size of both streams n_q.
     in_n_q = cfg.compression_model_n_q * 2
     out_n_q = cfg.compression_model_n_q
     print(f"in_n_q: {in_n_q}, out_n_q: {out_n_q}")
-    schedule = cfg.transformer_lm.depformer_weights_per_step_schedule
+    schedule = cfg.transformer_lm.get('depformer_weights_per_step_schedule', None)
     if schedule is None:
         schedule = list(range(in_n_q))
 
@@ -45,7 +50,7 @@ def import_model(
     # For mimi inference, we trim the depformer layer that are unused.
     for dep_idx in range(out_n_q - 1, in_n_q - 1):
         del model[f"depformer_emb.{dep_idx}.weight"]
-        if cfg.transformer_lm.depformer_low_rank_embeddings:
+        if cfg.transformer_lm.get('depformer_low_rank_embeddings'):
             del model[f"depformer_emb.{dep_idx}.low_rank.weight"]
     for dep_idx in range(out_n_q, in_n_q):
         del model[f"linears.{dep_idx}.weight"]
