@@ -63,6 +63,8 @@ We release three models:
 - Moshi fine-tuned on a male synthetic voice (Moshiko),
 - Moshi fine-tuned on a female synthetic voice (Moshika).
 
+Note that this codebase also supports [Hibiki](https://github.com/kyutai-labs/hibiki), check out the dedicated repo for more information.
+
 Depending on the backend, the file format and quantization available will vary. Here is the list
 of the HuggingFace repo with each model. Mimi is bundled in each of those, and always use the same checkpoint format.
 
