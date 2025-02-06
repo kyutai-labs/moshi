@@ -46,6 +46,7 @@ pub struct State {
     audio_lp: LogitsProcessor,
     text_lp: LogitsProcessor,
     step_idx: usize,
+    forced_audio_tokens: crate::lm::ForcedAudioTokens,
     config: Config,
     npads: i32,
 }
@@ -60,7 +61,21 @@ impl State {
     ) -> Self {
         let audio_tokens: Vec<Vec<u32>> =
             vec![vec![UNGENERATED; config.audio_codebooks]; max_step_idx + config.acoustic_delay];
-        Self { model, audio_tokens, audio_lp, text_lp, step_idx: 0, npads: 0, config }
+        let forced_audio_tokens = crate::lm::ForcedAudioTokens::new(
+            config.audio_codebooks,
+            model.audio_pad_token(),
+            &[8, 8],
+        );
+        Self {
+            model,
+            audio_tokens,
+            audio_lp,
+            text_lp,
+            step_idx: 0,
+            npads: 0,
+            forced_audio_tokens,
+            config,
+        }
     }
 
     pub fn audio_codebooks(&self) -> usize {
@@ -175,7 +190,12 @@ impl State {
         }
 
         let last_audio_tokens = if gen_audio {
-            self.model.depformer_sample(self.step_idx, &ys, Some(text_token), &mut self.audio_lp)?
+            self.model.depformer_sample(
+                &ys,
+                Some(text_token),
+                self.forced_audio_tokens.forced_tokens(self.step_idx),
+                &mut self.audio_lp,
+            )?
         } else {
             None
         };

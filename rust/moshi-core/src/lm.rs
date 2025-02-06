@@ -2,9 +2,12 @@
 // This source code is licensed under the license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::transformer;
+use crate::nn::{linear, MaybeQuantizedEmbedding, MaybeQuantizedLinear, MaybeQuantizedVarBuilder};
+use crate::{
+    transformer::{self, CaSrc},
+    NormType,
+};
 use candle::{DType, Device, IndexOp, Module, Result, Tensor};
-use candle_nn::VarBuilder;
 
 thread_local! {
     pub static VERBOSE: bool = {
@@ -16,14 +19,13 @@ thread_local! {
         }
     }
 }
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct DepFormerConfig {
     pub transformer: transformer::Config,
     pub num_slices: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
     pub transformer: transformer::Config,
     pub depformer: Option<DepFormerConfig>,
@@ -31,6 +33,7 @@ pub struct Config {
     pub text_out_vocab_size: usize,
     pub audio_vocab_size: usize,
     pub audio_codebooks: usize,
+    pub conditioners: Option<crate::conditioner::Config>,
 }
 
 impl Config {
@@ -55,7 +58,70 @@ impl Config {
             use_conv_bias: true,
             cross_attention: None,
             gating: Some(candle_nn::Activation::Silu),
-            norm: crate::NormType::RmsNorm,
+            norm: NormType::RmsNorm,
+            positional_embedding: transformer::PositionalEmbedding::Rope,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096,
+        };
+        let depformer_cfg = transformer::Config {
+            d_model: 1024,
+            num_heads: 16,
+            num_layers: 6,
+            dim_feedforward: 1024 * 4, // dim * hidden_scale
+            causal: true,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: 8,
+            max_period: 10000,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: None,
+            gating: Some(candle_nn::Activation::Silu),
+            norm: NormType::RmsNorm,
+            positional_embedding: transformer::PositionalEmbedding::None,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096,
+        };
+        let depformer_cfg = DepFormerConfig { num_slices: 8, transformer: depformer_cfg };
+        Self {
+            transformer: lm_cfg,
+            depformer: Some(depformer_cfg),
+            audio_vocab_size: 2049,
+            text_in_vocab_size: 32001,
+            text_out_vocab_size: 32000,
+            audio_codebooks: 8,
+            conditioners: Default::default(),
+        }
+    }
+
+    pub fn v0_1_vision() -> Self {
+        let lm_cfg = transformer::Config {
+            d_model: 4096,
+            num_heads: 32,
+            num_layers: 32,
+            dim_feedforward: 4096 * 4, // dim * hidden_scale
+            causal: true,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: 3000,
+            max_period: 10000,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: Some((
+                transformer::CrossAttentionGating::ConditionalGatedSigmoid,
+                NormType::RmsNorm,
+                None,
+            )),
+            gating: Some(candle_nn::Activation::Silu),
+            norm: NormType::RmsNorm,
             positional_embedding: transformer::PositionalEmbedding::Rope,
             conv_layout: false,
             conv_kernel_size: 3,
@@ -93,7 +159,18 @@ impl Config {
             text_in_vocab_size: 32001,
             text_out_vocab_size: 32000,
             audio_codebooks: 8,
+            conditioners: Default::default(),
         }
+    }
+
+    pub fn v0_1_vision_streaming(num_slices: usize) -> Self {
+        let mut s = Self::v0_1_vision();
+        s.audio_codebooks = 16;
+        if let Some(depformer) = s.depformer.as_mut() {
+            depformer.num_slices = num_slices;
+            depformer.transformer.context = num_slices;
+        }
+        s
     }
 
     pub fn v0_1_streaming(num_slices: usize) -> Self {
@@ -102,6 +179,16 @@ impl Config {
         if let Some(depformer) = s.depformer.as_mut() {
             depformer.num_slices = num_slices;
             depformer.transformer.context = num_slices;
+        }
+        s
+    }
+
+    pub fn v0_1_asr() -> Self {
+        let mut s = Self::v0_1();
+        s.audio_codebooks = 8;
+        if let Some(depformer) = s.depformer.as_mut() {
+            depformer.num_slices = 0;
+            depformer.transformer.context = 0;
         }
         s
     }
@@ -122,9 +209,13 @@ impl Config {
             max_period: 10000,
             use_conv_block: false,
             use_conv_bias: true,
-            cross_attention: None,
+            cross_attention: Some((
+                transformer::CrossAttentionGating::Normal,
+                NormType::LayerNorm,
+                None,
+            )),
             gating: None,
-            norm: crate::NormType::LayerNorm,
+            norm: NormType::LayerNorm,
             positional_embedding: transformer::PositionalEmbedding::Rope,
             conv_layout: false,
             conv_kernel_size: 3,
@@ -147,7 +238,7 @@ impl Config {
             use_conv_bias: true,
             cross_attention: None,
             gating: None,
-            norm: crate::NormType::LayerNorm,
+            norm: NormType::LayerNorm,
             positional_embedding: transformer::PositionalEmbedding::Sin,
             conv_layout: false,
             conv_kernel_size: 3,
@@ -162,6 +253,273 @@ impl Config {
             text_in_vocab_size: 32001,
             text_out_vocab_size: 32001,
             audio_codebooks: 16,
+            conditioners: Default::default(),
+        }
+    }
+
+    // /lustre/scwpod02/client/kyutai-interns/tomlab/mimi_exp/xps/c879d080/.hydra/config.yaml
+    // /lustre/scwpod02/client/kyutai-interns/tomlab/mimi_exp/xps/41e5e07d/.hydra/config.yaml
+    pub fn s2s_v0_1() -> Self {
+        let lm_cfg = transformer::Config {
+            d_model: 2048,
+            num_heads: 16,
+            num_layers: 16,
+            dim_feedforward: 4096 * 2, // dim * hidden_scale
+            causal: true,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: 3000,
+            max_period: 10000,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: None,
+            gating: Some(candle_nn::Activation::Silu),
+            norm: NormType::RmsNorm,
+            positional_embedding: transformer::PositionalEmbedding::Rope,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096,
+        };
+        let depformer_cfg = transformer::Config {
+            d_model: 1024,
+            num_heads: 16,
+            num_layers: 6,
+            dim_feedforward: 1024 * 4, // dim * hidden_scale
+            causal: true,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: 4096,
+            max_period: 10000,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: None,
+            gating: Some(candle_nn::Activation::Silu),
+            norm: crate::NormType::RmsNorm,
+            positional_embedding: transformer::PositionalEmbedding::None,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096,
+        };
+        let depformer_cfg = DepFormerConfig { num_slices: 16, transformer: depformer_cfg };
+        Self {
+            transformer: lm_cfg,
+            depformer: Some(depformer_cfg),
+            audio_vocab_size: 2049,
+            text_in_vocab_size: 48001,
+            text_out_vocab_size: 48000,
+            audio_codebooks: 16,
+            conditioners: Default::default(),
+        }
+    }
+
+    pub fn s2s_v0_1_streaming(num_slices: usize) -> Self {
+        let mut s = Self::s2s_v0_1();
+        s.audio_codebooks = 16;
+        if let Some(depformer) = s.depformer.as_mut() {
+            depformer.num_slices = num_slices;
+            depformer.transformer.context = num_slices;
+        }
+        s
+    }
+
+    // /lustre/scwpod02/client/kyutai/neilz/mimi_exp/xps/33e476c7/.hydra/config.yaml
+    pub fn asr_v0_1_1b() -> Self {
+        let lm_cfg = transformer::Config {
+            d_model: 2048,
+            num_heads: 16,
+            num_layers: 16,
+            dim_feedforward: 2048 * 4,
+            causal: true,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: 750,
+            max_period: 100_000,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: None,
+            gating: Some(candle_nn::Activation::Silu),
+            norm: NormType::RmsNorm,
+            positional_embedding: transformer::PositionalEmbedding::Rope,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096,
+        };
+        Self {
+            transformer: lm_cfg,
+            depformer: None,
+            audio_vocab_size: 2049,
+            text_in_vocab_size: 48001,
+            text_out_vocab_size: 48000,
+            audio_codebooks: 8,
+            conditioners: Default::default(),
+        }
+    }
+
+    pub fn asr_300m_202501() -> Self {
+        let lm_cfg = transformer::Config {
+            d_model: 1024,
+            num_heads: 8,
+            num_layers: 16,
+            dim_feedforward: 1024 * 4,
+            causal: true,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: 750,
+            max_period: 100_000,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: None,
+            gating: Some(candle_nn::Activation::Silu),
+            norm: NormType::RmsNorm,
+            positional_embedding: transformer::PositionalEmbedding::Rope,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096,
+        };
+        Self {
+            transformer: lm_cfg,
+            depformer: None,
+            audio_vocab_size: 2049,
+            text_in_vocab_size: 48001,
+            text_out_vocab_size: 48000,
+            audio_codebooks: 32,
+            conditioners: Default::default(),
+        }
+    }
+
+    // /lustre/scwpod02/client/kyutai/alex/mimi_exp/xps/d50593ae/.hydra/config.yaml
+    pub fn tts_202501() -> Self {
+        let lm_cfg = transformer::Config {
+            d_model: 2048,
+            num_heads: 32,
+            num_layers: 48,
+            dim_feedforward: 2048 * 4, // dim * hidden_scale
+            causal: true,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: 500,
+            max_period: 10000,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: Some((
+                transformer::CrossAttentionGating::Normal,
+                NormType::LayerNorm,
+                None,
+            )),
+            gating: Some(candle_nn::Activation::Silu),
+            norm: NormType::RmsNorm,
+            positional_embedding: transformer::PositionalEmbedding::Rope,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096,
+        };
+        let depformer_cfg = transformer::Config {
+            d_model: 1024,
+            num_heads: 16,
+            num_layers: 6,
+            dim_feedforward: 1024 * 4, // dim * hidden_scale
+            causal: true,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: 32,
+            max_period: 10000,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: None,
+            gating: Some(candle_nn::Activation::Silu),
+            norm: NormType::RmsNorm,
+            positional_embedding: transformer::PositionalEmbedding::None,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096,
+        };
+        let depformer_cfg = DepFormerConfig { num_slices: 32, transformer: depformer_cfg };
+        Self {
+            transformer: lm_cfg,
+            depformer: Some(depformer_cfg),
+            audio_vocab_size: 2049,
+            text_in_vocab_size: 8001,
+            text_out_vocab_size: 8000,
+            audio_codebooks: 32,
+            conditioners: Default::default(),
+        }
+    }
+
+    // /lustre/scwpod02/client/kyutai-interns/tomlab/mimi_exp/xps/1d426dfd/.hydra/config.yaml
+    pub fn s2s_2b_16rvq_202501() -> Self {
+        let lm_cfg = transformer::Config {
+            d_model: 2560,
+            num_heads: 20,
+            num_layers: 24,
+            dim_feedforward: 2560 * 4, // dim * hidden_scale
+            causal: true,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: 3000,
+            max_period: 100000,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: None,
+            gating: Some(candle_nn::Activation::Silu),
+            norm: NormType::RmsNorm,
+            positional_embedding: transformer::PositionalEmbedding::Rope,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096,
+        };
+        let depformer_cfg = transformer::Config {
+            d_model: 1024,
+            num_heads: 16,
+            num_layers: 6,
+            dim_feedforward: 1024 * 4, // dim * hidden_scale
+            causal: true,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: 32,
+            max_period: 10000,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: None,
+            gating: Some(candle_nn::Activation::Silu),
+            norm: NormType::RmsNorm,
+            positional_embedding: transformer::PositionalEmbedding::None,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096,
+        };
+        let depformer_cfg = DepFormerConfig { num_slices: 16, transformer: depformer_cfg };
+        Self {
+            transformer: lm_cfg,
+            depformer: Some(depformer_cfg),
+            audio_vocab_size: 2049,
+            text_in_vocab_size: 48001,
+            text_out_vocab_size: 48000,
+            audio_codebooks: 32,
+            conditioners: Default::default(),
         }
     }
 }
@@ -171,9 +529,9 @@ struct DepFormerSlice {
     transformer: transformer::StreamingTransformer,
     // Note that the embedding for the first slice does not have the same dimension as the
     // embedding for the other slices as it takes a text token as input rather than an audio token.
-    emb: candle_nn::Embedding,
-    linear_in: candle_nn::Linear,  // depformer_in.{idx}
-    linear_out: candle_nn::Linear, // linears.{idx}
+    emb: MaybeQuantizedEmbedding,
+    linear_in: MaybeQuantizedLinear,  // depformer_in.{idx}
+    linear_out: MaybeQuantizedLinear, // linears.{idx}
 }
 
 impl DepFormerSlice {
@@ -182,22 +540,19 @@ impl DepFormerSlice {
         out_vocab_size: usize,
         main_transformer_dim: usize,
         cfg: &transformer::Config,
-        vb: VarBuilder,
+        vb: MaybeQuantizedVarBuilder,
     ) -> Result<Self> {
         let dim = cfg.d_model;
         let transformer = transformer::StreamingTransformer::new(cfg, vb.pp("transformer"))?;
-        let emb = candle_nn::embedding(in_vocab_size, dim, vb.pp("emb"))?;
-        let linear_in = candle_nn::linear_no_bias(main_transformer_dim, dim, vb.pp("linear_in"))?;
-        let linear_out = candle_nn::linear_no_bias(dim, out_vocab_size, vb.pp("linear_out"))?;
+        let emb = MaybeQuantizedEmbedding::new(in_vocab_size, dim, vb.pp("emb"))?;
+        let linear_in = linear(main_transformer_dim, dim, false, vb.pp("linear_in"))?;
+        let linear_out = linear(dim, out_vocab_size, false, vb.pp("linear_out"))?;
         Ok(Self { transformer, emb, linear_in, linear_out })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct DepFormer {
-    first_eos_step_idx: Option<usize>,
-    audio_eos_token: u32,
-    audio_padding_token: u32,
     slices: Vec<DepFormerSlice>,
 }
 
@@ -207,7 +562,7 @@ impl DepFormer {
         audio_vocab_size: usize,
         main_transformer_dim: usize,
         cfg: &DepFormerConfig,
-        vb: VarBuilder,
+        vb: MaybeQuantizedVarBuilder,
     ) -> Result<Self> {
         let mut slices = Vec::with_capacity(cfg.num_slices);
         for slice_idx in 0..cfg.num_slices {
@@ -222,21 +577,16 @@ impl DepFormer {
             )?;
             slices.push(slice)
         }
-        Ok(Self {
-            slices,
-            audio_eos_token: audio_vocab_size as u32 - 2,
-            audio_padding_token: audio_vocab_size as u32 - 1,
-            first_eos_step_idx: None,
-        })
+        Ok(Self { slices })
     }
 
     /// Run a transformer sampling step, getting a token id per codebook.
     /// - `xs` is the previous layer hidden state.
     pub fn sample(
         &mut self,
-        step_idx: usize,
         xs: &Tensor,
         text_token: Option<u32>,
+        forced_audio_tokens: &[Option<u32>],
         lp: &mut candle_transformers::generation::LogitsProcessor,
     ) -> Result<Vec<u32>> {
         use crate::streaming::StreamingModule;
@@ -244,7 +594,6 @@ impl DepFormer {
         let mut tokens = Vec::with_capacity(self.slices.len());
         let mut last_token = text_token;
         for slice_idx in 0..self.slices.len() {
-            // Token shifting by 2.
             if slice_idx == 0 {
                 self.slices[slice_idx].transformer.reset_state();
             } else {
@@ -255,14 +604,6 @@ impl DepFormer {
             let xs = slice.linear_in.forward(xs)?;
             let xs = match last_token {
                 Some(last_token) => {
-                    // TODO(laurent): this seems a bit weird, does it mean that the acoustic delay
-                    // is somewhat hardcoded to ([1] + [0] * 7) * 2?
-                    // Maybe step_idx > 1 should be step_idx > 0 instead?
-                    let last_token = if slice_idx < 2 || slice_idx == 9 || step_idx > 1 {
-                        last_token
-                    } else {
-                        self.audio_padding_token
-                    };
                     let token_id = Tensor::from_vec(vec![last_token], (1, 1), dev)?;
                     let token_emb = slice.emb.forward(&token_id)?;
                     xs.broadcast_add(&token_emb)?
@@ -275,51 +616,25 @@ impl DepFormer {
                 1 => logits.i((0, 0))?,
                 b_size => candle::bail!("unexpected batch size {b_size}"),
             };
-            let token = self.sample_maybe_postpone_eos(step_idx, &logits, lp)?;
+            let token = lp.sample(&logits)?;
             if VERBOSE.with(|v| *v) {
                 println!("sampled {token} logits {slice_idx}:\n{logits}");
             }
-            last_token = Some(token);
-            tokens.push(token)
+            tokens.push(token);
+            let token_for_next_layer =
+                forced_audio_tokens.get(slice_idx).copied().flatten().unwrap_or(token);
+            last_token = Some(token_for_next_layer);
         }
         Ok(tokens)
-    }
-
-    fn sample_maybe_postpone_eos(
-        &mut self,
-        step_idx: usize,
-        logits: &Tensor,
-        lp: &mut candle_transformers::generation::LogitsProcessor,
-    ) -> Result<u32> {
-        let token = lp.sample(logits)?;
-        let token = if token == self.audio_eos_token {
-            let first_eos_step_idx = match self.first_eos_step_idx {
-                Some(step_idx) => step_idx,
-                None => {
-                    self.first_eos_step_idx = Some(step_idx);
-                    step_idx
-                }
-            };
-            // We enforce that the generation continues for a couple steps so that we don't
-            // stop in the middle of a word.
-            if step_idx >= first_eos_step_idx + 5 {
-                token
-            } else {
-                lp.sample_f(logits, |pr| pr[self.audio_eos_token as usize] = 1e-9)?
-            }
-        } else {
-            token
-        };
-        Ok(token)
     }
 
     // Sampling with classifier free guidance.
     pub fn sample_cfg(
         &mut self,
-        step_idx: usize,
         xs: &Tensor,
         cfg_alpha: f64,
         text_token: Option<u32>,
+        forced_audio_tokens: &[Option<u32>],
         lp: &mut candle_transformers::generation::LogitsProcessor,
     ) -> Result<Vec<u32>> {
         use crate::streaming::StreamingModule;
@@ -327,7 +642,6 @@ impl DepFormer {
         let mut tokens = Vec::with_capacity(self.slices.len());
         let mut last_token = text_token;
         for slice_idx in 0..self.slices.len() {
-            // Token shifting by 2.
             if slice_idx == 0 {
                 self.slices[slice_idx].transformer.reset_state();
             } else {
@@ -338,13 +652,6 @@ impl DepFormer {
             let xs = slice.linear_in.forward(xs)?;
             let xs = match last_token {
                 Some(last_token) => {
-                    // TODO(laurent): same as above, this seems to hardcode some delays and it's not
-                    // obvious why it should be step_idx > 1 rather than step_idx > 0.
-                    let last_token = if slice_idx < 2 || step_idx > 1 {
-                        last_token
-                    } else {
-                        self.audio_padding_token
-                    };
                     let token_id = Tensor::from_vec(vec![last_token], (1, 1), dev)?;
                     let token_emb = slice.emb.forward(&token_id)?;
                     xs.broadcast_add(&token_emb)?
@@ -357,31 +664,32 @@ impl DepFormer {
                 2 => ((logits.i((0, 0))? * cfg_alpha)? - (logits.i((1, 0))? * (cfg_alpha - 1.))?)?,
                 b_size => candle::bail!("unexpected batch size {b_size}"),
             };
-            let token = if slice_idx == 0 {
-                self.sample_maybe_postpone_eos(step_idx, &logits, lp)?
-            } else {
-                lp.sample(&logits)?
-            };
-            last_token = Some(token);
-            tokens.push(token)
+            let token = lp.sample(&logits)?;
+            tokens.push(token);
+            let token_for_next_layer =
+                forced_audio_tokens.get(slice_idx).copied().flatten().unwrap_or(token);
+            last_token = Some(token_for_next_layer);
         }
         Ok(tokens)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Lm {
-    pub transformer: transformer::StreamingTransformer,
-    pub text_emb: candle_nn::Embedding,
-    pub audio_embs: Vec<candle_nn::Embedding>,
-    pub text_linear: candle_nn::Linear,
-    pub out_norm: transformer::Norm,
-    pub depformer: Option<DepFormer>,
-    pub dtype: DType,
+pub struct LmModel {
+    transformer: transformer::StreamingTransformer,
+    text_emb: MaybeQuantizedEmbedding,
+    audio_embs: Vec<MaybeQuantizedEmbedding>,
+    text_linear: MaybeQuantizedLinear,
+    out_norm: transformer::Norm,
+    depformer: Option<DepFormer>,
+    audio_vocab_size: usize,
+    text_in_vocab_size: usize,
+    condition_provider: Option<crate::conditioner::ConditionProvider>,
+    dtype: DType,
 }
 
-impl Lm {
-    pub fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
+impl LmModel {
+    pub fn new(cfg: &Config, vb: MaybeQuantizedVarBuilder) -> Result<Self> {
         let d_model = cfg.transformer.d_model;
         let depformer = match &cfg.depformer {
             None => None,
@@ -396,18 +704,30 @@ impl Lm {
                 Some(depformer)
             }
         };
-        let text_emb = candle_nn::embedding(cfg.text_in_vocab_size, d_model, vb.pp("text_emb"))?;
+        let text_emb =
+            MaybeQuantizedEmbedding::new(cfg.text_in_vocab_size, d_model, vb.pp("text_emb"))?;
         let out_norm = transformer::Norm::new(d_model, &cfg.transformer, vb.pp("out_norm"))?;
-        let text_linear =
-            candle_nn::linear_no_bias(d_model, cfg.text_out_vocab_size, vb.pp("text_linear"))?;
+        let text_linear = linear(d_model, cfg.text_out_vocab_size, false, vb.pp("text_linear"))?;
         let transformer =
             transformer::StreamingTransformer::new(&cfg.transformer, vb.pp("transformer"))?;
         let vb_e = vb.pp("emb");
         let mut audio_embs = Vec::with_capacity(cfg.audio_codebooks);
         for i in 0..cfg.audio_codebooks {
-            let emb = candle_nn::embedding(cfg.audio_vocab_size, d_model, vb_e.pp(i))?;
+            let emb = MaybeQuantizedEmbedding::new(cfg.audio_vocab_size, d_model, vb_e.pp(i))?;
             audio_embs.push(emb)
         }
+        let dtype = vb.dtype();
+        let condition_provider = match cfg.conditioners.as_ref() {
+            None => None,
+            Some(cfg) => {
+                let conditioners = crate::conditioner::ConditionProvider::new(
+                    d_model,
+                    cfg,
+                    vb.pp("condition_provider"),
+                )?;
+                Some(conditioners)
+            }
+        };
         Ok(Self {
             transformer,
             text_emb,
@@ -415,8 +735,43 @@ impl Lm {
             audio_embs,
             out_norm,
             depformer,
-            dtype: vb.dtype(),
+            text_in_vocab_size: cfg.text_in_vocab_size,
+            audio_vocab_size: cfg.audio_vocab_size,
+            condition_provider,
+            dtype,
         })
+    }
+
+    pub fn condition_provider(&self) -> Option<&crate::conditioner::ConditionProvider> {
+        self.condition_provider.as_ref()
+    }
+
+    pub fn reset_state(&mut self) {
+        use crate::streaming::StreamingModule;
+        self.transformer.reset_state()
+    }
+
+    pub fn in_audio_codebooks(&self) -> usize {
+        self.audio_embs.len()
+    }
+
+    pub fn audio_pad_token(&self) -> u32 {
+        self.audio_vocab_size as u32 - 1
+    }
+
+    pub fn text_start_token(&self) -> u32 {
+        self.text_in_vocab_size as u32 - 1
+    }
+
+    pub fn generated_audio_codebooks(&self) -> usize {
+        self.depformer.as_ref().map_or(0, |v| v.slices.len())
+    }
+
+    pub fn is_quantized(&self) -> bool {
+        match self.text_linear {
+            MaybeQuantizedLinear::Quantized(_) => true,
+            MaybeQuantizedLinear::Real(_) => false,
+        }
     }
 
     pub fn device(&self) -> &Device {
@@ -427,6 +782,15 @@ impl Lm {
         &mut self,
         text_ids: Option<Tensor>,
         audio_ids: Vec<Option<Tensor>>,
+    ) -> candle::Result<(Tensor, Tensor)> {
+        self.forward_cond(text_ids, audio_ids, None)
+    }
+
+    pub fn forward_cond(
+        &mut self,
+        text_ids: Option<Tensor>,
+        audio_ids: Vec<Option<Tensor>>,
+        conditions: Option<&crate::conditioner::Condition>,
     ) -> candle::Result<(Tensor, Tensor)> {
         if VERBOSE.with(|v| *v) {
             print!("text_ids ");
@@ -451,7 +815,7 @@ impl Lm {
             Some(text_ids) => text_ids.apply(&self.text_emb)?,
             None => {
                 let device = self.text_emb.embeddings().device();
-                Tensor::zeros((1, 1, self.text_emb.hidden_size()), self.dtype, device)?
+                Tensor::zeros((1, 1, self.text_emb.hidden_size()?), self.dtype, device)?
             }
         };
 
@@ -459,6 +823,11 @@ impl Lm {
             if let Some(audio_ids) = audio_ids {
                 let e = audio_ids.apply(audio_emb)?;
                 emb = (emb + e)?
+            }
+        }
+        if let Some(conditions) = conditions {
+            match conditions {
+                crate::conditioner::Condition::AddToInput(v) => emb = emb.broadcast_add(v)?,
             }
         }
         let ys = self.transformer.forward(&emb)?;
@@ -470,18 +839,29 @@ impl Lm {
         Ok((logits, ys))
     }
 
+    pub fn maybe_precompute_ca_kv(&self, ca_src: Option<CaSrc>) -> Result<Option<CaSrc>> {
+        let ca_src = match ca_src {
+            None => None,
+            z => self.transformer.maybe_precompute_ca_kv(z)?,
+        };
+        Ok(ca_src)
+    }
+
     pub fn forward_ca(
         &mut self,
         text_ids: Option<Tensor>,
         audio_ids: Vec<Option<Tensor>>,
-        ca_src: &Tensor,
+        ca_src: &CaSrc,
     ) -> candle::Result<(Tensor, Tensor)> {
-        let b_size = ca_src.dim(0)?;
+        let b_size = match ca_src {
+            CaSrc::KeysValues((cak, _)) => cak.dim(0)?,
+            CaSrc::Tokens(catoks) => catoks.dim(0)?,
+        };
         let mut emb = match text_ids {
             Some(text_ids) => text_ids.apply(&self.text_emb)?,
             None => {
                 let device = self.text_emb.embeddings().device();
-                Tensor::zeros((b_size, 1, self.text_emb.hidden_size()), self.dtype, device)?
+                Tensor::zeros((b_size, 1, self.text_emb.hidden_size()?), self.dtype, device)?
             }
         };
         for (audio_emb, audio_ids) in self.audio_embs.iter().zip(audio_ids.iter()) {
@@ -495,91 +875,74 @@ impl Lm {
         let logits = ys.apply(&self.text_linear)?;
         Ok((logits, ys))
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum LmModel {
-    Lm(Lm),
-    QuantizedLm(crate::quantized_lm::Lm),
-}
-
-impl LmModel {
-    pub fn forward(
-        &mut self,
-        text_ids: Option<Tensor>,
-        audio_ids: Vec<Option<Tensor>>,
-    ) -> candle::Result<(Tensor, Tensor)> {
-        match self {
-            Self::Lm(m) => m.forward(text_ids, audio_ids),
-            Self::QuantizedLm(m) => m.forward(text_ids, audio_ids),
-        }
-    }
-
-    pub fn forward_ca(
-        &mut self,
-        text_ids: Option<Tensor>,
-        audio_ids: Vec<Option<Tensor>>,
-        ca_src: &Tensor,
-    ) -> candle::Result<(Tensor, Tensor)> {
-        match self {
-            Self::Lm(m) => m.forward_ca(text_ids, audio_ids, ca_src),
-            Self::QuantizedLm(m) => m.forward_ca(text_ids, audio_ids, ca_src),
-        }
-    }
 
     pub fn depformer_sample(
         &mut self,
-        step_idx: usize,
         xs: &Tensor,
         text_token: Option<u32>,
+        forced_audio_tokens: &[Option<u32>],
         lp: &mut candle_transformers::generation::LogitsProcessor,
     ) -> Result<Option<Vec<u32>>> {
-        let sample = match self {
-            Self::Lm(m) => match &mut m.depformer {
-                None => None,
-                Some(m) => {
-                    let sample = m.sample(step_idx, xs, text_token, lp)?;
-                    Some(sample)
-                }
-            },
-            Self::QuantizedLm(m) => match &mut m.depformer {
-                None => None,
-                Some(m) => {
-                    let sample = m.sample(step_idx, xs, text_token, lp)?;
-                    Some(sample)
-                }
-            },
+        let sample = match self.depformer.as_mut() {
+            None => None,
+            Some(m) => {
+                let sample = m.sample(xs, text_token, forced_audio_tokens, lp)?;
+                Some(sample)
+            }
         };
         Ok(sample)
     }
 
-    pub fn device(&self) -> &Device {
-        match self {
-            Self::Lm(m) => m.device(),
-            Self::QuantizedLm(m) => m.device(),
-        }
+    pub fn depformer_sample_cfg(
+        &mut self,
+        xs: &Tensor,
+        cfg_alpha: f64,
+        text_token: Option<u32>,
+        forced_audio_tokens: &[Option<u32>],
+        lp: &mut candle_transformers::generation::LogitsProcessor,
+    ) -> Result<Option<Vec<u32>>> {
+        let sample = match self.depformer.as_mut() {
+            None => None,
+            Some(m) => {
+                let sample = m.sample_cfg(xs, cfg_alpha, text_token, forced_audio_tokens, lp)?;
+                Some(sample)
+            }
+        };
+        Ok(sample)
     }
+}
+
+pub fn load_lm_model<P: AsRef<std::path::Path>>(
+    cfg: Config,
+    model_file: P,
+    dtype: DType,
+    dev: &Device,
+) -> Result<LmModel> {
+    let quantized = model_file.as_ref().extension().is_some_and(|v| v == "gguf");
+    let vb = if quantized {
+        MaybeQuantizedVarBuilder::Quantized(
+            candle_transformers::quantized_var_builder::VarBuilder::from_gguf(model_file, dev)?,
+        )
+    } else {
+        unsafe {
+            MaybeQuantizedVarBuilder::Real(candle_nn::VarBuilder::from_mmaped_safetensors(
+                &[model_file],
+                dtype,
+                dev,
+            )?)
+        }
+    };
+    let model = LmModel::new(&cfg, vb)?;
+    Ok(model)
 }
 
 pub fn load<P: AsRef<std::path::Path>>(
     model_file: P,
     dtype: DType,
-    quantized: bool,
     dev: &Device,
 ) -> Result<LmModel> {
     let cfg = Config::v0_1();
-    let model = if quantized {
-        let vb =
-            candle_transformers::quantized_var_builder::VarBuilder::from_gguf(model_file, dev)?;
-        let lm = crate::quantized_lm::Lm::new(&cfg, vb)?;
-        LmModel::QuantizedLm(lm)
-    } else {
-        let vb =
-            unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[model_file], dtype, dev)? };
-        let lm = Lm::new(&cfg, vb)?;
-        LmModel::Lm(lm)
-    };
-    Ok(model)
+    load_lm_model(cfg, model_file, dtype, dev)
 }
 
 pub fn load_streaming<P: AsRef<std::path::Path>>(
@@ -588,19 +951,7 @@ pub fn load_streaming<P: AsRef<std::path::Path>>(
     dev: &Device,
 ) -> Result<LmModel> {
     let cfg = Config::v0_1_streaming(8);
-    let is_gguf = model_file.as_ref().extension().is_some_and(|v| v == "gguf");
-    let lm = if is_gguf {
-        let vb =
-            candle_transformers::quantized_var_builder::VarBuilder::from_gguf(model_file, dev)?;
-        let lm = crate::quantized_lm::Lm::new(&cfg, vb)?;
-        LmModel::QuantizedLm(lm)
-    } else {
-        let vb =
-            unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[model_file], dtype, dev)? };
-        let lm = Lm::new(&cfg, vb)?;
-        LmModel::Lm(lm)
-    };
-    Ok(lm)
+    load_lm_model(cfg, model_file, dtype, dev)
 }
 
 pub fn load_streaming_both_ways<P: AsRef<std::path::Path>>(
@@ -609,17 +960,64 @@ pub fn load_streaming_both_ways<P: AsRef<std::path::Path>>(
     dev: &Device,
 ) -> Result<LmModel> {
     let cfg = Config::v0_1_streaming(16);
-    let is_gguf = model_file.as_ref().extension().is_some_and(|v| v == "gguf");
-    let lm = if is_gguf {
-        let vb =
-            candle_transformers::quantized_var_builder::VarBuilder::from_gguf(model_file, dev)?;
-        let lm = crate::quantized_lm::Lm::new(&cfg, vb)?;
-        LmModel::QuantizedLm(lm)
-    } else {
-        let vb =
-            unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[model_file], dtype, dev)? };
-        let lm = Lm::new(&cfg, vb)?;
-        LmModel::Lm(lm)
-    };
-    Ok(lm)
+    load_lm_model(cfg, model_file, dtype, dev)
+}
+
+pub fn load_vision<P: AsRef<std::path::Path>>(
+    model_file: P,
+    override_cross_attention_gating: Option<transformer::CrossAttentionGating>,
+    override_cross_attention_in_dim: Option<usize>,
+    dtype: DType,
+    dev: &Device,
+) -> Result<LmModel> {
+    // load_vision allows for overriding some hyperparams of the lm from the main config file
+    let mut cfg = Config::v0_1_vision_streaming(8);
+    cfg.transformer.cross_attention = override_cross_attention_gating
+        .map(|v| (v, cfg.transformer.norm, override_cross_attention_in_dim));
+    load_lm_model(cfg, model_file, dtype, dev)
+}
+
+pub fn load_s2s<P: AsRef<std::path::Path>>(
+    model_file: P,
+    dtype: DType,
+    dev: &Device,
+) -> Result<LmModel> {
+    let cfg = Config::s2s_2b_16rvq_202501();
+    load_lm_model(cfg, model_file, dtype, dev)
+}
+
+pub fn load_asr<P: AsRef<std::path::Path>>(
+    model_file: P,
+    dtype: DType,
+    dev: &Device,
+) -> Result<LmModel> {
+    let cfg = Config::asr_v0_1_1b();
+    load_lm_model(cfg, model_file, dtype, dev)
+}
+
+pub struct ForcedAudioTokens {
+    acoustic_delay: usize,
+    // Tokens that are teacher forced before the acoustic delay.
+    pre_delay_tokens: Vec<Option<u32>>,
+}
+
+impl ForcedAudioTokens {
+    pub fn new(acoustic_delay: usize, audio_pad_token: u32, stream_codebooks: &[usize]) -> Self {
+        let mut pre_delay_tokens = vec![];
+        for codebooks in stream_codebooks.iter() {
+            for c in 0..*codebooks {
+                let token = if c == 0 { None } else { Some(audio_pad_token) };
+                pre_delay_tokens.push(token);
+            }
+        }
+        Self { acoustic_delay, pre_delay_tokens }
+    }
+
+    pub fn forced_tokens(&self, step_idx: usize) -> &[Option<u32>] {
+        if step_idx < self.acoustic_delay {
+            &self.pre_delay_tokens
+        } else {
+            &[]
+        }
+    }
 }

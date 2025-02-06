@@ -2,7 +2,8 @@
 // This source code is licensed under the license found in the
 // LICENSE file in the root directory of this source tree.
 
-use candle::{DType, Result, Tensor, D};
+use crate::transformer::CaSrc;
+use candle::{Context, DType, Result, Tensor, D};
 use candle_nn::{linear_no_bias, Linear, VarBuilder};
 use candle_transformers::models::t5;
 
@@ -32,7 +33,7 @@ impl Config {
 #[derive(Clone)]
 pub struct Model {
     t5: t5::T5EncoderModel,
-    pub lm: crate::lm::Lm,
+    pub lm: crate::lm::LmModel,
     speaker_cond: Option<(crate::mimi::Mimi, Linear)>,
     t5_proj: Linear,
     pub sample_rate: f64,
@@ -72,7 +73,8 @@ impl Model {
             };
             linear_no_bias(cfg.t5.d_model, cfg.lm.transformer.d_model, vb_lm.pp(name))?
         };
-        let lm = crate::lm::Lm::new(&cfg.lm, vb_lm)?;
+        let lm =
+            crate::lm::LmModel::new(&cfg.lm, crate::nn::MaybeQuantizedVarBuilder::Real(vb_lm))?;
         Ok(Self {
             t5,
             lm,
@@ -158,6 +160,11 @@ impl Model {
         let audio_codebooks = self.audio_codebooks;
         let audio_vocab_size = self.audio_vocab_size;
         let mut audio_tokens: Vec<Vec<u32>> = vec![vec![u32::MAX; audio_codebooks]; max_steps + 2];
+        let forced_audio_tokens = crate::lm::ForcedAudioTokens::new(
+            /* acoustic_delay= */ 2,
+            self.lm.audio_pad_token(),
+            &[audio_codebooks],
+        );
         let quantizer_bins = audio_vocab_size - 2; // 2048
         for step_idx in 0..(max_steps + 2) {
             let mut codes = Vec::with_capacity(audio_codebooks);
@@ -176,16 +183,25 @@ impl Model {
                 let t = Tensor::new(&[t], conditions.device())?.unsqueeze(0)?;
                 codes.push(Some(t))
             }
-            let (_text_logits, ys) = self.lm.forward_ca(None, codes, conditions)?;
-            let df = match self.lm.depformer.as_mut() {
-                None => candle::bail!("no depformer"),
-                Some(df) => df,
-            };
+            let (_text_logits, ys) =
+                self.lm.forward_ca(None, codes, &CaSrc::Tokens(conditions.clone()))?;
             let last_audio_tokens = if self.speaker_cond.is_some() {
-                df.sample_cfg(step_idx, &ys, cfg_alpha, None, &mut lp)?
+                self.lm.depformer_sample_cfg(
+                    &ys,
+                    cfg_alpha,
+                    None,
+                    forced_audio_tokens.forced_tokens(step_idx),
+                    &mut lp,
+                )?
             } else {
-                df.sample(step_idx, &ys, None, &mut lp)?
+                self.lm.depformer_sample(
+                    &ys,
+                    None,
+                    forced_audio_tokens.forced_tokens(step_idx),
+                    &mut lp,
+                )?
             };
+            let last_audio_tokens = last_audio_tokens.context("no depformer")?;
             for (c_idx, token) in last_audio_tokens.into_iter().enumerate() {
                 if step_idx > 0 && token >= quantizer_bins && self.end_of_gen.is_none() {
                     // Continue generating for two steps to get the final acoustic tokens.
