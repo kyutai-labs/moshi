@@ -128,7 +128,7 @@ class InferenceState:
         dt = time.time() - start_time
         log("info", f"processed {ntokens} steps in {dt:.0f}s, {1000 * dt / ntokens:.2f}ms/step")
         out = [
-            (torch.cat(one_texts, dim=1), torch.cat(one_pcms, dim=2))
+            (torch.cat(one_texts, dim=0), torch.cat(one_pcms, dim=1))
             for one_texts, one_pcms in zip(out_text_tokens_per_item, out_pcms_per_item)
         ]
         return out
@@ -174,14 +174,14 @@ def main():
     out_items = state.run(in_pcms)
 
     outfile = Path(args.outfile)
-    for index, (out_text, out_pcm) in enumerate(out_items):
+    for index, (_, out_pcm) in enumerate(out_items):
         if len(out_items) > 1:
             outfile_ = outfile.with_name(f"{outfile.stem}-{index}{outfile.suffix}")
         else:
             outfile_ = outfile
-        log("info", f"out-pcm: {out_pcm.shape}, out-text: {out_text.shape}")
-        log("info", f"writing {outfile_}")
-        sphn.write_wav(str(outfile_), out_pcm[0], sample_rate=mimi.sample_rate)
+        duration = out_pcm.shape[1] / mimi.sample_rate
+        log("info", f"writing {outfile_} with duration {duration:.1f} sec.")
+        sphn.write_wav(str(outfile_), out_pcm[0].numpy(), sample_rate=mimi.sample_rate)
 
 
 if __name__ == "__main__":
