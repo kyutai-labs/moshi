@@ -69,7 +69,7 @@ Depending on the backend, the file format and quantization available will vary. 
 of the HuggingFace repo with each model. Mimi is bundled in each of those, and always use the same checkpoint format.
 
 - Moshika for PyTorch (bf16, int8): [kyutai/moshika-pytorch-bf16](https://huggingface.co/kyutai/moshika-pytorch-bf16), [kyutai/moshika-pytorch-q8](https://huggingface.co/kyutai/moshika-pytorch-q8) (experimental).
-- Moshiko for PyTorch (bf16, int8): [kyutai/moshiko-pytorch-bf16](https://huggingface.co/kyutai/moshiko-pytorch-bf16), [kyutai/moshiko-pytorch-q88888888](https://huggingface.co/kyutai/moshiko-pytorch-q8) (experimental).
+- Moshiko for PyTorch (bf16, int8): [kyutai/moshiko-pytorch-bf16](https://huggingface.co/kyutai/moshiko-pytorch-bf16), [kyutai/moshiko-pytorch-q8](https://huggingface.co/kyutai/moshiko-pytorch-q8) (experimental).
 - Moshika for MLX (int4, int8, bf16): [kyutai/moshika-mlx-q4](https://huggingface.co/kyutai/moshika-mlx-q4), [kyutai/moshika-mlx-q8](https://huggingface.co/kyutai/moshika-mlx-q8),  [kyutai/moshika-mlx-bf16](https://huggingface.co/kyutai/moshika-mlx-bf16).
 - Moshiko for MLX (int4, int8, bf16): [kyutai/moshiko-mlx-q4](https://huggingface.co/kyutai/moshiko-mlx-q4), [kyutai/moshiko-mlx-q8](https://huggingface.co/kyutai/moshiko-mlx-q8),  [kyutai/moshiko-mlx-bf16](https://huggingface.co/kyutai/moshiko-mlx-bf16).
 - Moshika for Rust/Candle (int8, bf16): [kyutai/moshika-candle-q8](https://huggingface.co/kyutai/moshika-candle-q8),  [kyutai/moshika-mlx-bf16](https://huggingface.co/kyutai/moshika-candle-bf16).
