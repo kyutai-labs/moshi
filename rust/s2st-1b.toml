@@ -1,0 +1,55 @@
+text_in_vocab_size = 48001
+text_out_vocab_size = 48000
+audio_vocab_size = 2049
+audio_codebooks = 16
+
+[transformer]
+d_model = 2048
+num_heads = 16
+num_layers = 16
+dim_feedforward = 8192
+causal = true
+norm_first = true
+bias_ff = false
+bias_attn = false
+context = 3000
+max_period = 100000
+use_conv_block = false
+use_conv_bias = true
+gating = "silu"
+norm = "RmsNorm"
+positional_embedding = "Rope"
+conv_layout = false
+conv_kernel_size = 3
+kv_repeat = 1
+max_seq_len = 4096
+
+[depformer]
+num_slices = 8
+
+[depformer.transformer]
+d_model = 1024
+num_heads = 16
+num_layers = 6
+dim_feedforward = 4096
+causal = true
+norm_first = true
+bias_ff = false
+bias_attn = false
+context = 32
+max_period = 10000
+use_conv_block = false
+use_conv_bias = true
+gating = "silu"
+norm = "RmsNorm"
+positional_embedding = "None"
+conv_layout = false
+conv_kernel_size = 3
+kv_repeat = 1
+max_seq_len = 4096
+
+[conditioners.description]
+type = "Lut"
+n_bins = 31
+dim = 16
+possible_values = ["very_bad", "bad", "neutral", "good", "very_good"]
