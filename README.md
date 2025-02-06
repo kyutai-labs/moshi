@@ -81,11 +81,11 @@ You will need at least Python 3.10, with 3.12 recommended. For specific requirem
 directories. You can install the PyTorch and MLX clients with the following:
 
 ```bash
-pip install moshi      # moshi PyTorch, from PyPI
-pip install moshi_mlx  # moshi MLX, from PyPI, best with Python 3.12.
+pip install -U moshi      # moshi PyTorch, from PyPI
+pip install -U moshi_mlx  # moshi MLX, from PyPI, best with Python 3.12.
 # Or the bleeding edge versions for Moshi and Moshi-MLX.
-pip install -e "git+https://git@github.com/kyutai-labs/moshi.git#egg=moshi&subdirectory=moshi"
-pip install -e "git+https://git@github.com/kyutai-labs/moshi.git#egg=moshi_mlx&subdirectory=moshi_mlx"
+pip install -U -e "git+https://git@github.com/kyutai-labs/moshi.git#egg=moshi&subdirectory=moshi"
+pip install -U -e "git+https://git@github.com/kyutai-labs/moshi.git#egg=moshi_mlx&subdirectory=moshi_mlx"
 
 pip install rustymimi  # mimi, rust implementation with Python bindings from PyPI
 ```
