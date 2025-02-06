@@ -56,12 +56,12 @@ class InferenceState:
     lm_gen: LMGen
 
     def __init__(self, model_type: str, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
-                 lm: LMModel, batch_size: int, cfg_coef: float, device: str | torch.device):
+                 lm: LMModel, batch_size: int, cfg_coef: float, device: str | torch.device, **kwargs):
         self.model_type = model_type
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
         condition_tensors = get_condition_tensors(model_type, lm, batch_size, cfg_coef)
-        self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors)
+        self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors, **kwargs)
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
         self.batch_size = batch_size
@@ -127,7 +127,11 @@ class InferenceState:
                 if eos_reached[b]:
                     continue
                 elif one_text.item() == self.text_tokenizer.eos_id():
-                    eos_reached[b] = True
+                    if need_eos_input:
+                        # We sampled the EOS before the end of the file! Not possible.
+                        self.printer.log("warning", "EOS sampled too early.")
+                    else:
+                        eos_reached[b] = True
 
                 out_text_tokens_per_item[b].append(one_text)
                 out_pcms_per_item[b].append(one_pcm)
@@ -162,7 +166,7 @@ def main():
     parser.add_argument("outfile", type=str, help="Output audio file in wav format.")
 
     args = parser.parse_args()
-    seed_all(42424242)
+    seed_all(4242)
 
     log("info", "retrieving checkpoint")
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
@@ -182,7 +186,7 @@ def main():
 
     state = InferenceState(
         checkpoint_info.model_type, mimi, text_tokenizer, lm,
-        args.batch_size, args.cfg_coef, args.device)
+        args.batch_size, args.cfg_coef, args.device, **checkpoint_info.lm_gen_config)
     out_items = state.run(in_pcms)
 
     outfile = Path(args.outfile)
