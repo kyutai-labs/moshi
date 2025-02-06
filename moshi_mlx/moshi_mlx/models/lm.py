@@ -301,7 +301,7 @@ class Lm(nn.Module):
         )
         return text_token, audio_tokens
 
-    def warmup(self, ct: ConditionTensor | None):
+    def warmup(self, ct: ConditionTensor | None = None):
         text, audio = self.sample(
             mx.array([[self.cfg.text_out_vocab_size]]),
             [mx.array([[0]])] * self.cfg.other_codebooks,

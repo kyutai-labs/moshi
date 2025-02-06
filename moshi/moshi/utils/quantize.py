@@ -77,7 +77,7 @@ def multi_linear(num_steps: int, schedule: list[int] | None,
         else:
             state = bnb.MatmulLtState()
             CB = weight[linear_index]
-            state.CB = CB
+            state.CB = CB  # type: ignore
             state.SCB = weight_scb[linear_index]
             state.has_fp16_weights = False
             y = bnb.matmul(x[:, t].half(), CB, state=state)
@@ -102,7 +102,7 @@ def quantize_param(module: nn.Module, name: str = 'weight') -> None:
         return
     weight = getattr(module, name)
     assert weight.data.dtype.is_floating_point
-    CB, SCB, _ = bnbF.int8_vectorwise_quant(weight.data.to(torch.float16))
+    CB, SCB, _ = bnbF.int8_vectorwise_quant(weight.data.to(torch.float16))  # type: ignore
     setattr(module, name, nn.Parameter(CB, requires_grad=False))
     setattr(module, name + '_scb', nn.Parameter(SCB, requires_grad=False))
 
