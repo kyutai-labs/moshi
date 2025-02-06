@@ -353,6 +353,7 @@ class LMModel(StreamingContainer):
             last_token_input = self.depformer_emb[depformer_cb_index - 1](
                 sequence[:, 0]
             )
+        assert last_token_input is not None
         depformer_input = depformer_input + last_token_input
         assert depformer_input.shape[1] == 1
         # depformer_input is [B, 1, depformer_dim].

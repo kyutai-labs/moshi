@@ -128,6 +128,7 @@ def simple_checkpoint(module: torch.nn.Module, *args, **kwargs):
         module_for_sig = module._fsdp_wrapped_module
     else:
         module_for_sig = module
+    assert isinstance(module_for_sig, torch.nn.Module)
     sig = inspect.signature(module_for_sig.forward)
     # We first flatten all arguments to use only *args, to make things easier and because
     # torch.autograd.Function has weird support for kwargs.
