@@ -40,7 +40,7 @@ macro_rules! py_bail {
     };
 }
 
-fn mimi_cfg(max_seq_len: Option<usize>) -> mimi::Config {
+fn mimi_cfg(num_codebooks: usize, max_seq_len: Option<usize>) -> mimi::Config {
     let seanet_cfg = seanet::Config {
         dimension: 512,
         channels: 1,
@@ -93,7 +93,7 @@ fn mimi_cfg(max_seq_len: Option<usize>) -> mimi::Config {
         resample_method: mimi::ResampleMethod::Conv,
         seanet: seanet_cfg,
         transformer: transformer_cfg,
-        quantizer_n_q: 8,
+        quantizer_n_q: num_codebooks,
         quantizer_bins: 2048,
         quantizer_dim: 256,
     }
@@ -108,9 +108,14 @@ struct Tokenizer {
 
 #[pymethods]
 impl Tokenizer {
-    #[pyo3(signature = (path, *, dtype="f32", max_seq_len=None))]
+    #[pyo3(signature = (path, *, num_codebooks=8, dtype="f32", max_seq_len=None))]
     #[new]
-    fn new(path: std::path::PathBuf, dtype: &str, max_seq_len: Option<usize>) -> PyResult<Self> {
+    fn new(
+        path: std::path::PathBuf,
+        num_codebooks: usize,
+        dtype: &str,
+        max_seq_len: Option<usize>,
+    ) -> PyResult<Self> {
         let device = candle::Device::Cpu;
         let dtype = match dtype {
             "f32" => candle::DType::F32,
@@ -120,7 +125,7 @@ impl Tokenizer {
         };
         let vb =
             unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[path], dtype, &device).w()? };
-        let cfg = mimi_cfg(max_seq_len);
+        let cfg = mimi_cfg(num_codebooks, max_seq_len);
         let mimi = mimi::Mimi::new(cfg, vb).w()?;
         Ok(Self { mimi, device, dtype })
     }
@@ -241,9 +246,14 @@ struct StreamTokenizer {
 
 #[pymethods]
 impl StreamTokenizer {
-    #[pyo3(signature = (path, *, dtype="f32", max_seq_len=None))]
+    #[pyo3(signature = (path, *, num_codebooks=8, dtype="f32", max_seq_len=None))]
     #[new]
-    fn new(path: std::path::PathBuf, dtype: &str, max_seq_len: Option<usize>) -> PyResult<Self> {
+    fn new(
+        path: std::path::PathBuf,
+        num_codebooks: usize,
+        dtype: &str,
+        max_seq_len: Option<usize>,
+    ) -> PyResult<Self> {
         let device = candle::Device::Cpu;
         let dtype = match dtype {
             "f32" => candle::DType::F32,
@@ -253,7 +263,7 @@ impl StreamTokenizer {
         };
         let vb =
             unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[path], dtype, &device).w()? };
-        let cfg = mimi_cfg(max_seq_len);
+        let cfg = mimi_cfg(num_codebooks, max_seq_len);
         let mut e_mimi = mimi::Mimi::new(cfg, vb).w()?;
         let mut d_mimi = e_mimi.clone();
         let (encoder_tx, e_rx) = mpsc::channel::<Vec<f32>>();

@@ -364,10 +364,10 @@ impl StreamingModel {
                 // For the ASR, we don't provide text tokens during the initial steps except the
                 // initial one.
                 if state.step_idx() > 0 && state.step_idx() < asr_delay_in_tokens {
-                    prev_text_token = state.step_(None, &codes, None)?;
+                    prev_text_token = state.step_(None, &codes, None, None, None)?;
                 } else {
                     sender.send(StreamOut::StepStart { step })?;
-                    let text_token = state.step(prev_text_token, &codes, None)?;
+                    let text_token = state.step(prev_text_token, &codes, None, None)?;
                     sender.send(StreamOut::StepPostSampling { step })?;
                     if let Some(text) = app_state.text(prev_text_token, text_token, &config) {
                         sender.send(StreamOut::Text { text })?;
@@ -418,7 +418,7 @@ impl StreamingModel {
             for step in 0..steps {
                 let codes = audio_tokens.i((0, .., step))?.to_vec1::<u32>()?;
                 sender.send(StreamOut::StepStart { step })?;
-                let text_token = state.step(prev_text_token, &codes, None)?;
+                let text_token = state.step(prev_text_token, &codes, None, None)?;
                 sender.send(StreamOut::StepPostSampling { step })?;
                 if let Some(audio_tokens) = state.last_audio_tokens() {
                     let audio_tokens = {
@@ -520,7 +520,7 @@ impl StreamingModel {
             while let Ok((codes, step)) = rx_i.recv() {
                 tracing::info!("received codes");
                 sender.send(StreamOut::StepStart { step })?;
-                let text_token = state.step(prev_text_token, &codes, None);
+                let text_token = state.step(prev_text_token, &codes, None, None);
                 sender.send(StreamOut::StepPostSampling { step })?;
                 tracing::info!(?text_token, "codes");
                 if text_token.is_err() {
@@ -595,12 +595,12 @@ impl StreamingModel {
         );
         let mut state = moshi::lm_generate_multistream::State::new(
             lm_model,
-            None,
             self.session_config.max_steps,
             audio_lp,
             text_lp,
             self.session_config.pad_mult,
             self.session_config.repetition_penalty,
+            None,
             self.config.clone(),
         );
 

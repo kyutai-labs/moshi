@@ -159,7 +159,7 @@ pub mod client {
             let all_pcms = all_pcms.concat();
             tracing::info!(len = all_pcms.len(), "saving pcms with shape");
             let mut w = std::fs::File::create("received.wav")?;
-            crate::audio_io::write_pcm_as_wav(&mut w, &all_pcms, 24000)?;
+            moshi::wav::write_pcm_as_wav(&mut w, &all_pcms, 24000)?;
             Ok::<(), anyhow::Error>(())
         });
         tokio::spawn(async move {
@@ -556,7 +556,7 @@ pub mod client_tui {
                 let all_pcms = all_pcms.concat();
                 tracing::info!(len = all_pcms.len(), "saving pcms with shape");
                 let mut w = std::fs::File::create("received.wav")?;
-                crate::audio_io::write_pcm_as_wav(&mut w, &all_pcms, 24000)?;
+                moshi::wav::write_pcm_as_wav(&mut w, &all_pcms, 24000)?;
                 Ok::<(), anyhow::Error>(())
             }
         });

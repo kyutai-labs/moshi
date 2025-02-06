@@ -3,7 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use crate::streaming::{StreamTensor, StreamingModule};
-use crate::{conv, quantization, seanet, transformer};
+use crate::{conv, nn, quantization, seanet, transformer};
 use candle::{DType, Device, Module, Result, Tensor};
 use candle_nn::VarBuilder;
 
@@ -110,13 +110,13 @@ impl Mimi {
             dim,
             &[dim],
             &cfg.transformer,
-            vb.pp("encoder_transformer"),
+            nn::MaybeQuantizedVarBuilder::Real(vb.pp("encoder_transformer")),
         )?;
         let decoder_transformer = transformer::ProjectedTransformer::new(
             dim,
             &[dim],
             &cfg.transformer,
-            vb.pp("decoder_transformer"),
+            nn::MaybeQuantizedVarBuilder::Real(vb.pp("decoder_transformer")),
         )?;
         let quantizer = quantization::SplitResidualVectorQuantizer::new(
             /* dim */ cfg.quantizer_dim,
