@@ -135,6 +135,10 @@ class EuclideanCodebook(nn.Module):
         self._next_unused_check = check_unused_every
         self._cached_initialized = False
 
+        self._initialized: torch.Tensor
+        self.cluster_usage: torch.Tensor
+        self.embedding_sum: torch.Tensor
+        self._embedding: torch.Tensor
         self.register_buffer("_initialized", torch.tensor([False], dtype=torch.float))
         self.register_buffer("cluster_usage", torch.ones(codebook_size))
         embedding = torch.zeros(codebook_size, dim)
@@ -172,7 +176,7 @@ class EuclideanCodebook(nn.Module):
         """Cached version of self._initialized,
         This assumes that once the module is initialized, it will never go back to the uninitialized state."""
         if not self._cached_initialized:
-            self._cached_initialized = self._initialized.item()
+            self._cached_initialized = bool(self._initialized.item())
         return self._cached_initialized
 
     def _init_embedding(self, data: torch.Tensor) -> None:
@@ -487,6 +491,7 @@ class ResidualVectorQuantization(nn.Module):
         all_indices = []
         n_q = n_q or len(self.layers)
         for layer in self.layers[:n_q]:  # type: ignore
+            assert isinstance(layer, VectorQuantization)
             indices = layer.encode(residual)
             quantized = layer.decode(indices)
             residual = residual - quantized
@@ -499,5 +504,6 @@ class ResidualVectorQuantization(nn.Module):
         quantized = zero_scalar(codes.device)
         for idx, layer_codes in enumerate(codes):
             layer = self.layers[idx]
+            assert isinstance(layer, VectorQuantization)
             quantized = quantized + layer.decode(layer_codes)
         return quantized

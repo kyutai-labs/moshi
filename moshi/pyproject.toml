@@ -11,7 +11,7 @@ dependencies = [
     "sentencepiece == 0.2",
     "sounddevice == 0.5",
     "sphn >= 0.1.4",
-    "torch >= 2.2.0, < 2.6",
+    "torch >= 2.2.0, < 2.7",
     "aiohttp>=3.10.5, <3.12",
     "pytest >= 8.3.3",
 ]

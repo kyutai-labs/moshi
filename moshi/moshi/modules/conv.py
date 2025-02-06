@@ -22,6 +22,7 @@ from .streaming import RawStreamingConv1d, RawStreamingConvTranspose1d, Streamin
 
 
 CONV_NORMALIZATIONS = frozenset(["none", "weight_norm"])
+M = tp.TypeVar('M', bound=nn.Module)
 
 
 class TransposedLayerNorm(nn.Module):
@@ -37,7 +38,7 @@ class TransposedLayerNorm(nn.Module):
         return x.transpose(1, 2)
 
 
-def apply_parametrization_norm(module: nn.Module, norm: str = "none"):
+def apply_parametrization_norm(module: M, norm: str = "none") -> M:
     assert norm in CONV_NORMALIZATIONS
     if norm == "weight_norm":
         return weight_norm(module)

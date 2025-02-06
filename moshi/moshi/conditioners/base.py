@@ -458,7 +458,9 @@ class ConditionProvider(nn.Module):
         if missing_inputs:
             raise RuntimeError(f"Some conditioners did not receive an input: {missing_inputs}")
         for attribute, batch in chain(text.items(), wavs.items()):
-            output[attribute] = self.conditioners[attribute].prepare(batch)
+            conditioner = self.conditioners[attribute]
+            assert isinstance(conditioner, BaseConditioner)
+            output[attribute] = conditioner.prepare(batch)
         return output
 
     def forward(self, prepared: tp.Dict[str, tp.Any]) -> tp.Dict[str, ConditionType]:
