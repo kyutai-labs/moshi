@@ -191,6 +191,8 @@ def main():
                              "Use this to select a different pre-trained model.")
     parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
+    parser.add_argument("--half", action="store_const", const=torch.float16, default=torch.bfloat16,
+                        dest="dtype", help="Run inference with float16, not bfloat16, better for old GPUs.")
     parser.add_argument(
         "--ssl",
         type=str,
@@ -228,7 +230,7 @@ def main():
     text_tokenizer = checkpoint_info.get_text_tokenizer()
 
     log("info", "loading moshi")
-    lm = checkpoint_info.get_moshi(device=args.device)
+    lm = checkpoint_info.get_moshi(device=args.device).to(dtype=args.dtype)
     log("info", "moshi loaded")
 
     state = ServerState(checkpoint_info.model_type, mimi, text_tokenizer, lm, args.cfg_coef, args.device)

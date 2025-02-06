@@ -144,6 +144,8 @@ def main():
                              "Use this to select a different pre-trained model.")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size to be used for inference.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
+    parser.add_argument("--half", action="store_const", const=torch.float16, default=torch.bfloat16,
+                        dest="dtype", help="Run inference with float16, not bfloat16, better for old GPUs.")
     parser.add_argument("--config", "--lm-config", dest="config", type=str, help="The config as a json file.")
     parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
     parser.add_argument("infile", type=str, help="Input audio file.")
@@ -160,7 +162,7 @@ def main():
     log("info", "mimi loaded")
     text_tokenizer = checkpoint_info.get_text_tokenizer()
     log("info", "loading moshi")
-    lm = checkpoint_info.get_moshi(device=args.device)
+    lm = checkpoint_info.get_moshi(device=args.device).to(dtype=args.dtype)
     log("info", "moshi loaded")
 
     log("info", f"loading input file {args.infile}")
