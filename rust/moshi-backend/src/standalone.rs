@@ -73,7 +73,7 @@ impl stream_both::AppStateInner {
             let mut lm_model = lm_model.clone();
             let (_v, ys) = lm_model.forward(None, vec![None; config.mimi_num_codebooks])?;
             let mut lp = candle_transformers::generation::LogitsProcessor::new(123, None, None);
-            let _ = lm_model.depformer_sample(0, &ys, None, &mut lp)?;
+            let _ = lm_model.depformer_sample(&ys, None, &[], &mut lp)?;
             let mut mimi_model = mimi_model.clone();
             let config = mimi_model.config();
             let frame_length = (config.sample_rate / config.frame_rate).ceil() as usize;
