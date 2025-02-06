@@ -9,28 +9,46 @@ categories.workspace = true
 license.workspace = true
 
 [dependencies]
+anyhow = "1.0"
+byteorder = "1.5.0"
+candle = { workspace = true }
+candle-nn = { workspace = true }
+candle-transformers = { workspace = true }
+clap = { version = "4.2.4", features = ["derive"] }
+color-eyre = "0.6.2"
+cpal = "0.15.3"
+crossterm = { version = "0.27.0", features = ["event-stream"] }
+env_logger = "0.10.1"
+futures = "0.3.28"
+futures-util = "0.3.30"
+log = "0.4.20"
+moshi = { path = "../moshi-core", version = "0.5.0" }
+native-tls = "0.2.11"
+ogg = { version = "0.9.1", features = ["async"] }
+opus = "0.3.0"
 rand = "0.8.5"
+ratatui = "0.27.0"
+rubato = "0.15.0"
+rustls = "0.23.5"
+sentencepiece = "0.11.2"
+serde_json = "1.0.115"
+symphonia = { version = "0.5.3", features = ["all"] }
+tokio = { version = "1.0", features = ["full"] }
+tokio-tungstenite = { version = "0.21.0", features = ["rustls", "native-tls"] }
+toml = "0.8.19"
 tracing = "0.1.40"
 tracing-chrome = "0.7.1"
 tracing-subscriber = "0.3.18"
-anyhow = "1.0"
-clap = { version = "4.2.4", features = ["derive"] }
-cpal = "0.15.3"
-rubato = "0.15.0"
-tokio = { version = "1.0", features = ["full"] }
-env_logger = "0.10.1"
-log = "0.4.20"
-futures-util = "0.3.30"
-serde_json = "1.0.115"
-tokio-tungstenite = { version = "0.21.0", features = ["rustls", "native-tls"] }
-opus = "0.3.0"
-ogg = { version = "0.9.1", features = ["async"] }
-rustls = "0.23.5"
-native-tls = "0.2.11"
-byteorder = "1.5.0"
-
-color-eyre = "0.6.2"
-crossterm = { version = "0.27.0", features = ["event-stream"] }
-ratatui = "0.27.0"
 tui-logger = "0.11.2"
-futures = "0.3.28"
+
+[features]
+default = []
+cuda = ["moshi/cuda", "candle/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["moshi/metal", "candle/metal", "candle-nn/metal", "candle-transformers/metal"]
+
+[profile.release]
+debug = true
+
+[profile.release-no-debug]
+inherits = "release"
+debug = false
