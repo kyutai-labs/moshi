@@ -3,15 +3,15 @@ name = "moshi_mlx"
 requires-python = ">= 3.10"
 description = "Moshi is moshi, but running on macOS"
 dependencies = [
-    "numpy >= 2.1.0, < 2.2",
-    "safetensors >= 0.4.0, < 0.5",
+    "numpy >= 2.1.0, < 2.3",
+    "safetensors >= 0.4.0, < 0.6",
     "huggingface-hub >= 0.24, < 0.29",
     "rustymimi == 0.4.1",
     "sentencepiece == 0.2",
     "sounddevice == 0.5",
     "sphn >= 0.1.4",
     "mlx >= 0.22.0, < 0.23",
-    "aiohttp>=3.10.5, <3.11",
+    "aiohttp>=3.10.5, <3.12",
 ]
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
