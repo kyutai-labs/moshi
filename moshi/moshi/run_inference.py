@@ -3,6 +3,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 import random
@@ -55,43 +56,82 @@ class InferenceState:
 
     def __init__(self, model_type: str, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
                  lm: LMModel, batch_size: int, cfg_coef: float, device: str | torch.device):
+        self.model_type = model_type
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
         condition_tensors = get_condition_tensors(model_type, lm, batch_size, cfg_coef)
         self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors)
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
+        self.batch_size = batch_size
         self.mimi.streaming_forever(batch_size)
         self.lm_gen.streaming_forever(batch_size)
 
-    def run(self, in_pcms: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        out_pcms = []
-        out_text_tokens = []
+    def run(self, in_pcms: torch.Tensor) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Returns a list of tupel `(text_tokens, audio_tokens)`"""
+        out_pcms_per_item: list[list[torch.Tensor]] = [[] for _ in range(self.batch_size)]
+        out_text_tokens_per_item: list[list[torch.Tensor]] = [[] for _ in range(self.batch_size)]
+        # For the Hibiki translation model, we feed a special token for the end of the input stream,
+        # which corresponds to `2048` on all the codebooks of the audio stream, and wait
+        # for the EOS on the output text stream to be emitted, as indication that the model is done.
+        eos_reached: list[bool] = [False] * self.batch_size
+        need_eos_input: bool = True
         log("info", "starting the inference loop")
+        device = self.lm_gen.lm_model.device
         start_time = time.time()
         ntokens = 0
-        for i, chunk in enumerate(in_pcms.split(1920, dim=2)):
-            if chunk.shape[-1] != 1920:
-                break
-            codes = self.mimi.encode(chunk)
-            if i == 0:
+        first_frame = True
+        # We keep only fully frames.
+        chunks = deque([
+            chunk for chunk in in_pcms.split(self.frame_size, dim=2)
+            if chunk.shape[-1] == self.frame_size])
+        while not all(eos_reached):
+            if chunks:
+                chunk = chunks.popleft()
+                codes = self.mimi.encode(chunk)
+            else:
+                if self.model_type == 'hibiki':
+                    if need_eos_input:
+                        # First frame after the end of the file, we feed a code full of 2048
+                        # to indicate the end of stream.
+                        need_eos_input = False
+                        eos_value = self.mimi.cardinality
+                        codes = torch.full(
+                            (self.batch_size, self.mimi.num_codebooks, 1),
+                            eos_value, device=device, dtype=torch.long)
+                    else:
+                        silence = torch.zeros((self.batch_size, self.mimi.channels, self.frame_size), device=device)
+                        codes = self.mimi.encode(silence)
+                else:
+                    # For other models, we stop as soon as we are reaching the end of the audio.
+                    break
+            if first_frame:
                 # Ensure that the first slice of codes is properly seen by the transformer
                 # as otherwise the first slice is replaced by the initial tokens.
                 tokens = self.lm_gen.step(codes)
                 assert tokens is None
+                first_frame = False
             tokens = self.lm_gen.step(codes)
             if tokens is None:
                 continue
             assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
-            out_pcm = self.mimi.decode(tokens[:, 1:])
-            out_text_tokens.append(tokens[:, 0])
-            out_pcms.append(out_pcm)
+            out_pcm = self.mimi.decode(tokens[:, 1:]).cpu()
+            for b, (one_text, one_pcm) in enumerate(zip(tokens[:, 0].cpu(), out_pcm)):
+                if eos_reached[b]:
+                    continue
+                elif one_text.item() == self.text_tokenizer.eos_id():
+                    eos_reached[b] = True
+
+                out_text_tokens_per_item[b].append(one_text)
+                out_pcms_per_item[b].append(one_pcm)
             ntokens += 1
         dt = time.time() - start_time
         log("info", f"processed {ntokens} steps in {dt:.0f}s, {1000 * dt / ntokens:.2f}ms/step")
-        out_pcms = torch.cat(out_pcms, dim=2)
-        out_text_tokens = torch.cat(out_text_tokens, dim=1)
-        return out_pcms, out_text_tokens
+        out = [
+            (torch.cat(one_texts, dim=1), torch.cat(one_pcms, dim=2))
+            for one_texts, one_pcms in zip(out_text_tokens_per_item, out_pcms_per_item)
+        ]
+        return out
 
 
 def main():
@@ -131,17 +171,17 @@ def main():
     state = InferenceState(
         checkpoint_info.model_type, mimi, text_tokenizer, lm,
         args.batch_size, args.cfg_coef, args.device)
-    out_pcms, out_text_tokens = state.run(in_pcms)
-    log("info", f"out-pcm: {out_pcms.shape}, out-text: {out_text_tokens.shape}")
+    out_items = state.run(in_pcms)
 
-    if args.batch_size == 1:
-        sphn.write_wav(args.outfile, out_pcms[0, 0].cpu().numpy(), sample_rate=mimi.sample_rate)
-    else:
-        outfile = Path(args.outfile)
-        for index in range(args.batch_size):
+    outfile = Path(args.outfile)
+    for index, (out_text, out_pcm) in enumerate(out_items):
+        if len(out_items) > 1:
             outfile_ = outfile.with_name(f"{outfile.stem}-{index}{outfile.suffix}")
-            log("info", f"writing {outfile_}")
-            sphn.write_wav(str(outfile_), out_pcms[index, 0].cpu().numpy(), sample_rate=24000)
+        else:
+            outfile_ = outfile
+        log("info", f"out-pcm: {out_pcm.shape}, out-text: {out_text.shape}")
+        log("info", f"writing {outfile_}")
+        sphn.write_wav(str(outfile_), out_pcm[0], sample_rate=mimi.sample_rate)
 
 
 if __name__ == "__main__":
