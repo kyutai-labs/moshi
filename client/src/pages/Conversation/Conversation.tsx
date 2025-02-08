@@ -20,7 +20,9 @@ type ConversationProps = {
 
 
 const buildURL = ({}: {}) => {
-  const url = new URL(`wss://192.168.1.10:8998/api/chat`);
+  const workerAddr = window.location.hostname + ":" + window.location.port;
+  const wsProtocol = (window.location.protocol === 'https:') ? 'wss' : 'ws';
+  const url = new URL(`${wsProtocol}://${workerAddr}/api/chat`);
   console.log("URL is", url.toString());
   return url.toString();
 };
