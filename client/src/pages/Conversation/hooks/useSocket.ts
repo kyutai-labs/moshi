@@ -43,6 +43,9 @@ export const useSocket = ({
       lastMessageTime.current = Date.now();
       const dataArray = new Uint8Array(eventData.data);
       const message = decodeMessage(dataArray);
+      if (message.type == "ping") {
+        console.log("ping");
+      }
       if (message.type == "handshake") {
         console.log("Handshake received, let's rocknroll.");
         setIsConnected(true);

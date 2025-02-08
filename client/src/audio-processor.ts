@@ -22,12 +22,12 @@ class MoshiProcessor extends AudioWorkletProcessor {
     this.partialBufferSamples = asSamples(10);
     // If the buffer length goes over that many, we will drop the oldest packets until
     // we reach back initialBufferSamples + partialBufferSamples.
-    this.maxBufferSamples = asSamples(10);
+    this.maxBufferSamples = asSamples(500);
     // increments
     this.partialBufferIncrement = asSamples(5);
     this.maxPartialWithIncrements = asSamples(80);
-    this.maxBufferSamplesIncrement = asSamples(5);
-    this.maxMaxBufferWithIncrements = asSamples(80);
+    this.maxBufferSamplesIncrement = asSamples(100);
+    this.maxMaxBufferWithIncrements = asSamples(800);
 
     // State and metrics
     this.initState();
