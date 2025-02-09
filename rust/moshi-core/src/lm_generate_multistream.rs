@@ -266,18 +266,9 @@ impl State {
                 self.config.acoustic_delay
             };
             let pos = &mut self.audio_tokens[self.step_idx.saturating_sub(delay)][c_idx];
-            match last_audio_tokens.as_ref() {
-                Some(lat) => {
-                    if *pos == UNGENERATED {
-                        *pos = lat[c_idx]
-                    }
-                }
-                None => {
-                    if *pos == UNGENERATED {
-                        *pos = audio_pad_token
-                    }
-                }
-            }
+            // Overwrite existing positions even if there are non-UNGENERATED values. This
+            // actually happens for the first few slices because of the saturating_sub.
+            *pos = last_audio_tokens.as_ref().map_or(audio_pad_token, |l| l[c_idx]);
         }
         self.step_idx += 1;
         if self.step_idx >= self.audio_tokens.len() {
