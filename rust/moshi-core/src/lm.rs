@@ -23,6 +23,7 @@ thread_local! {
 pub struct DepFormerConfig {
     pub transformer: transformer::Config,
     pub num_slices: usize,
+    pub low_rank_embeddings: Option<usize>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -37,6 +38,33 @@ pub struct Config {
 }
 
 impl Config {
+    fn depformer_cfg(num_slices: usize) -> DepFormerConfig {
+        let depformer_cfg = transformer::Config {
+            d_model: 1024,
+            num_heads: 16,
+            num_layers: 6,
+            dim_feedforward: 1024 * 4, // dim * hidden_scale
+            causal: true,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: num_slices,
+            max_period: 10000,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: None,
+            gating: Some(candle_nn::Activation::Silu),
+            norm: NormType::RmsNorm,
+            positional_embedding: transformer::PositionalEmbedding::None,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096,
+        };
+        DepFormerConfig { num_slices, transformer: depformer_cfg, low_rank_embeddings: None }
+    }
+
     // /lustre/scwpod02/client/kyutai/alex/mimi_exp/xps/af78657c/outputs/hyperparams.json
     // Update 2024-03-19: Sin embeddings -> None, RmsNorm fix, scale factor 4.125
     // Update 2024-05-02: split text_vocab_size into text_in_vocab_size and text_out_vocab_size.
@@ -65,33 +93,9 @@ impl Config {
             kv_repeat: 1,
             max_seq_len: 4096,
         };
-        let depformer_cfg = transformer::Config {
-            d_model: 1024,
-            num_heads: 16,
-            num_layers: 6,
-            dim_feedforward: 1024 * 4, // dim * hidden_scale
-            causal: true,
-            norm_first: true,
-            bias_ff: false,
-            bias_attn: false,
-            layer_scale: None,
-            context: 8,
-            max_period: 10000,
-            use_conv_block: false,
-            use_conv_bias: true,
-            cross_attention: None,
-            gating: Some(candle_nn::Activation::Silu),
-            norm: NormType::RmsNorm,
-            positional_embedding: transformer::PositionalEmbedding::None,
-            conv_layout: false,
-            conv_kernel_size: 3,
-            kv_repeat: 1,
-            max_seq_len: 4096,
-        };
-        let depformer_cfg = DepFormerConfig { num_slices: 8, transformer: depformer_cfg };
         Self {
             transformer: lm_cfg,
-            depformer: Some(depformer_cfg),
+            depformer: Some(Self::depformer_cfg(8)),
             audio_vocab_size: 2049,
             text_in_vocab_size: 32001,
             text_out_vocab_size: 32000,
@@ -128,33 +132,9 @@ impl Config {
             kv_repeat: 1,
             max_seq_len: 4096,
         };
-        let depformer_cfg = transformer::Config {
-            d_model: 1024,
-            num_heads: 16,
-            num_layers: 6,
-            dim_feedforward: 1024 * 4, // dim * hidden_scale
-            causal: true,
-            norm_first: true,
-            bias_ff: false,
-            bias_attn: false,
-            layer_scale: None,
-            context: 8,
-            max_period: 10000,
-            use_conv_block: false,
-            use_conv_bias: true,
-            cross_attention: None,
-            gating: Some(candle_nn::Activation::Silu),
-            norm: crate::NormType::RmsNorm,
-            positional_embedding: transformer::PositionalEmbedding::None,
-            conv_layout: false,
-            conv_kernel_size: 3,
-            kv_repeat: 1,
-            max_seq_len: 4096,
-        };
-        let depformer_cfg = DepFormerConfig { num_slices: 8, transformer: depformer_cfg };
         Self {
             transformer: lm_cfg,
-            depformer: Some(depformer_cfg),
+            depformer: Some(Self::depformer_cfg(8)),
             audio_vocab_size: 2049,
             text_in_vocab_size: 32001,
             text_out_vocab_size: 32000,
@@ -222,33 +202,9 @@ impl Config {
             kv_repeat: 1,
             max_seq_len: 4096,
         };
-        let depformer_cfg = transformer::Config {
-            d_model: 1024,
-            num_heads: 16,
-            num_layers: 6,
-            dim_feedforward: 1024 * 4, // dim * hidden_scale
-            causal: true,
-            norm_first: true,
-            bias_ff: false,
-            bias_attn: false,
-            layer_scale: None,
-            context: 4096,
-            max_period: 10000,
-            use_conv_block: false,
-            use_conv_bias: true,
-            cross_attention: None,
-            gating: None,
-            norm: NormType::LayerNorm,
-            positional_embedding: transformer::PositionalEmbedding::Sin,
-            conv_layout: false,
-            conv_kernel_size: 3,
-            kv_repeat: 1,
-            max_seq_len: 4096,
-        };
-        let depformer_cfg = DepFormerConfig { num_slices: 16, transformer: depformer_cfg };
         Self {
             transformer: lm_cfg,
-            depformer: Some(depformer_cfg),
+            depformer: Some(Self::depformer_cfg(16)),
             audio_vocab_size: 2050,
             text_in_vocab_size: 32001,
             text_out_vocab_size: 32001,
@@ -283,33 +239,9 @@ impl Config {
             kv_repeat: 1,
             max_seq_len: 4096,
         };
-        let depformer_cfg = transformer::Config {
-            d_model: 1024,
-            num_heads: 16,
-            num_layers: 6,
-            dim_feedforward: 1024 * 4, // dim * hidden_scale
-            causal: true,
-            norm_first: true,
-            bias_ff: false,
-            bias_attn: false,
-            layer_scale: None,
-            context: 4096,
-            max_period: 10000,
-            use_conv_block: false,
-            use_conv_bias: true,
-            cross_attention: None,
-            gating: Some(candle_nn::Activation::Silu),
-            norm: crate::NormType::RmsNorm,
-            positional_embedding: transformer::PositionalEmbedding::None,
-            conv_layout: false,
-            conv_kernel_size: 3,
-            kv_repeat: 1,
-            max_seq_len: 4096,
-        };
-        let depformer_cfg = DepFormerConfig { num_slices: 16, transformer: depformer_cfg };
         Self {
             transformer: lm_cfg,
-            depformer: Some(depformer_cfg),
+            depformer: Some(Self::depformer_cfg(16)),
             audio_vocab_size: 2049,
             text_in_vocab_size: 48001,
             text_out_vocab_size: 48000,
@@ -428,33 +360,9 @@ impl Config {
             kv_repeat: 1,
             max_seq_len: 4096,
         };
-        let depformer_cfg = transformer::Config {
-            d_model: 1024,
-            num_heads: 16,
-            num_layers: 6,
-            dim_feedforward: 1024 * 4, // dim * hidden_scale
-            causal: true,
-            norm_first: true,
-            bias_ff: false,
-            bias_attn: false,
-            layer_scale: None,
-            context: 32,
-            max_period: 10000,
-            use_conv_block: false,
-            use_conv_bias: true,
-            cross_attention: None,
-            gating: Some(candle_nn::Activation::Silu),
-            norm: NormType::RmsNorm,
-            positional_embedding: transformer::PositionalEmbedding::None,
-            conv_layout: false,
-            conv_kernel_size: 3,
-            kv_repeat: 1,
-            max_seq_len: 4096,
-        };
-        let depformer_cfg = DepFormerConfig { num_slices: 32, transformer: depformer_cfg };
         Self {
             transformer: lm_cfg,
-            depformer: Some(depformer_cfg),
+            depformer: Some(Self::depformer_cfg(32)),
             audio_vocab_size: 2049,
             text_in_vocab_size: 8001,
             text_out_vocab_size: 8000,
@@ -488,33 +396,9 @@ impl Config {
             kv_repeat: 1,
             max_seq_len: 4096,
         };
-        let depformer_cfg = transformer::Config {
-            d_model: 1024,
-            num_heads: 16,
-            num_layers: 6,
-            dim_feedforward: 1024 * 4, // dim * hidden_scale
-            causal: true,
-            norm_first: true,
-            bias_ff: false,
-            bias_attn: false,
-            layer_scale: None,
-            context: 32,
-            max_period: 10000,
-            use_conv_block: false,
-            use_conv_bias: true,
-            cross_attention: None,
-            gating: Some(candle_nn::Activation::Silu),
-            norm: NormType::RmsNorm,
-            positional_embedding: transformer::PositionalEmbedding::None,
-            conv_layout: false,
-            conv_kernel_size: 3,
-            kv_repeat: 1,
-            max_seq_len: 4096,
-        };
-        let depformer_cfg = DepFormerConfig { num_slices: 16, transformer: depformer_cfg };
         Self {
             transformer: lm_cfg,
-            depformer: Some(depformer_cfg),
+            depformer: Some(Self::depformer_cfg(16)),
             audio_vocab_size: 2049,
             text_in_vocab_size: 48001,
             text_out_vocab_size: 48000,
@@ -525,11 +409,49 @@ impl Config {
 }
 
 #[derive(Debug, Clone)]
+struct LowRankEmbeddings {
+    embeddings: MaybeQuantizedEmbedding,
+    low_rank: Option<MaybeQuantizedLinear>,
+}
+
+impl LowRankEmbeddings {
+    fn new(
+        in_vocab_size: usize,
+        dim: usize,
+        low_rank_dim: Option<usize>,
+        vb: MaybeQuantizedVarBuilder,
+    ) -> Result<Self> {
+        let (low_rank, embeddings) = match low_rank_dim {
+            None => {
+                let embeddings = MaybeQuantizedEmbedding::new(in_vocab_size, dim, vb)?;
+                (None, embeddings)
+            }
+            Some(low_rank_dim) => {
+                let low_rank = linear(low_rank_dim, dim, false, vb.pp("low_rank"))?;
+                let embeddings = MaybeQuantizedEmbedding::new(in_vocab_size, low_rank_dim, vb)?;
+                (Some(low_rank), embeddings)
+            }
+        };
+        Ok(Self { embeddings, low_rank })
+    }
+}
+
+impl Module for LowRankEmbeddings {
+    fn forward(&self, xs: &Tensor) -> Result<Tensor> {
+        let embs = xs.apply(&self.embeddings)?;
+        match self.low_rank.as_ref() {
+            None => Ok(embs),
+            Some(lr) => embs.apply(lr),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct DepFormerSlice {
     transformer: transformer::StreamingTransformer,
     // Note that the embedding for the first slice does not have the same dimension as the
     // embedding for the other slices as it takes a text token as input rather than an audio token.
-    emb: MaybeQuantizedEmbedding,
+    emb: LowRankEmbeddings,
     linear_in: MaybeQuantizedLinear,  // depformer_in.{idx}
     linear_out: MaybeQuantizedLinear, // linears.{idx}
 }
@@ -539,12 +461,14 @@ impl DepFormerSlice {
         in_vocab_size: usize,
         out_vocab_size: usize,
         main_transformer_dim: usize,
-        cfg: &transformer::Config,
+        cfg: &DepFormerConfig,
         vb: MaybeQuantizedVarBuilder,
     ) -> Result<Self> {
-        let dim = cfg.d_model;
-        let transformer = transformer::StreamingTransformer::new(cfg, vb.pp("transformer"))?;
-        let emb = MaybeQuantizedEmbedding::new(in_vocab_size, dim, vb.pp("emb"))?;
+        let dim = cfg.transformer.d_model;
+        let transformer =
+            transformer::StreamingTransformer::new(&cfg.transformer, vb.pp("transformer"))?;
+        let emb =
+            LowRankEmbeddings::new(in_vocab_size, dim, cfg.low_rank_embeddings, vb.pp("emb"))?;
         let linear_in = linear(main_transformer_dim, dim, false, vb.pp("linear_in"))?;
         let linear_out = linear(dim, out_vocab_size, false, vb.pp("linear_out"))?;
         Ok(Self { transformer, emb, linear_in, linear_out })
@@ -572,7 +496,7 @@ impl DepFormer {
                 in_vs,
                 audio_vocab_size - 1, // The depformer cannot emit an audio padding token.
                 main_transformer_dim,
-                &cfg.transformer,
+                cfg,
                 vb.pp(slice_idx),
             )?;
             slices.push(slice)

@@ -22,7 +22,7 @@ env_logger = "0.10.1"
 futures = "0.3.28"
 futures-util = "0.3.30"
 log = "0.4.20"
-moshi = { path = "../moshi-core", version = "0.5.1" }
+moshi = { path = "../moshi-core", version = "0.5.2" }
 native-tls = "0.2.11"
 ogg = { version = "0.9.1", features = ["async"] }
 opus = "0.3.0"
