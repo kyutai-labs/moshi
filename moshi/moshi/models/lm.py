@@ -181,7 +181,7 @@ class LMModel(StreamingContainer):
         if depformer_weights_per_step:
             kwargs_dep["weights_per_step"] = dep_q
         if depformer_multi_linear:
-            # One linear layer per codebook to project different informations from the main model.
+            # One linear layer per codebook to project different information from the main model.
             num_in = dep_q
             if depformer_weights_per_step_schedule:
                 num_in = max(depformer_weights_per_step_schedule) + 1

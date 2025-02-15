@@ -19,7 +19,7 @@ Note that in general, we will not accept refactoring of the code.
 
 In order to accept your pull request, we need you to submit a Contributor License Agreement.
 
-If you agree with the full CLA provided in the next paragraph, copy the following statement in your PR, changing your Github Handle:
+If you agree with the full CLA provided in the next paragraph, copy the following statement in your PR, changing your GitHub Handle:
 
 > I, {your GitHub handle}, confirm that I have read and understood the terms of the CLA of Kyutai-labs, as outlined in the repository's CONTRIBUTING.md, and I agree to be bound by these terms.
 
@@ -48,7 +48,7 @@ The full CLA is provided as follows:
 
 ## Issues
 
-Please submit issues on our Github repository.
+Please submit issues on our GitHub repository.
 
 ## License
 
