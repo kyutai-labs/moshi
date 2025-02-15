@@ -74,7 +74,7 @@ class InferenceState:
             self.printer = RawPrinter()
 
     def run(self, in_pcms: torch.Tensor) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Returns a list of tupel `(text_tokens, audio_tokens)`"""
+        """Returns a list of tuple `(text_tokens, audio_tokens)`"""
         out_pcms_per_item: list[list[torch.Tensor]] = [[] for _ in range(self.batch_size)]
         out_text_tokens_per_item: list[list[torch.Tensor]] = [[] for _ in range(self.batch_size)]
         # For the Hibiki translation model, we feed a special token for the end of the input stream,

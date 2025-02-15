@@ -220,7 +220,7 @@ class CheckpointInfo:
         if self.model_type == 'hibiki':
             # Sometime the model samples the EOS (2) too early, which we want to ignore.
             # We keep generating if the input file is not finished, and this is a way
-            # to implicitely replace early EOS with PAD.
+            # to implicitly replace early EOS with PAD.
             model.text_emb.weight.data[2] = model.text_emb.weight.data[3]
         return model
 

@@ -94,7 +94,7 @@ def is_quantized(module: nn.Module, name: str = 'weight'):
 def quantize_param(module: nn.Module, name: str = 'weight') -> None:
     from bitsandbytes import functional as bnbF  # type: ignore
     if is_quantized(module, name):
-        # Due to model casting, the type of SCB might be wrong, althought
+        # Due to model casting, the type of SCB might be wrong, although
         # that would only happen during the init. Let's recast it to float.
         SCB = getattr(module, name + '_scb')
         if SCB.dtype != torch.float:

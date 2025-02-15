@@ -44,7 +44,7 @@ def apply_parametrization_norm(module: M, norm: str = "none") -> M:
         return weight_norm(module)
     else:
         # We already check was in CONV_NORMALIZATION, so any other choice
-        # doesn't need reparametrization.
+        # doesn't need reparameterization.
         return module
 
 
