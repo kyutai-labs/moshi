@@ -27,6 +27,7 @@ class SeanetConfig:
 
 class SeanetResnetBlock(nn.Module):
     def __init__(self, cfg: SeanetConfig, dim: int, ksizes_and_dilations: list):
+        super().__init__()
         block = []
         hidden = dim // cfg.compress
         for i, (ksize, dilation) in enumerate(ksizes_and_dilations):
@@ -80,6 +81,7 @@ class SeanetResnetBlock(nn.Module):
 
 class EncoderLayer(nn.Module):
     def __init__(self, cfg: SeanetConfig, ratio: int, mult: int):
+        super().__init__()
         residuals = []
         dilation = 1
         for _ in range(cfg.nresidual_layers):
@@ -115,6 +117,7 @@ class EncoderLayer(nn.Module):
 
 class SeanetEncoder(nn.Module):
     def __init__(self, cfg: SeanetConfig):
+        super().__init__()
         mult = 1
         self.init_conv1d = StreamableConv1d(
             in_channels=cfg.channels,
@@ -159,6 +162,7 @@ class SeanetEncoder(nn.Module):
 
 class DecoderLayer(nn.Module):
     def __init__(self, cfg: SeanetConfig, ratio: int, mult: int):
+        super().__init__()
         self.upsample = StreamableConvTranspose1d(
             in_channels=mult * cfg.nfilters,
             out_channels=mult * cfg.nfilters // 2,
@@ -183,6 +187,7 @@ class DecoderLayer(nn.Module):
 
 class SeanetDecoder(nn.Module):
     def __init__(self, cfg: SeanetConfig):
+        super().__init__()
         mult = 1 << len(cfg.ratios)
         self.init_conv1d = StreamableConv1d(
             in_channels=cfg.dimension,
@@ -227,5 +232,6 @@ class SeanetDecoder(nn.Module):
 
 class Seanet(nn.Module):
     def __init__(self, cfg: SeanetConfig):
+        super().__init__()
         self.encoder = SeanetEncoder(cfg)
         self.decoder = SeanetDecoder(cfg)
