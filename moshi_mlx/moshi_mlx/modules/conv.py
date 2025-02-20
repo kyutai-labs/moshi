@@ -182,7 +182,7 @@ class StreamableConv1d(nn.Module):
         self._left_pad_applied = False
         self._out_channels = out_channels
 
-    def reset(self):
+    def reset_state(self):
         self._prev_xs = None
         self._left_pad_applied = False
 
@@ -217,3 +217,95 @@ class StreamableConv1d(nn.Module):
         else:
             self._prev_xs = xs
             return mx.zeros((b, self._out_channels, 0))
+
+class StreamableConvTranspose1d(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        ksize: int,
+        stride: int,
+        groups: int,
+        bias: bool,
+        causal: bool,
+    ):
+        self._causal = causal
+        self._ksize = ksize
+        self.convtr = NormConvTranspose1d(
+            in_channels,
+            out_channels,
+            ksize,
+            stride=stride,
+            groups=groups,
+            bias=bias,
+        )
+        self._prev_ys = None
+
+    def reset_state(self):
+        self._prev_ys = None
+
+    def __call__(self, xs: mx.array) -> mx.array:
+        b, _, l = xs.shape
+        if l == 0:
+            return mx.zeros((b, self._out_channels, 0))
+        stride = self.convtr.convtr._stride
+        ys = self.convtr(xs)
+        ot = ys.shape[-1]
+        if self._prev_ys is not None:
+            prev_ys = self._prev_ys
+            pt = prev_ys.shape[-1]
+            if self.convtr.convtr.bias is not None:
+                prev_ys = prev_ys - self.convtr.convtr.bias[None, :, None]
+            ys1, ys2 = ys[..., :pt] + prev_ys, ys[..., pt:]
+            ys = mx.concat([ys1, ys2], axis=-1)
+        invalid_steps = self._ksize - stride
+        ys, self._prev_ys = ys[..., :ot-invalid_steps], ys[..., ot-invalid_steps]
+        return ys
+
+class ConvDownsample1d(nn.Module):
+    def __init__(
+        self,
+        stride: int,
+        dim: int,
+        causal: bool
+    ):
+        self.conv = StreamableConv1d(
+            in_channels=dim,
+            out_channels=dim,
+            ksize=2*stride,
+            stride=stride,
+            dilation=1,
+            groups=1,
+            bias=False,
+            causal=causal,
+            pad_mode="edge",
+        )
+
+    def reset_state(self):
+        self.conv.reset_state()
+
+    def __call__(self, xs: mx.array) -> mx.array:
+        return self.conv(xs)
+
+class ConvTrUpsample1d(nn.Module):
+    def __init__(
+        self,
+        stride: int,
+        dim: int,
+        causal: bool
+    ):
+        self.convtr = StreamableConvTranspose1d(
+            in_channels=dim,
+            out_channels=dim,
+            ksize=2*stride,
+            stride=stride,
+            groups=dim, # TODO: hopefully someday this will be fixed.
+            bias=False,
+            causal=causal,
+        )
+
+    def reset_state(self):
+        self.convtr.reset_state()
+
+    def __call__(self, xs: mx.array) -> mx.array:
+        return self.convtr(xs)
