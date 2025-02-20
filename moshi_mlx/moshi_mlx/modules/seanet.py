@@ -26,10 +26,57 @@ class SeanetConfig:
     compress: int
 
 class SeanetResnetBlock(nn.Module):
-    pass
+    def __init__(self, cfg: SeanetConfig, dim: int, ksizes_and_dilations: list):
+        block = []
+        hidden = dim // cfg.compress
+        for i, (ksize, dilation) in enumerate(ksizes_and_dilations):
+            in_channels = dim if i == 0 else hidden
+            out_channels = dim if i == len(ksizes_and_dilations) - 1 else hidden
+            c = StreamableConv1d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                ksize=ksize,
+                stride=1,
+                dilation=dilation,
+                groups=1,
+                bias=True,
+                causal=cfg.causal,
+                pad_mode=cfg.pad_mode,
+            )
+            block.append(c)
+        self.block = block
+
+        if cfg.true_skip:
+            self.shortcut = None
+        else:
+            self.shortcut = StreamableConv1d(
+                in_channels=dim,
+                out_channels=dim,
+                ksize=1,
+                stride=1,
+                dilation=1,
+                groups=1,
+                bias=True,
+                causal=cfg.causal,
+                pad_mode=cfg.pad_mode,
+            )
 
     def reset_state(self):
-        pass
+        if self.shortcut is not None:
+            self.shortcut.reset_state()
+        for b in self.block:
+            b.reset_state()
+
+    def __call__(self, xs: mx.array) -> mx.array:
+        residual = xs
+        for b in self.block:
+            xs = b(nn.elu(xs, alpha=1.0))
+        # TODO(laurent): we might need some streaming additions below.
+        if self.shortcut is None:
+            xs = xs + residual
+        else:
+            xs = xs + self.shortcut(residual)
+        return xs
 
 class EncoderLayer(nn.Module):
     def __init__(self, cfg: SeanetConfig, ratio: int, mult: int):
@@ -37,6 +84,9 @@ class EncoderLayer(nn.Module):
 
     def reset_state(self):
         pass
+
+    def __call__(self, xs: mx.array) -> mx.array:
+        return xs
 
 class SeanetEncoder(nn.Module):
     def __init__(self, cfg: SeanetConfig):
