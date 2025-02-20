@@ -4,5 +4,6 @@
 # flake8: noqa
 """Modules used for building the models."""
 
+from .conv import Conv1d, ConvTranspose1d
 from .kv_cache import KVCache, RotatingKVCache
 from .transformer import Transformer, TransformerConfig
