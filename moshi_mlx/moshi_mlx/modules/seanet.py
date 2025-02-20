@@ -80,13 +80,38 @@ class SeanetResnetBlock(nn.Module):
 
 class EncoderLayer(nn.Module):
     def __init__(self, cfg: SeanetConfig, ratio: int, mult: int):
-        pass
+        residuals = []
+        dilation = 1
+        for _ in range(cfg.nresidual_layers):
+            b = SeanetResnetBlock(
+                cfg,
+                dim=mult * cfg.nfilters,
+                ksizes_and_dilations=[(cfg.residual_ksize, dilation), (1, 1)],
+            )
+            residuals.append(b)
+            dilation *= cfg.dilation_base
+        self.residuals = residuals
+        self.downsample = StreamableConv1d(
+            in_channels=mult * cfg.nfilters,
+            out_channels=mult * cfg.nfilters * 2,
+            ksize=ratio * 2,
+            stride=ratio,
+            dilation=1,
+            groups=1,
+            bias=True,
+            causal=True,
+            pad_mode=cfg.pad_mode,
+        )
 
     def reset_state(self):
-        pass
+        self.downsample.reset_state()
+        for r in self.residuals:
+            r.reset_state()
 
     def __call__(self, xs: mx.array) -> mx.array:
-        return xs
+        for r in self.residuals:
+            xs = r(xs)
+        return self.downsample(nn.elu(xs, alpha=1.0))
 
 class SeanetEncoder(nn.Module):
     def __init__(self, cfg: SeanetConfig):
