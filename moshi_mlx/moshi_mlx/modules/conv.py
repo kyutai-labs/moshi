@@ -147,10 +147,10 @@ def get_extra_padding_for_conv1d(
     stride: int,
     padding_total: int,
 ) -> int:
-    l = xs.shape[-1]
-    nframes = max(l + padding_total - ksize, 0) / stride + 1.0
+    len_ = xs.shape[-1]
+    nframes = max(len_ + padding_total - ksize, 0) / stride + 1.0
     ideal_len = (int(math.ceil(nframes)) - 1) * stride + ksize - padding_total
-    return max(0, ideal_len - l)
+    return max(0, ideal_len - len_)
 
 
 def unpad1d(xs: mx.array, unpad_l: int, unpad_r: int) -> mx.array:
@@ -195,8 +195,8 @@ class StreamableConv1d(nn.Module):
         self._left_pad_applied = False
 
     def __call__(self, xs: mx.array) -> mx.array:
-        b, _, l = xs.shape
-        if l == 0:
+        b, _, len_ = xs.shape
+        if len_ == 0:
             return mx.zeros((b, self._out_channels, 0))
         stride = self.conv.conv._stride
         dilation = self.conv.conv._dilation
@@ -211,8 +211,8 @@ class StreamableConv1d(nn.Module):
             )
         if self._prev_xs is not None:
             xs = mx.concat([self._prev_xs, xs], axis=-1)
-        l = xs.shape[-1]
-        nframes = max(l + stride - ksize, 0) // stride
+        len_ = xs.shape[-1]
+        nframes = max(len_ + stride - ksize, 0) // stride
         if nframes > 0:
             offset = nframes * stride
             self._prev_xs = xs[..., offset:]
@@ -254,8 +254,8 @@ class StreamableConvTranspose1d(nn.Module):
         self._prev_ys = None
 
     def __call__(self, xs: mx.array) -> mx.array:
-        b, _, l = xs.shape
-        if l == 0:
+        b, _, len_ = xs.shape
+        if len_ == 0:
             return mx.zeros((b, self._out_channels, 0))
         stride = self.convtr.convtr._stride
         ys = self.convtr(xs)
