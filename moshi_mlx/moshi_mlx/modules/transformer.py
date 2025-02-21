@@ -229,7 +229,7 @@ class ProjectedTransformer(nn.Module):
         self,
         xs: mx.array,
         cache: list[KVCache] | list[RotatingKVCache],
-    ) -> mx.array:
+    ) -> list[mx.array]:
         if self.conv_layout:
             xs = xs.swapaxes(1, 2)
         if self.input_proj is not None:
@@ -244,7 +244,7 @@ class ProjectedTransformer(nn.Module):
             if self.conv_layout:
                 out = out.swapaxes(1, 2)
             outs.append(out)
-        return xs
+        return outs
 
     def make_cache(self) -> list[KVCache]:
         return self.transformer.make_cache()

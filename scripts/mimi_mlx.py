@@ -16,7 +16,7 @@ def run():
     args = parser.parse_args()
 
     pcm_in, _ = sphn.read(args.input, sample_rate=24000)
-    pcm_in = mx.array(pcm_in[0])
+    pcm_in = mx.array(pcm_in[0])[None, None]
     print(pcm_in.shape)
 
     weight_file = hf_hub_download(args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors")
