@@ -29,13 +29,13 @@ class EuclideanCodebook(nn.Module):
 
     def encode(self, xs: mx.array) -> mx.array:
         target_shape = xs.shape[:-1]
-        xs = xs.flatten(start_axis=-2)
+        xs = xs.flatten(end_axis=-2)
         dot_prod = xs @ self.embedding.swapaxes(-1, -2)
-        return (self.c2 - dot_prod).min(axis=-1).reshape(target_shape)
+        return (self.c2 - dot_prod).argmin(axis=-1).reshape(target_shape)
 
     def decode(self, xs: mx.array) -> mx.array:
         target_shape = list(xs.shape) + [self._dim]
-        return mx.take(self.embedding, xs.flatten()).reshape(target_shape)
+        return mx.take(self.embedding, xs.flatten(), axis=0).reshape(target_shape)
 
 
 class VectorQuantization(nn.Module):
@@ -84,7 +84,7 @@ class ResidualVectorQuantization(nn.Module):
             quantized = layer.decode(indices)
             residual = residual - quantized
             codes.append(indices)
-        return mx.concat(codes, axis=0)
+        return mx.stack(codes, axis=0)
 
     def decode(self, xs: mx.array) -> mx.array:
         seq_len = xs.shape[0]
@@ -125,7 +125,7 @@ class ResidualVectorQuantizer(nn.Module):
     def encode(self, xs: mx.array) -> mx.array:
         if self.input_proj is not None:
             xs = self.input_proj(xs)
-        return self.vq.encode(xs).transpose(0, 1)
+        return self.vq.encode(xs).swapaxes(0, 1)
 
     def decode(self, xs: mx.array) -> mx.array:
         xs = xs.swapaxes(0, 1)
@@ -166,7 +166,7 @@ class SplitResidualVectorQuantizer(nn.Module):
     def encode(self, xs: mx.array) -> mx.array:
         codes = self.rvq_first.encode(xs)
         if self._nq > 1:
-            rest_codes = self.rvq_rest(xs)
+            rest_codes = self.rvq_rest.encode(xs)
             codes = mx.concat([codes, rest_codes], axis=1)
         return codes
 

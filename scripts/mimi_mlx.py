@@ -22,7 +22,8 @@ def run():
     weight_file = hf_hub_download(args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors")
     cfg = moshi_mlx.models.mimi.mimi_202407(16)
     mimi = moshi_mlx.models.mimi.Mimi(cfg)
-    mimi.encode(pcm_in)
+    codes = mimi.encode(pcm_in)
+    print(codes.shape)
 
 if __name__ == "__main__":
     run()
