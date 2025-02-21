@@ -133,7 +133,7 @@ impl State {
     fn apply_repetition_penalty(&self, logits: Tensor) -> candle::Result<Tensor> {
         let logits = match self.repetition_penalty {
             None => logits,
-            Some((_, penalty)) if penalty == 1. => logits,
+            Some((_, 1.)) => logits,
             Some((context_size, penalty)) => {
                 let device = logits.device();
                 let mut logits = logits.to_dtype(candle::DType::F32)?.to_vec1::<f32>()?;
