@@ -203,3 +203,51 @@ class Transformer(nn.Module):
             )
             for _ in self.layers
         ]
+
+
+class ProjectedTransformer(nn.Module):
+    def __init__(self, cfg: TransformerConfig, input_dim: int, output_dims: list[int]):
+        super().__init__()
+
+        self.conv_layout = cfg.conv_layout
+        self.transformer = Transformer(cfg)
+        if input_dim == cfg.d_model:
+            self.input_proj = None
+        else:
+            self.input_proj = nn.Linear(input_dim, cfg.d_model, bias=False)
+
+        output_projs = []
+        for output_dim in output_dims:
+            if output_dim == cfg.d_model:
+                p = None
+            else:
+                p = nn.Linear(cfg.d_model, output_dim, bias=False)
+            output_projs.append(p)
+        self.output_projs = output_projs
+
+    def __call__(
+        self,
+        xs: mx.array,
+        cache: list[KVCache] | list[RotatingKVCache],
+    ) -> list[mx.array]:
+        if self.conv_layout:
+            xs = xs.swapaxes(1, 2)
+        if self.input_proj is not None:
+            xs = self.input_proj(xs)
+        xs = self.transformer(xs, cache=cache)
+        outs = []
+        for output_proj in self.output_projs:
+            if output_proj is None:
+                out = xs
+            else:
+                out = output_proj(xs)
+            if self.conv_layout:
+                out = out.swapaxes(1, 2)
+            outs.append(out)
+        return outs
+
+    def make_cache(self) -> list[KVCache]:
+        return self.transformer.make_cache()
+
+    def make_rot_cache(self) -> list[RotatingKVCache]:
+        return self.transformer.make_rot_cache()
