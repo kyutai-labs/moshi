@@ -15,3 +15,4 @@ from .lm import (
     config_helium_1_preview_2b,
 )
 from .generate import LmGen
+from .mimi import mimi_202407, MimiConfig
