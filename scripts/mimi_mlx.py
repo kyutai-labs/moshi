@@ -24,6 +24,8 @@ def run():
     mimi = moshi_mlx.models.mimi.Mimi(cfg)
     codes = mimi.encode(pcm_in)
     print(codes.shape)
+    pcm_out = mimi.decode(codes)
+    print(pcm_out.shape)
 
 if __name__ == "__main__":
     run()

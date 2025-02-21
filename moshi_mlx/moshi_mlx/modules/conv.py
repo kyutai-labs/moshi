@@ -75,14 +75,45 @@ class ConvTranspose1d(nn.Module):
         self._padding = padding
         self._groups = groups
         self._stride = stride
+        self._ksize = ksize
+        self._in_channels = in_channels
+        self._out_channels = out_channels
+        if groups == in_channels and groups == out_channels:
+            eye = mx.eye(out_channels).astype(self.weight.dtype).reshape((out_channels, 1, out_channels))
+            eye = mx.repeat(eye, repeats=ksize, axis=1)
+            self.expanded_weight = mx.repeat(self.weight, repeats=groups, axis=0) * eye
+            self.expanded_groups = 1
+        elif groups > 1:
+            raise ValueError("groups are not supported in ConvTranspose1d")
+        else:
+            self.expanded_weight = self.weight
+            self.expanded_groups = groups
+
+    def update(self, parameters: dict) -> nn.Module:
+        super().update(parameters)
+        groups = self._groups
+        in_channels = self._in_channels
+        out_channels = self._out_channels
+        ksize = self._ksize
+        if groups == in_channels and groups == out_channels:
+            eye = mx.eye(out_channels).astype(self.weight.dtype).reshape((out_channels, 1, out_channels))
+            eye = mx.repeat(eye, repeats=ksize, axis=1)
+            self.expanded_weight = mx.repeat(self.weight, repeats=groups, axis=0) * eye
+            self.expanded_groups = 1
+        elif groups > 1:
+            raise ValueError("groups are not supported in ConvTranspose1d")
+        else:
+            self.expanded_weight = self.weight
+            self.expanded_groups = groups
+        return self
 
     def __call__(self, xs: mx.array) -> mx.array:
         y = mx.conv_transpose1d(
             xs.swapaxes(-1, -2),
-            self.weight,
+            self.expanded_weight,
             stride=self._stride,
             padding=self._padding,
-            groups=self._groups,
+            groups=self.expanded_groups,
         )
         if self.bias is not None:
             y = y + self.bias
