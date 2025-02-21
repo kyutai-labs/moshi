@@ -143,7 +143,7 @@ class Mimi(nn.Module):
         xs = self.quantizer.decode(xs)
         xs = self.upsample(xs)
         xs = self.decoder_transformer(xs, cache=self.decoder_cache)[0]
-        return self.decoder(xs[0])
+        return self.decoder(xs)
 
     def encode_step(self, _: mx.array) -> mx.array:
         raise ValueError("TODO")

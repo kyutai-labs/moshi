@@ -117,7 +117,7 @@ class ConvTranspose1d(nn.Module):
         )
         if self.bias is not None:
             y = y + self.bias
-        return y
+        return y.swapaxes(-1, -2)
 
 
 class NormConv1d(nn.Module):
@@ -350,4 +350,5 @@ class ConvTrUpsample1d(nn.Module):
         self.convtr.reset_state()
 
     def __call__(self, xs: mx.array) -> mx.array:
-        return self.convtr(xs)
+        xs = self.convtr(xs)
+        return xs
