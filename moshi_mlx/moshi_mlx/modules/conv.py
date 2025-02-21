@@ -6,6 +6,7 @@ import math
 import mlx.core as mx
 import mlx.nn as nn
 
+
 class Conv1d(nn.Module):
     def __init__(
         self,
@@ -48,6 +49,7 @@ class Conv1d(nn.Module):
             y = y + self.bias
         return y.swapaxes(-1, -2)
 
+
 class ConvTranspose1d(nn.Module):
     def __init__(
         self,
@@ -86,6 +88,7 @@ class ConvTranspose1d(nn.Module):
             y = y + self.bias
         return y
 
+
 class NormConv1d(nn.Module):
     def __init__(
         self,
@@ -112,6 +115,7 @@ class NormConv1d(nn.Module):
     def __call__(self, xs: mx.array) -> mx.array:
         return self.conv(xs)
 
+
 class NormConvTranspose1d(nn.Module):
     def __init__(
         self,
@@ -136,10 +140,11 @@ class NormConvTranspose1d(nn.Module):
     def __call__(self, xs: mx.array) -> mx.array:
         return self.convtr(xs)
 
+
 def get_extra_padding_for_conv1d(
     xs: mx.array,
     ksize: int,
-    stride: int, 
+    stride: int,
     padding_total: int,
 ) -> int:
     l = xs.shape[-1]
@@ -147,12 +152,15 @@ def get_extra_padding_for_conv1d(
     ideal_len = (int(math.ceil(nframes)) - 1) * stride + ksize - padding_total
     return max(0, ideal_len - l)
 
+
 def unpad1d(xs: mx.array, unpad_l: int, unpad_r: int) -> mx.array:
     left = unpad_l
     right = xs.shape[-1] - unpad_r
     return xs[..., left:right]
 
 # TODO(laurent): add a streaming module abstract class?
+
+
 class StreamableConv1d(nn.Module):
     def __init__(
         self,
@@ -218,6 +226,7 @@ class StreamableConv1d(nn.Module):
             self._prev_xs = xs
             return mx.zeros((b, self._out_channels, 0))
 
+
 class StreamableConvTranspose1d(nn.Module):
     def __init__(
         self,
@@ -259,8 +268,9 @@ class StreamableConvTranspose1d(nn.Module):
             ys1, ys2 = ys[..., :pt] + prev_ys, ys[..., pt:]
             ys = mx.concat([ys1, ys2], axis=-1)
         invalid_steps = self._ksize - stride
-        ys, self._prev_ys = ys[..., :ot-invalid_steps], ys[..., ot-invalid_steps]
+        ys, self._prev_ys = ys[..., :ot - invalid_steps], ys[..., ot - invalid_steps]
         return ys
+
 
 class ConvDownsample1d(nn.Module):
     def __init__(
@@ -272,7 +282,7 @@ class ConvDownsample1d(nn.Module):
         self.conv = StreamableConv1d(
             in_channels=dim,
             out_channels=dim,
-            ksize=2*stride,
+            ksize=2 * stride,
             stride=stride,
             dilation=1,
             groups=1,
@@ -287,6 +297,7 @@ class ConvDownsample1d(nn.Module):
     def __call__(self, xs: mx.array) -> mx.array:
         return self.conv(xs)
 
+
 class ConvTrUpsample1d(nn.Module):
     def __init__(
         self,
@@ -297,9 +308,9 @@ class ConvTrUpsample1d(nn.Module):
         self.convtr = StreamableConvTranspose1d(
             in_channels=dim,
             out_channels=dim,
-            ksize=2*stride,
+            ksize=2 * stride,
             stride=stride,
-            groups=dim, # TODO: hopefully someday this will be fixed.
+            groups=dim,  # TODO: hopefully someday this will be fixed.
             bias=False,
             causal=causal,
         )

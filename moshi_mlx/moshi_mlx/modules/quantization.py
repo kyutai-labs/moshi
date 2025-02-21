@@ -7,6 +7,7 @@ from .conv import Conv1d
 import mlx.core as mx
 import mlx.nn as nn
 
+
 class EuclideanCodebook(nn.Module):
     def __init__(self, dim: int, codebook_size: int):
         super().__init__()
@@ -36,6 +37,7 @@ class EuclideanCodebook(nn.Module):
         target_shape = list(xs.shape) + [self._dim]
         return mx.take(self.embedding, xs.flatten()).reshape(target_shape)
 
+
 class VectorQuantization(nn.Module):
     def __init__(self, dim: int, codebook_size: int, codebook_dim: int | None):
         super().__init__()
@@ -59,6 +61,7 @@ class VectorQuantization(nn.Module):
         if self.project_out is not None:
             xs = self.project_out(xs)
         return xs.swapaxes(-1, -2)
+
 
 class ResidualVectorQuantization(nn.Module):
     def __init__(self, nq: int, dim: int, codebook_size: int, codebook_dim: int | None):
@@ -90,6 +93,7 @@ class ResidualVectorQuantization(nn.Module):
             quantized = quantized + self.layers[i].decode(xs[i])
         return quantized
 
+
 class ResidualVectorQuantizer(nn.Module):
     def __init__(
         self,
@@ -112,10 +116,10 @@ class ResidualVectorQuantizer(nn.Module):
         else:
             self.output_proj = Conv1d(dim, output_dim, 1, bias=False)
         self.vq = ResidualVectorQuantization(
-                nq=nq,
-                dim=dim,
-                codebook_size=bins,
-                codebook_dim=None,
+            nq=nq,
+            dim=dim,
+            codebook_size=bins,
+            codebook_dim=None,
         )
 
     def encode(self, xs: mx.array) -> mx.array:
@@ -129,6 +133,7 @@ class ResidualVectorQuantizer(nn.Module):
         if self.output_proj is not None:
             quantized = self.output_proj(quantized)
         return quantized
+
 
 class SplitResidualVectorQuantizer(nn.Module):
     def __init__(
@@ -153,7 +158,7 @@ class SplitResidualVectorQuantizer(nn.Module):
             dim=dim,
             input_dim=input_dim,
             output_dim=output_dim,
-            nq=nq-1,
+            nq=nq - 1,
             bins=bins,
             force_projection=True
         )

@@ -25,6 +25,7 @@ class SeanetConfig:
     true_skip: bool
     compress: int
 
+
 class SeanetResnetBlock(nn.Module):
     def __init__(self, cfg: SeanetConfig, dim: int, ksizes_and_dilations: list):
         super().__init__()
@@ -79,6 +80,7 @@ class SeanetResnetBlock(nn.Module):
             xs = xs + self.shortcut(residual)
         return xs
 
+
 class EncoderLayer(nn.Module):
     def __init__(self, cfg: SeanetConfig, ratio: int, mult: int):
         super().__init__()
@@ -114,6 +116,7 @@ class EncoderLayer(nn.Module):
         for r in self.residuals:
             xs = r(xs)
         return self.downsample(nn.elu(xs, alpha=1.0))
+
 
 class SeanetEncoder(nn.Module):
     def __init__(self, cfg: SeanetConfig):
@@ -160,6 +163,7 @@ class SeanetEncoder(nn.Module):
         xs = nn.elu(xs, alpha=1.0)
         return self.final_conv1d(xs)
 
+
 class DecoderLayer(nn.Module):
     def __init__(self, cfg: SeanetConfig, ratio: int, mult: int):
         super().__init__()
@@ -184,6 +188,7 @@ class DecoderLayer(nn.Module):
         for r in self.residuals:
             xs = r(xs)
         return xs
+
 
 class SeanetDecoder(nn.Module):
     def __init__(self, cfg: SeanetConfig):
@@ -229,6 +234,7 @@ class SeanetDecoder(nn.Module):
             xs = layer(xs)
         xs = nn.elu(xs, alpha=1.0)
         return self.final_conv1d(xs)
+
 
 class Seanet(nn.Module):
     def __init__(self, cfg: SeanetConfig):
