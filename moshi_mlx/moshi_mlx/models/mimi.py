@@ -3,7 +3,20 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass
-from ..modules import SeanetConfig, TransformerConfig
+from ..modules import (
+    SeanetConfig,
+    TransformerConfig,
+    SeanetEncoder,
+    SeanetDecoder,
+    SplitResidualVectorQuantizer,
+    ProjectedTransformer,
+    ConvDownsample1d,
+    ConvTrUpsample1d,
+)
+import math
+
+import mlx.core as mx
+import mlx.nn as nn
 
 
 @dataclass
@@ -69,3 +82,65 @@ def mimi_202407(num_codebooks: int) -> MimiConfig:
         quantizer_bins=2048,
         quantizer_dim=256,
     )
+
+
+class Mimi(nn.Module):
+    def __init__(self, cfg: MimiConfig):
+        super().__init__()
+        dim = cfg.seanet.dimension
+        self.cfg = cfg
+        encoder_frame_rate = cfg.sample_rate / math.prod(cfg.seanet.ratios)
+        downsample_stride = int(encoder_frame_rate / cfg.frame_rate)
+        self.encoder = SeanetEncoder(cfg.seanet)
+        self.decoder = SeanetDecoder(cfg.seanet)
+        self.quantizer = SplitResidualVectorQuantizer(
+            dim=cfg.quantizer_dim,
+            input_dim=dim,
+            output_dim=dim,
+            nq=cfg.quantizer_nq,
+            bins=cfg.quantizer_bins,
+        )
+        self.encoder_transformer = ProjectedTransformer(
+            cfg.transformer,
+            input_dim=dim,
+            output_dims=[dim],
+        )
+        self.decoder_transformer = ProjectedTransformer(
+            cfg.transformer,
+            input_dim=dim,
+            output_dims=[dim],
+        )
+        self.downsample = ConvDownsample1d(
+            stride=downsample_stride,
+            dim=dim,
+            causal=True,
+        )
+        self.upsample = ConvTrUpsample1d(
+            stride=downsample_stride,
+            dim=dim,
+            causal=True,
+        )
+        self.encoder_cache = self.encoder_transformer.make_cache()
+        self.decoder_cache = self.decoder_transformer.make_cache()
+
+    def reset_state(self):
+        self.encoder.reset_state()
+        self.decoder.reset_state()
+
+    def encode(self, xs: mx.array) -> mx.array:
+        return xs
+
+    def decode(self, xs: mx.array) -> mx.array:
+        return xs
+
+    def encode_step(self, xs: mx.array) -> mx.array:
+        return xs
+
+    def decode_step(self, xs: mx.array) -> mx.array:
+        return xs
+
+    def warmup(self):
+        pcm = mx.zeros((1, 1, 1920 * 4))
+        codes = self.encode(pcm)
+        pcm_out = self.decode(codes)
+        mx.eval(pcm_out)

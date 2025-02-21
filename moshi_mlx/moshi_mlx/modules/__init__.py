@@ -8,4 +8,4 @@ from .conv import Conv1d, ConvTranspose1d, StreamableConv1d, StreamableConvTrans
 from .quantization import SplitResidualVectorQuantizer
 from .seanet import SeanetConfig, SeanetEncoder, SeanetDecoder
 from .kv_cache import KVCache, RotatingKVCache
-from .transformer import Transformer, TransformerConfig
+from .transformer import Transformer, TransformerConfig, ProjectedTransformer
