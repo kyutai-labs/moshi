@@ -26,6 +26,31 @@ class SeanetConfig:
     compress: int
 
 
+class StreamingAdd(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self._lhs = None
+        self._rhs = None
+
+    def step(self, lhs: mx.array, rhs: mx.array) -> mx.array:
+        if self._lhs is not None:
+            lhs = mx.concat([self._lhs, lhs], axis=-1)
+            self._lhs = None
+        if self._rhs is not None:
+            rhs = mx.concat([self._rhs, rhs], axis=-1)
+            self._rhs = None
+        lhs_l = lhs.shape[-1]
+        rhs_l = rhs.shape[-1]
+        if lhs_l == rhs_l:
+            return lhs + rhs
+        elif lhs_l < rhs_l:
+            self._rhs = rhs[..., lhs_l:]
+            return lhs + rhs[..., :lhs_l]
+        else:
+            self._lhs = lhs[..., rhs_l:]
+            return lhs[..., :rhs_l] + rhs
+
+
 class SeanetResnetBlock(nn.Module):
     def __init__(self, cfg: SeanetConfig, dim: int, ksizes_and_dilations: list):
         super().__init__()
@@ -47,6 +72,7 @@ class SeanetResnetBlock(nn.Module):
             )
             block.append(c)
         self.block = block
+        self.streaming_add = StreamingAdd()
 
         if cfg.true_skip:
             self.shortcut = None
@@ -73,11 +99,20 @@ class SeanetResnetBlock(nn.Module):
         residual = xs
         for b in self.block:
             xs = b(nn.elu(xs, alpha=1.0))
-        # TODO(laurent): we might need some streaming additions below.
         if self.shortcut is None:
             xs = xs + residual
         else:
             xs = xs + self.shortcut(residual)
+        return xs
+
+    def step(self, xs: mx.array) -> mx.array:
+        residual = xs
+        for b in self.block:
+            xs = b.step(nn.elu(xs, alpha=1.0))
+        if self.shortcut is None:
+            xs = self.streaming_add.step(xs, residual)
+        else:
+            xs = self.streaming_add.step(xs, self.shortcut.step(residual))
         return xs
 
 
@@ -116,6 +151,11 @@ class EncoderLayer(nn.Module):
         for r in self.residuals:
             xs = r(xs)
         return self.downsample(nn.elu(xs, alpha=1.0))
+
+    def step(self, xs: mx.array) -> mx.array:
+        for r in self.residuals:
+            xs = r.step(xs)
+        return self.downsample.step(nn.elu(xs, alpha=1.0))
 
 
 class SeanetEncoder(nn.Module):
@@ -163,6 +203,13 @@ class SeanetEncoder(nn.Module):
         xs = nn.elu(xs, alpha=1.0)
         return self.final_conv1d(xs)
 
+    def step(self, xs: mx.array) -> mx.array:
+        xs = self.init_conv1d.step(xs)
+        for layer in self.layers:
+            xs = layer.step(xs)
+        xs = nn.elu(xs, alpha=1.0)
+        return self.final_conv1d.step(xs)
+
 
 class DecoderLayer(nn.Module):
     def __init__(self, cfg: SeanetConfig, ratio: int, mult: int):
@@ -197,6 +244,12 @@ class DecoderLayer(nn.Module):
         xs = self.upsample(nn.elu(xs, alpha=1.0))
         for r in self.residuals:
             xs = r(xs)
+        return xs
+
+    def step(self, xs: mx.array) -> mx.array:
+        xs = self.upsample.step(nn.elu(xs, alpha=1.0))
+        for r in self.residuals:
+            xs = r.step(xs)
         return xs
 
 
@@ -244,6 +297,13 @@ class SeanetDecoder(nn.Module):
             xs = layer(xs)
         xs = nn.elu(xs, alpha=1.0)
         return self.final_conv1d(xs)
+
+    def step(self, xs: mx.array) -> mx.array:
+        xs = self.init_conv1d.step(xs)
+        for layer in self.layers:
+            xs = layer.step(xs)
+        xs = nn.elu(xs, alpha=1.0)
+        return self.final_conv1d.step(xs)
 
 
 class Seanet(nn.Module):

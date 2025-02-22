@@ -226,6 +226,27 @@ class StreamableConv1d(nn.Module):
         self._left_pad_applied = False
 
     def __call__(self, xs: mx.array) -> mx.array:
+        ksize = self._ksize
+        ksize = (ksize - 1) * self.conv.conv._dilation + 1
+        padding_total = ksize - self.conv.conv._stride
+        extra_padding = get_extra_padding_for_conv1d(
+            xs,
+            ksize=ksize,
+            stride=self.conv.conv._stride,
+            padding_total=padding_total,
+        )
+        z = 0, 0
+        if self._causal:
+            padding_left = padding_total
+            padding_right = 0
+        else:
+            padding_right = padding_total // 2
+            padding_left = padding_total - padding_right
+        widths = [z, z, (padding_left, padding_right + extra_padding)]
+        pd = mx.pad(xs, pad_width=widths, mode=self._pad_mode)
+        return self.conv(pd)
+
+    def step(self, xs: mx.array) -> mx.array:
         b, _, len_ = xs.shape
         if len_ == 0:
             return mx.zeros((b, self._out_channels, 0))
@@ -233,7 +254,7 @@ class StreamableConv1d(nn.Module):
         dilation = self.conv.conv._dilation
         ksize = (self._ksize - 1) * dilation + 1
         if not self._left_pad_applied:
-            self._left_pad_applied
+            self._left_pad_applied = True
             padding_total = ksize - stride
             xs = mx.pad(
                 xs,
@@ -285,6 +306,18 @@ class StreamableConvTranspose1d(nn.Module):
         self._prev_ys = None
 
     def __call__(self, xs: mx.array) -> mx.array:
+        stride = self.convtr.convtr._stride
+        padding_total = max(self._ksize - stride, 0)
+        xs = self.convtr(xs)
+        if self._causal:
+            unpad_l = 0
+            unpad_r = padding_total
+        else:
+            unpad_r = padding_total // 2
+            unpad_l = padding_total - unpad_r
+        return unpad1d(xs, unpad_l=unpad_l, unpad_r=unpad_r)
+
+    def step(self, xs: mx.array) -> mx.array:
         b, _, len_ = xs.shape
         if len_ == 0:
             return mx.zeros((b, self._out_channels, 0))
@@ -299,7 +332,7 @@ class StreamableConvTranspose1d(nn.Module):
             ys1, ys2 = ys[..., :pt] + prev_ys, ys[..., pt:]
             ys = mx.concat([ys1, ys2], axis=-1)
         invalid_steps = self._ksize - stride
-        ys, self._prev_ys = ys[..., :ot - invalid_steps], ys[..., ot - invalid_steps]
+        ys, self._prev_ys = ys[..., :ot - invalid_steps], ys[..., ot - invalid_steps:]
         return ys
 
 
@@ -328,6 +361,9 @@ class ConvDownsample1d(nn.Module):
     def __call__(self, xs: mx.array) -> mx.array:
         return self.conv(xs)
 
+    def step(self, xs: mx.array) -> mx.array:
+        return self.conv.step(xs)
+
 
 class ConvTrUpsample1d(nn.Module):
     def __init__(
@@ -351,4 +387,8 @@ class ConvTrUpsample1d(nn.Module):
 
     def __call__(self, xs: mx.array) -> mx.array:
         xs = self.convtr(xs)
+        return xs
+
+    def step(self, xs: mx.array) -> mx.array:
+        xs = self.convtr.step(xs)
         return xs
