@@ -126,6 +126,10 @@ class Mimi(nn.Module):
     def reset_state(self):
         self.encoder.reset_state()
         self.decoder.reset_state()
+        for c in self.decoder_cache:
+            c.reset()
+        for c in self.encoder_cache:
+            c.reset()
 
     def encode(self, xs: mx.array) -> mx.array:
         self.encoder.reset_state()
@@ -145,11 +149,19 @@ class Mimi(nn.Module):
         xs = self.decoder_transformer(xs, cache=self.decoder_cache)[0]
         return self.decoder(xs)
 
-    def encode_step(self, _: mx.array) -> mx.array:
-        raise ValueError("TODO")
+    def encode_step(self, xs: mx.array) -> mx.array:
+        xs = self.encoder.step(xs)
+        xs = self.encoder_transformer(xs, cache=self.encoder_cache)[0]
+        xs = self.downsample.step(xs)
+        xs = self.quantizer.encode(xs)
+        return xs
 
-    def decode_step(self, _: mx.array) -> mx.array:
-        raise ValueError("TODO")
+    def decode_step(self, xs: mx.array) -> mx.array:
+        xs = self.quantizer.decode(xs)
+        xs = self.upsample.step(xs)
+        xs = self.decoder_transformer(xs, cache=self.decoder_cache)[0]
+        xs = self.decoder.step(xs)
+        return xs
 
     def warmup(self):
         pcm = mx.zeros((1, 1, 1920 * 4))
