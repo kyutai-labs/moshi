@@ -176,7 +176,17 @@ class DecoderLayer(nn.Module):
             bias=True,
             causal=cfg.causal,
         )
-        self.residuals = []
+        residuals = []
+        dilation = 1
+        for _ in range(cfg.nresidual_layers):
+            r = SeanetResnetBlock(
+                cfg,
+                dim=mult * cfg.nfilters // 2,
+                ksizes_and_dilations=[(cfg.residual_ksize, dilation), (1, 1)],
+            )
+            residuals.append(r)
+            dilation *= cfg.dilation_base
+        self.residuals = residuals
 
     def reset_state(self):
         self.upsample.reset_state()

@@ -179,8 +179,6 @@ class Mimi(nn.Module):
                 if k.endswith(".linear2.weight"):
                     k = k.replace(".linear2.weight", ".gating.linear2.weight")
                 # Awfully hardcoded matching between the pytorch layers and their mlx equivalent :(
-                if k.startswith("decoder.6"):
-                    print(k)
                 for layerIdx, decoderIdx in enumerate([2, 5, 8, 11]):
                     k = k.replace(f"decoder.{decoderIdx}.", f"decoder.layers.{layerIdx}.upsample.")
                     k = k.replace(
@@ -190,12 +188,12 @@ class Mimi(nn.Module):
                     k = k.replace(
                         f"encoder.{encoderIdx + 2}.", f"encoder.layers.{layerIdx}.downsample.")
 
-                k.replace("decoder.0.", "decoder.init_conv1d.")
-                k.replace("decoder.14.", "decoder.final_conv1d.")
-                k.replace("encoder.0.", "encoder.init_conv1d.")
-                k.replace("encoder.14.", "encoder.final_conv1d.")
-                k.replace(".block.1.", ".block.0.")
-                k.replace(".block.3.", ".block.1.")
+                k = k.replace("decoder.0.", "decoder.init_conv1d.")
+                k = k.replace("decoder.14.", "decoder.final_conv1d.")
+                k = k.replace("encoder.0.", "encoder.init_conv1d.")
+                k = k.replace("encoder.14.", "encoder.final_conv1d.")
+                k = k.replace(".block.1.", ".block.0.")
+                k = k.replace(".block.3.", ".block.1.")
 
                 # PyTorch layout for conv weights is outC, inC, kSize, for MLX it's outC, kSize, inC
                 if k.endswith(".conv.weight") or k.endswith(".output_proj.weight") or k.endswith(".input_proj.weight"):

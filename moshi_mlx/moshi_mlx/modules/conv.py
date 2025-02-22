@@ -81,13 +81,13 @@ class ConvTranspose1d(nn.Module):
         if groups == in_channels and groups == out_channels:
             eye = mx.eye(out_channels).astype(self.weight.dtype).reshape((out_channels, 1, out_channels))
             eye = mx.repeat(eye, repeats=ksize, axis=1)
-            self.expanded_weight = mx.repeat(self.weight, repeats=groups, axis=0) * eye
-            self.expanded_groups = 1
+            self._expanded_weight = mx.repeat(self.weight, repeats=groups, axis=0) * eye
+            self._expanded_groups = 1
         elif groups > 1:
             raise ValueError("groups are not supported in ConvTranspose1d")
         else:
-            self.expanded_weight = self.weight
-            self.expanded_groups = groups
+            self._expanded_weight = self.weight
+            self._expanded_groups = groups
 
     def update(self, parameters: dict) -> nn.Module:
         super().update(parameters)
@@ -98,22 +98,22 @@ class ConvTranspose1d(nn.Module):
         if groups == in_channels and groups == out_channels:
             eye = mx.eye(out_channels).astype(self.weight.dtype).reshape((out_channels, 1, out_channels))
             eye = mx.repeat(eye, repeats=ksize, axis=1)
-            self.expanded_weight = mx.repeat(self.weight, repeats=groups, axis=0) * eye
-            self.expanded_groups = 1
+            self._expanded_weight = mx.repeat(self.weight, repeats=groups, axis=0) * eye
+            self._expanded_groups = 1
         elif groups > 1:
             raise ValueError("groups are not supported in ConvTranspose1d")
         else:
-            self.expanded_weight = self.weight
-            self.expanded_groups = groups
+            self._expanded_weight = self.weight
+            self._expanded_groups = groups
         return self
 
     def __call__(self, xs: mx.array) -> mx.array:
         y = mx.conv_transpose1d(
             xs.swapaxes(-1, -2),
-            self.expanded_weight,
+            self._expanded_weight,
             stride=self._stride,
             padding=self._padding,
-            groups=self.expanded_groups,
+            groups=self._expanded_groups,
         )
         if self.bias is not None:
             y = y + self.bias
