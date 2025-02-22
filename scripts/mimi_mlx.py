@@ -4,6 +4,7 @@
 
 import argparse
 from huggingface_hub import hf_hub_download
+import numpy as np
 import mlx.core as mx
 import sphn
 import moshi_mlx
@@ -30,6 +31,7 @@ def run():
     print(codes.shape)
     pcm_out = model.decode(codes)
     print(pcm_out.shape)
+    sphn.write_wav("out.wav", np.array(pcm_out[0]), sample_rate=24000)
 
 if __name__ == "__main__":
     run()
