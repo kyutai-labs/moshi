@@ -13,6 +13,7 @@ import moshi_mlx
 def run():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=str)
+    parser.add_argument("--model-file", type=str)
     parser.add_argument("--hf-repo", type=str, default="kyutai/moshiko-mlx-q4")
     parser.add_argument("--streaming", action="store_true")
     args = parser.parse_args()
@@ -21,10 +22,14 @@ def run():
     pcm_in = mx.array(pcm_in[0])[None, None]
     print(pcm_in.shape)
 
-    model_file = hf_hub_download(args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors")
+    if args.model_file is None:
+        model_file = hf_hub_download(args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors")
+    else:
+        model_file = args.model_file
     cfg = moshi_mlx.models.mimi.mimi_202407(32)
+    print("building model", flush=True)
     model = moshi_mlx.models.mimi.Mimi(cfg)
-    print(f"loading weights {model_file}")
+    print(f"loading weights {model_file}", flush=True)
     model.load_pytorch_weights(model_file, strict=True)
     print("weights loaded")
 
@@ -49,7 +54,7 @@ def run():
         codes = model.encode(pcm_in)
         print(codes.shape)
         pcm_out = model.decode(codes)
-    print("PCM OUT", pcm_out.shape)
+    print("writing output file with audio shape", pcm_out.shape)
     sphn.write_wav("out.wav", np.array(pcm_out[0]), sample_rate=24000)
 
 if __name__ == "__main__":
