@@ -26,6 +26,31 @@ class SeanetConfig:
     compress: int
 
 
+class StreamingAdd(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self._lhs = None
+        self._rhs = None
+
+    def step(self, lhs: mx.array, rhs: mx.array) -> mx.array:
+        if self._lhs is not None:
+            lhs = mx.concat([self._lhs, lhs], axis=-1)
+            self._lhs = None
+        if self._rhs is not None:
+            rhs = mx.concat([self._rhs, rhs], axis=-1)
+            self._rhs = None
+        lhs_l = lhs.shape[-1]
+        rhs_l = rhs.shape[-1]
+        if lhs_l == rhs_l:
+            return lhs + rhs
+        elif lhs_l < rhs_l:
+            self._rhs = rhs[..., lhs_l:]
+            return lhs + rhs[..., :lhs_l]
+        else:
+            self._lhs = lhs[..., rhs_l:]
+            return lhs[..., :rhs_l] + rhs
+
+
 class SeanetResnetBlock(nn.Module):
     def __init__(self, cfg: SeanetConfig, dim: int, ksizes_and_dilations: list):
         super().__init__()
@@ -47,6 +72,7 @@ class SeanetResnetBlock(nn.Module):
             )
             block.append(c)
         self.block = block
+        self.streaming_add = StreamingAdd()
 
         if cfg.true_skip:
             self.shortcut = None
@@ -83,11 +109,10 @@ class SeanetResnetBlock(nn.Module):
         residual = xs
         for b in self.block:
             xs = b.step(nn.elu(xs, alpha=1.0))
-        # TODO(laurent): we might need some streaming additions below.
         if self.shortcut is None:
-            xs = xs + residual
+            xs = self.streaming_add.step(xs, residual)
         else:
-            xs = xs + self.shortcut(residual)
+            xs = self.streaming_add.step(xs, self.shortcut(residual))
         return xs
 
 

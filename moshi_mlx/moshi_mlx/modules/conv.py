@@ -332,7 +332,7 @@ class StreamableConvTranspose1d(nn.Module):
             ys1, ys2 = ys[..., :pt] + prev_ys, ys[..., pt:]
             ys = mx.concat([ys1, ys2], axis=-1)
         invalid_steps = self._ksize - stride
-        ys, self._prev_ys = ys[..., :ot - invalid_steps], ys[..., ot - invalid_steps]
+        ys, self._prev_ys = ys[..., :ot - invalid_steps], ys[..., ot - invalid_steps:]
         return ys
 
 

@@ -43,8 +43,8 @@ def run():
             if end_idx >= len_:
                 break
             _pcm_in = pcm_in[..., start_idx:end_idx]
-            codes = model.encode(_pcm_in)
-            _pcm_out = model.decode(codes)
+            codes = model.encode_step(_pcm_in)
+            _pcm_out = model.decode_step(codes)
             pcm_out.append(_pcm_out)
             pct = int(100 * start_idx / len_)
             print(f"{pct}%", end="\r", flush=True)
