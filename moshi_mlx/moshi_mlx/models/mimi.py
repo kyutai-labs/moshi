@@ -14,6 +14,7 @@ from ..modules import (
     ConvTrUpsample1d,
 )
 import math
+import typing as tp
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -157,11 +158,52 @@ class Mimi(nn.Module):
         pcm_out = self.decode(codes)
         mx.eval(pcm_out)
 
-    def load_weights(self, model_file: str, strict: bool) -> nn.Module:
-        weights = {}
-        for k, v in mx.load(model_file).items():
-            clean_k = '.'.join([s.removeprefix('_') for s in k.split('.')])
-            weights[clean_k] = v
+    def load_weights(
+        self,
+        file_or_weights: tp.Union[str, tp.List[tp.Tuple[str, mx.array]]],
+        strict: bool = True,
+    ) -> nn.Module:
+        if isinstance(file_or_weights, str):
+            weights = []
+            for k, v in mx.load(file_or_weights).items():
+                v: mx.array = v
+                k: str = '.'.join([s.removeprefix('_') for s in k.split('.')])
+                if k.startswith("encoder.model."):
+                    k = k.replace("encoder.model.", "encoder.")
+                if k.startswith("decoder.model."):
+                    k = k.replace("decoder.model.", "decoder.")
+                if k.endswith(".in_proj_weight"):
+                    k = k.replace(".in_proj_weight", ".in_proj.weight")
+                if k.endswith(".linear1.weight"):
+                    k = k.replace(".linear1.weight", ".gating.linear1.weight")
+                if k.endswith(".linear2.weight"):
+                    k = k.replace(".linear2.weight", ".gating.linear2.weight")
+                # Awfully hardcoded matching between the pytorch layers and their mlx equivalent :(
+                if k.startswith("decoder.6"):
+                    print(k)
+                for layerIdx, decoderIdx in enumerate([2, 5, 8, 11]):
+                    k = k.replace(f"decoder.{decoderIdx}.", f"decoder.layers.{layerIdx}.upsample.")
+                    k = k.replace(
+                        f"decoder.{decoderIdx + 1}.", f"decoder.layers.{layerIdx}.residuals.0.")
+                for (layerIdx, encoderIdx) in enumerate([1, 4, 7, 10]):
+                    k = k.replace(f"encoder.{encoderIdx}.", f"encoder.layers.{layerIdx}.residuals.0.")
+                    k = k.replace(
+                        f"encoder.{encoderIdx + 2}.", f"encoder.layers.{layerIdx}.downsample.")
+
+                k.replace("decoder.0.", "decoder.init_conv1d.")
+                k.replace("decoder.14.", "decoder.final_conv1d.")
+                k.replace("encoder.0.", "encoder.init_conv1d.")
+                k.replace("encoder.14.", "encoder.final_conv1d.")
+                k.replace(".block.1.", ".block.0.")
+                k.replace(".block.3.", ".block.1.")
+
+                # PyTorch layout for conv weights is outC, inC, kSize, for MLX it's outC, kSize, inC
+                if k.endswith(".conv.weight") or k.endswith(".output_proj.weight") or k.endswith(".input_proj.weight"):
+                    v = v.swapaxes(-1, -2)
+                # PyTorch layout for conv-transposed weights is inC, outC, kSize, for MLX it's outC, kSize, inC
+                if k.endswith(".convtr.weight"):
+                    v = v.transpose(1, 2, 0)
+                weights.append((k, v))
+        else:
+            weights = file_or_weights
         return super().load_weights(weights, strict=strict)
-
-
