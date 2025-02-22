@@ -14,7 +14,6 @@ from ..modules import (
     ConvTrUpsample1d,
 )
 import math
-import typing as tp
 
 import mlx.core as mx
 import mlx.nn as nn
