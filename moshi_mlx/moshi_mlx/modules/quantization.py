@@ -13,29 +13,29 @@ class EuclideanCodebook(nn.Module):
         super().__init__()
         self._epsilon = 1e-5
         self._dim = dim
-        self._initialized = mx.zeros([1], dtype=mx.float32)
+        self.initialized = mx.zeros([1], dtype=mx.float32)
         self.embedding_sum = mx.zeros([codebook_size, dim], dtype=mx.float32)
         self.cluster_usage = mx.zeros([codebook_size], dtype=mx.float32)
         cluster_usage = mx.maximum(self.cluster_usage, self._epsilon)[:, None]
-        self.embedding = self.embedding_sum / cluster_usage
-        self.c2 = self.embedding.square().sum(axis=-1) / 2
+        self._embedding = self.embedding_sum / cluster_usage
+        self._c2 = self._embedding.square().sum(axis=-1) / 2
 
     def update(self, parameters: dict) -> nn.Module:
         super().update(parameters)
         cluster_usage = mx.maximum(self.cluster_usage, self._epsilon)[:, None]
-        self.embedding = self.embedding_sum / cluster_usage
-        self.c2 = self.embedding.square().sum(axis=-1) / 2
+        self._embedding = self.embedding_sum / cluster_usage
+        self._c2 = self._embedding.square().sum(axis=-1) / 2
         return self
 
     def encode(self, xs: mx.array) -> mx.array:
         target_shape = xs.shape[:-1]
         xs = xs.flatten(end_axis=-2)
-        dot_prod = xs @ self.embedding.swapaxes(-1, -2)
-        return (self.c2 - dot_prod).argmin(axis=-1).reshape(target_shape)
+        dot_prod = xs @ self._embedding.swapaxes(-1, -2)
+        return (self._c2 - dot_prod).argmin(axis=-1).reshape(target_shape)
 
     def decode(self, xs: mx.array) -> mx.array:
         target_shape = list(xs.shape) + [self._dim]
-        return mx.take(self.embedding, xs.flatten(), axis=0).reshape(target_shape)
+        return mx.take(self._embedding, xs.flatten(), axis=0).reshape(target_shape)
 
 
 class VectorQuantization(nn.Module):
@@ -48,16 +48,16 @@ class VectorQuantization(nn.Module):
         else:
             self.project_in = nn.Linear(dim, codebook_dim)
             self.project_out = nn.Linear(codebook_dim, dim)
-        self._codebook = EuclideanCodebook(dim=codebook_dim, codebook_size=codebook_size)
+        self.codebook = EuclideanCodebook(dim=codebook_dim, codebook_size=codebook_size)
 
     def encode(self, xs: mx.array) -> mx.array:
         xs = xs.swapaxes(-1, -2)
         if self.project_in is not None:
             xs = self.project_in(xs)
-        return self._codebook.encode(xs)
+        return self.codebook.encode(xs)
 
     def decode(self, xs: mx.array) -> mx.array:
-        xs = self._codebook.decode(xs)
+        xs = self.codebook.decode(xs)
         if self.project_out is not None:
             xs = self.project_out(xs)
         return xs.swapaxes(-1, -2)

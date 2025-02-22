@@ -156,3 +156,12 @@ class Mimi(nn.Module):
         codes = self.encode(pcm)
         pcm_out = self.decode(codes)
         mx.eval(pcm_out)
+
+    def load_weights(self, model_file: str, strict: bool) -> nn.Module:
+        weights = {}
+        for k, v in mx.load(model_file).items():
+            clean_k = '.'.join([s.removeprefix('_') for s in k.split('.')])
+            weights[clean_k] = v
+        return super().load_weights(weights, strict=strict)
+
+

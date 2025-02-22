@@ -19,12 +19,16 @@ def run():
     pcm_in = mx.array(pcm_in[0])[None, None]
     print(pcm_in.shape)
 
-    weight_file = hf_hub_download(args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors")
+    model_file = hf_hub_download(args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors")
     cfg = moshi_mlx.models.mimi.mimi_202407(16)
-    mimi = moshi_mlx.models.mimi.Mimi(cfg)
-    codes = mimi.encode(pcm_in)
+    model = moshi_mlx.models.mimi.Mimi(cfg)
+    print(f"loading weights {model_file}")
+    model.load_weights(model_file, strict=True)
+    print("weights loaded")
+
+    codes = model.encode(pcm_in)
     print(codes.shape)
-    pcm_out = mimi.decode(codes)
+    pcm_out = model.decode(codes)
     print(pcm_out.shape)
 
 if __name__ == "__main__":
