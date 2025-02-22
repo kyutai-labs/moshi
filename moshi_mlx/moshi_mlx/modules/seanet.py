@@ -112,7 +112,7 @@ class SeanetResnetBlock(nn.Module):
         if self.shortcut is None:
             xs = self.streaming_add.step(xs, residual)
         else:
-            xs = self.streaming_add.step(xs, self.shortcut(residual))
+            xs = self.streaming_add.step(xs, self.shortcut.step(residual))
         return xs
 
 

@@ -254,7 +254,7 @@ class StreamableConv1d(nn.Module):
         dilation = self.conv.conv._dilation
         ksize = (self._ksize - 1) * dilation + 1
         if not self._left_pad_applied:
-            self._left_pad_applied
+            self._left_pad_applied = True
             padding_total = ksize - stride
             xs = mx.pad(
                 xs,
