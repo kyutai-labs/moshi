@@ -24,7 +24,7 @@ def run():
     cfg = moshi_mlx.models.mimi.mimi_202407(32)
     model = moshi_mlx.models.mimi.Mimi(cfg)
     print(f"loading weights {model_file}")
-    model.load_weights(model_file, strict=True)
+    model.load_pytorch_weights(model_file, strict=True)
     print("weights loaded")
 
     codes = model.encode(pcm_in)
