@@ -60,6 +60,20 @@ def _is_distributed() -> bool:
     return distributed.is_initialized() and distributed.get_world_size() > 1
 
 
+def _average_tensors(tensors: tp.Sequence[torch.Tensor]) -> None:
+    if not _is_distributed():
+        return
+    world_size = distributed.get_world_size()
+    handles = []
+    for tensor in tensors:
+        handle = torch.distributed.all_reduce(
+            tensor.data, op=torch.distributed.ReduceOp.SUM, async_op=True)
+        handles.append(handle)
+    for tensor, handle in zip(tensors, handles):
+        handle.wait()
+        tensor.data /= world_size
+
+
 def _run_kmeans(samples: torch.Tensor, num_clusters: int, num_iters: int = 50) -> tp.Tuple[torch.Tensor, torch.Tensor]:
     # Kmeans algorithm used to initialize the codebooks.
     dim = samples.shape[-1]
@@ -319,6 +333,7 @@ class EuclideanCodebook(nn.Module):
             embedding_sum.scatter_add_(0, repeat(flat_codes, "n -> n d", d=self.dim), x)
             _ema_inplace(self.embedding_sum, embedding_sum, self.decay)
             self.register_buffer('_embedding', None)
+            _average_tensors([self.embedding_sum, self.cluster_usage])
 
         return _CodebookForwardResult(quantized, codes, metrics)
 
