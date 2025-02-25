@@ -333,7 +333,6 @@ class EuclideanCodebook(nn.Module):
             embedding_sum.scatter_add_(0, repeat(flat_codes, "n -> n d", d=self.dim), x)
             _ema_inplace(self.embedding_sum, embedding_sum, self.decay)
             self.register_buffer('_embedding', None)
-            _average_tensors([self.embedding_sum, self.cluster_usage])
 
         return _CodebookForwardResult(quantized, codes, metrics)
 
@@ -496,6 +495,11 @@ class ResidualVectorQuantization(nn.Module):
         if self.training:
             # Solving subtle bug with STE and RVQ: https://github.com/facebookresearch/encodec/issues/25
             quantized_out = x + (quantized_out - x).detach()
+            to_average = []
+            for layer in self.layers:
+                assert isinstance(layer, VectorQuantization)
+                to_average += [layer._codebook.cluster_usage, layer._codebook.embedding_sum]
+                _average_tensors(to_average)
 
         out_losses, out_codes = map(torch.stack, (all_losses, all_codes))
         return _VQForwardResult(quantized_out, out_codes, out_losses, all_metrics)
