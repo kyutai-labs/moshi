@@ -32,6 +32,48 @@ from ..modules.transformer import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class LMOutput:
+    # The logits are already re-aligned with the input codes
+    # hence no extra shift is required, e.g. when computing CE
+    logits: tp.Optional[torch.Tensor]  # [B, K, T, card]
+    mask: tp.Optional[torch.Tensor]  # [B, K, T]
+    text_logits: tp.Optional[torch.Tensor]  # [B, 1, T, text_card]
+    text_mask: tp.Optional[torch.Tensor]  # [B, 1, T]
+
+
+def _delay_sequence(delays: tp.List[int], tensor: torch.Tensor, padding: torch.Tensor) -> torch.Tensor:
+    B, K, T = tensor.shape
+    assert len(delays) == K, (len(delays), K)
+    outs = []
+
+    for k, delay in enumerate(delays):
+        assert delay >= 0
+        line = tensor[:, k].roll(delay, dims=1)
+        if delay > 0:
+            line[:, :delay] = padding[:, k]
+        outs.append(line)
+    return torch.stack(outs, dim=1)
+
+
+def _undelay_sequence(delays: tp.List[int], tensor: torch.Tensor,
+                      fill_value: tp.Union[int, float] = float('NaN')) -> tp.Tuple[torch.Tensor, torch.Tensor]:
+    B, K, T, *_ = tensor.shape
+    assert len(delays) == K
+    mask = torch.ones(B, K, T, dtype=torch.bool, device=tensor.device)
+    outs = []
+    if all([delay == 0 for delay in delays]):
+        return tensor, mask
+    for k, delay in enumerate(delays):
+        assert delay >= 0
+        line = tensor[:, k].roll(-delay, dims=1)
+        if delay > 0:
+            line[:, -delay:] = fill_value
+            mask[:, k, -delay:] = 0
+        outs.append(line)
+    return torch.stack(outs, dim=1), mask
+
+
 class ScaledEmbedding(nn.Embedding):
     """Boost learning rate for embeddings (with `scale`).
 
@@ -294,6 +336,63 @@ class LMModel(StreamingContainer):
         token = torch.cat([text_token, audio_token], dim=1)
         return token
 
+    def forward(
+            self, codes: torch.Tensor,
+            condition_tensors: tp.Optional[ConditionTensors] = None) -> LMOutput:
+        """Given an input tensor of codes [B, K, T] and list of conditions, returns the logits
+        along with masks indicating the valid positions at which to compute the loss.
+        The logits time steps are aligned with those in the input `code`.
+        Should only be used for training, not inference (use `LMGen` for that).
+
+        Args:
+            codes (torch.Tensor): Input codes of shape [B, K, T] with B the batch size,
+                K the number of codebooks and T the number of timesteps. When text is supported,
+                the first 'codebook' corresponds to the text, and the remaining codebooks are for the  audio.
+            condition_tensors (dict[str, ConditionType], optional): pre-computed conditioning tensors.
+        Returns:
+            LMOutput: Language model outputs, containing either text or audio logits, or both.
+                logits (torch.Tensor, or None) of shape [B, K, T, card] corresponding to the provided codes,
+                    i.e. the first item corresponds to logits to predict the first code, meaning that
+                    no additional shifting of codes and logits is required.
+                mask (torch.Tensor, or None) of shape [B, K, T], mask over valid and invalid positions.
+                    Given the specified interleaving strategies, parts of the logits and codes should
+                    not be considered as valid predictions because of invalid context.
+                text_logits (torch.Tensor, or None) of shape [B, 1, T, text_card].
+                text_mask (torch.Tensor, or None) of shape [B, 1, T], mask over the valid positions for the text.
+        """
+        B, K, T = codes.shape
+        assert K == self.num_codebooks, (K, self.num_codebooks)
+        # Delaying codes and removing the last time step that will never be an input.
+        initial = self._get_initial_token().expand(B, -1, -1)
+        delayed_codes = _delay_sequence(self.delays, codes, initial)
+        # Inserting the empty tokens for the first time step.
+        delayed_codes = torch.cat([initial, delayed_codes], dim=2)
+
+        sum_condition: torch.Tensor | None = None
+        if condition_tensors is None:
+            assert self.fuser is None
+        else:
+            assert self.fuser is not None
+            sum_condition = self.fuser.get_sum(condition_tensors)
+
+        transformer_out, text_logits = self.forward_text(delayed_codes, sum_condition)
+        assert transformer_out.shape[0] == delayed_codes.shape[0]
+        assert transformer_out.shape[1] == delayed_codes.shape[2]
+        logits = self.forward_depformer_training(delayed_codes, transformer_out)
+
+        # map back the logits on pattern sequence to logits on original codes: [B, K, S, card] -> [B, K, T, card]
+        # and provide the corresponding mask over invalid positions of tokens. We will with NaN values invalid positions
+        # to ensure they properly handled.
+        logits_mask = None
+        if logits is not None:
+            logits, logits_mask = _undelay_sequence(self.delays[self.audio_offset:], logits, fill_value=float('NaN'))
+            logits_mask &= (codes[:, self.audio_offset:] != self.zero_token_id)
+        text_logits_mask = None
+        if text_logits is not None:
+            text_logits, text_logits_mask = _undelay_sequence(self.delays[:1], text_logits, fill_value=float('NaN'))
+            text_logits_mask &= (codes[:, :1] != self.zero_token_id)
+        return LMOutput(logits, logits_mask, text_logits, text_logits_mask)
+
     def forward_text(
         self,
         sequence: torch.Tensor, sum_condition: torch.Tensor | None = None
@@ -321,6 +420,40 @@ class LMModel(StreamingContainer):
         text_logits = quantize.linear(self.text_linear, transformer_out)
         text_logits = text_logits[:, None]
         return transformer_out, text_logits
+
+    def forward_depformer_training(
+        self,
+        sequence: torch.Tensor,
+        transformer_out: torch.Tensor,
+    ) -> torch.Tensor:
+        B, K, T = sequence.shape
+        assert (
+            K == self.num_codebooks
+        ), f"Codebooks for Depformer training should be passed all at once, got {K,}."
+        depformer_inputs = []
+        for cb_index in range(self.num_audio_codebooks):
+            if self.depformer_multi_linear:
+                if self.depformer_weights_per_step_schedule is not None:
+                    cb_index = self.depformer_weights_per_step_schedule[cb_index]
+                transformer_in = quantize.linear(self.depformer_in[cb_index], transformer_out)
+            else:
+                transformer_in = quantize.linear(self.depformer_in[0], transformer_out)
+            if cb_index == 0:
+                token_in = self.depformer_text_emb(sequence[:, 0])
+            else:
+                token_in = self.depformer_emb[cb_index - 1](sequence[:, cb_index + self.audio_offset - 1])
+            depformer_inputs.append(token_in + transformer_in)
+        depformer_input = torch.stack(depformer_inputs, 2)
+        # depformer_input is [B, T, K, depformer_dim], reshaping to [B * T, K, D]
+        depformer_input = depformer_input.view(B * T, K, -1)
+        depformer_output = self.depformer(depformer_input)
+        all_logits = []
+        for cb_index in range(self.num_audio_codebooks):
+            logits = quantize.linear(self.linears[cb_index], depformer_output[:, cb_index])
+            all_logits.append(logits)
+        logits = torch.stack(all_logits, 1).view(B, T, K, -1)
+        assert logits.dim() == 4, logits.shape  # [B, Ka, T, card]
+        return logits
 
     def forward_depformer(
         self,
