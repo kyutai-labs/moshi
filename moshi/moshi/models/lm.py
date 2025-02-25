@@ -37,10 +37,10 @@ logger = logging.getLogger(__name__)
 class LMOutput:
     # The logits are already re-aligned with the input codes
     # hence no extra shift is required, e.g. when computing CE
-    logits: tp.Optional[torch.Tensor]  # [B, K, T, card]
-    mask: tp.Optional[torch.Tensor]  # [B, K, T]
-    text_logits: tp.Optional[torch.Tensor]  # [B, 1, T, text_card]
-    text_mask: tp.Optional[torch.Tensor]  # [B, 1, T]
+    logits: torch.Tensor  # [B, K, T, card]
+    mask: torch.Tensor  # [B, K, T]
+    text_logits: torch.Tensor  # [B, 1, T, text_card]
+    text_mask: torch.Tensor  # [B, 1, T]
 
 
 class LMModel(StreamingContainer):
@@ -91,6 +91,7 @@ class LMModel(StreamingContainer):
         existing_text_padding_id: int = 3,
         existing_text_end_padding_id: int = 0,
         context: tp.Optional[int] = None,
+        causal: bool = True,
         condition_provider: tp.Optional[ConditionProvider] = None,
         fuser: tp.Optional[ConditionFuser] = None,
         quantize: bool = False,
@@ -112,7 +113,6 @@ class LMModel(StreamingContainer):
         self.depformer_weights_per_step_schedule = depformer_weights_per_step_schedule
         if depformer_weights_per_step_schedule is not None:
             assert len(depformer_weights_per_step_schedule) == dep_q
-        kwargs["context"] = context
         EmbeddingFactory = partial(
             ScaledEmbedding,
             norm=norm_emb,
@@ -138,6 +138,8 @@ class LMModel(StreamingContainer):
             device=device,
             dtype=dtype,
             quantize=quantize,
+            context=context,
+            causal=causal,
             **main_kwargs,
         )
         self.out_norm = create_norm_fn(norm, dim)
@@ -179,6 +181,7 @@ class LMModel(StreamingContainer):
             dim_feedforward=depformer_dim_feedforward,
             norm=norm,
             weights_per_step_schedule=depformer_weights_per_step_schedule,
+            causal=causal,
             quantize=quantize,
             device=device,
             dtype=dtype,
@@ -313,14 +316,10 @@ class LMModel(StreamingContainer):
         # map back the logits on pattern sequence to logits on original codes: [B, K, S, card] -> [B, K, T, card]
         # and provide the corresponding mask over invalid positions of tokens. We will with NaN values invalid positions
         # to ensure they properly handled.
-        logits_mask = None
-        if logits is not None:
-            logits, logits_mask = _undelay_sequence(self.delays[self.audio_offset:], logits, fill_value=float('NaN'))
-            logits_mask &= (codes[:, self.audio_offset:] != self.zero_token_id)
-        text_logits_mask = None
-        if text_logits is not None:
-            text_logits, text_logits_mask = _undelay_sequence(self.delays[:1], text_logits, fill_value=float('NaN'))
-            text_logits_mask &= (codes[:, :1] != self.zero_token_id)
+        logits, logits_mask = _undelay_sequence(self.delays[self.audio_offset:], logits, fill_value=float('NaN'))
+        logits_mask &= (codes[:, self.audio_offset:] != self.zero_token_id)
+        text_logits, text_logits_mask = _undelay_sequence(self.delays[:1], text_logits, fill_value=float('NaN'))
+        text_logits_mask &= (codes[:, :1] != self.zero_token_id)
         return LMOutput(logits, logits_mask, text_logits, text_logits_mask)
 
     def forward_text(
@@ -364,9 +363,10 @@ class LMModel(StreamingContainer):
         depformer_inputs = []
         for cb_index in range(Ka):
             if self.depformer_multi_linear:
+                linear_index = cb_index
                 if self.depformer_weights_per_step_schedule is not None:
-                    cb_index = self.depformer_weights_per_step_schedule[cb_index]
-                transformer_in = quantize.linear(self.depformer_in[cb_index], transformer_out)
+                    linear_index = self.depformer_weights_per_step_schedule[cb_index]
+                transformer_in = quantize.linear(self.depformer_in[linear_index], transformer_out)
             else:
                 transformer_in = quantize.linear(self.depformer_in[0], transformer_out)
             if cb_index == 0:
