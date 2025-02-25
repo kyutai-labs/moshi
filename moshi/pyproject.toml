@@ -35,6 +35,7 @@ build-backend = "setuptools.build_meta"
 [project.optional-dependencies]
 dev = [
     "pyright",
+    "pytest",
     "flake8",
     "pre-commit",
     "gradio-webrtc>=0.0.18"

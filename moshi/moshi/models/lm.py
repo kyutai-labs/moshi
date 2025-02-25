@@ -27,6 +27,7 @@ from ..modules.transformer import (
     quantize_transformer,
     create_norm_fn,
 )
+from .lm_utils import _delay_sequence, _undelay_sequence, _init_layer, ScaledEmbedding
 
 
 logger = logging.getLogger(__name__)
@@ -40,74 +41,6 @@ class LMOutput:
     mask: tp.Optional[torch.Tensor]  # [B, K, T]
     text_logits: tp.Optional[torch.Tensor]  # [B, 1, T, text_card]
     text_mask: tp.Optional[torch.Tensor]  # [B, 1, T]
-
-
-def _delay_sequence(delays: tp.List[int], tensor: torch.Tensor, padding: torch.Tensor) -> torch.Tensor:
-    B, K, T = tensor.shape
-    assert len(delays) == K, (len(delays), K)
-    outs = []
-
-    for k, delay in enumerate(delays):
-        assert delay >= 0
-        line = tensor[:, k].roll(delay, dims=1)
-        if delay > 0:
-            line[:, :delay] = padding[:, k]
-        outs.append(line)
-    return torch.stack(outs, dim=1)
-
-
-def _undelay_sequence(delays: tp.List[int], tensor: torch.Tensor,
-                      fill_value: tp.Union[int, float] = float('NaN')) -> tp.Tuple[torch.Tensor, torch.Tensor]:
-    B, K, T, *_ = tensor.shape
-    assert len(delays) == K
-    mask = torch.ones(B, K, T, dtype=torch.bool, device=tensor.device)
-    outs = []
-    if all([delay == 0 for delay in delays]):
-        return tensor, mask
-    for k, delay in enumerate(delays):
-        assert delay >= 0
-        line = tensor[:, k].roll(-delay, dims=1)
-        if delay > 0:
-            line[:, -delay:] = fill_value
-            mask[:, k, -delay:] = 0
-        outs.append(line)
-    return torch.stack(outs, dim=1), mask
-
-
-class ScaledEmbedding(nn.Embedding):
-    """Boost learning rate for embeddings (with `scale`).
-
-    Args:
-        norm (bool): if True, uses a layer norm after the embedding.
-        zero_idx (int): special value indicating that the output should be exactly 0.
-        low_rank (int | None): if provided, uses low rank embedding with a linear layer to reach
-            the desired dimension. Quite efficient for reducing the number of weights for very large vocabs.
-    """
-
-    def __init__(self, num_embeddings: int, embedding_dim: int,
-                 *args, norm: bool = False, zero_idx: int = -1,
-                 low_rank: int | None = None, **kwargs):
-        super().__init__(num_embeddings, low_rank or embedding_dim, *args, **kwargs)
-        self.norm = None
-        if norm:
-            self.norm = create_norm_fn("layer_norm", self.embedding_dim)
-        assert zero_idx < 0, "Please use negative values for the zero_idx."
-        self.zero_idx = zero_idx
-        self.low_rank = None
-        if low_rank is not None:
-            self.low_rank = nn.Linear(low_rank, embedding_dim, bias=False)
-
-    def forward(self, input, *args, **kwargs):
-        is_zero = input == self.zero_idx
-        zero = torch.zeros(1, dtype=input.dtype, device=input.device)
-        input = input.clamp(min=0)
-        y = super().forward(input, *args, **kwargs)
-        if self.norm is not None:
-            y = self.norm(y)
-        y = torch.where(is_zero[..., None], zero, y)
-        if self.low_rank is not None:
-            y = quantize.linear(self.low_rank, y)
-        return y
 
 
 class LMModel(StreamingContainer):
@@ -130,8 +63,7 @@ class LMModel(StreamingContainer):
         depformer_dim_feedforward (int| list[int]| None): If None, defaults to hidden_scale * depformer_dim.
         depformer_weights_per_step_schedule (list[int] | None): mapping `CODEBOOK_INDEX -> WEIGHT_INDEX`, allowing
         depformer_low_rank_embeddings (int | None): if provided, uses low rank embeddings, with a linear
-        existing_text_padding_id (bool): if True, will use a different token for the initial text token, and
-            the text padding token.
+        existing_text_padding_id (int): token to use for the padding.
         same_initial (bool): if True, uses the same initial tokens for both text and audio mode.
         **kwargs: Additional parameters for the transformer encoder.
     """
@@ -156,7 +88,8 @@ class LMModel(StreamingContainer):
         depformer_weights_per_step_schedule: list[int] | None = None,
         depformer_low_rank_embeddings: int | None = None,
         depformer_pos_emb: str = "sin",
-        existing_text_padding_id: tp.Optional[int] = None,
+        existing_text_padding_id: int = 3,
+        existing_text_end_padding_id: int = 0,
         context: tp.Optional[int] = None,
         condition_provider: tp.Optional[ConditionProvider] = None,
         fuser: tp.Optional[ConditionFuser] = None,
@@ -174,6 +107,7 @@ class LMModel(StreamingContainer):
         self.delays = delays
         self.dim = dim
         self.existing_text_padding_id = existing_text_padding_id
+        self.existing_text_end_padding_id = existing_text_end_padding_id
         self.context = context
         self.depformer_weights_per_step_schedule = depformer_weights_per_step_schedule
         if depformer_weights_per_step_schedule is not None:
@@ -189,11 +123,9 @@ class LMModel(StreamingContainer):
         self.emb = nn.ModuleList(
             [EmbeddingFactory(self.card + 1, dim) for _ in range(n_q)]
         )
-        # Text card + padding token (if not in the original tokenizer)
-        extra_text = self.existing_text_padding_id is None
         # Unlike for audio, here we authorize the model to output the special token.
         self.text_emb = EmbeddingFactory(text_card + 1, dim)
-        self.text_linear = nn.Linear(dim, text_card + extra_text, bias=bias_proj)
+        self.text_linear = nn.Linear(dim, text_card, bias=bias_proj)
         depformer_prefix = "depformer_"
         main_kwargs = {
             k: v for k, v in kwargs.items() if not k.startswith(depformer_prefix)
@@ -263,6 +195,7 @@ class LMModel(StreamingContainer):
         self.condition_provider = condition_provider
         self.fuser = fuser
         self.to(device=device, dtype=dtype)
+        self._init_weights()
         if quantize:
             quantize_transformer(self)
 
@@ -279,15 +212,12 @@ class LMModel(StreamingContainer):
     @property
     def text_padding_token_id(self) -> int:
         """Token id for text padding."""
-        if self.existing_text_padding_id is None:
-            return self.text_card
-        else:
-            return self.existing_text_padding_id
+        return self.existing_text_padding_id
 
     @property
     def end_of_text_padding_id(self) -> int:
         """Token id for optionally marking the last padding step for a word."""
-        return 0
+        return self.existing_text_end_padding_id
 
     @property
     def zero_token_id(self) -> int:
@@ -375,10 +305,10 @@ class LMModel(StreamingContainer):
             assert self.fuser is not None
             sum_condition = self.fuser.get_sum(condition_tensors)
 
-        transformer_out, text_logits = self.forward_text(delayed_codes, sum_condition)
+        transformer_out, text_logits = self.forward_text(delayed_codes[:, :, :-1], sum_condition)
         assert transformer_out.shape[0] == delayed_codes.shape[0]
-        assert transformer_out.shape[1] == delayed_codes.shape[2]
-        logits = self.forward_depformer_training(delayed_codes, transformer_out)
+        assert transformer_out.shape[1] == delayed_codes.shape[2] - 1
+        logits = self.forward_depformer_training(delayed_codes[:, :, 1:], transformer_out)
 
         # map back the logits on pattern sequence to logits on original codes: [B, K, S, card] -> [B, K, T, card]
         # and provide the corresponding mask over invalid positions of tokens. We will with NaN values invalid positions
@@ -427,11 +357,12 @@ class LMModel(StreamingContainer):
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
         B, K, T = sequence.shape
+        Ka = self.num_audio_codebooks
         assert (
             K == self.num_codebooks
         ), f"Codebooks for Depformer training should be passed all at once, got {K,}."
         depformer_inputs = []
-        for cb_index in range(self.num_audio_codebooks):
+        for cb_index in range(Ka):
             if self.depformer_multi_linear:
                 if self.depformer_weights_per_step_schedule is not None:
                     cb_index = self.depformer_weights_per_step_schedule[cb_index]
@@ -445,13 +376,13 @@ class LMModel(StreamingContainer):
             depformer_inputs.append(token_in + transformer_in)
         depformer_input = torch.stack(depformer_inputs, 2)
         # depformer_input is [B, T, K, depformer_dim], reshaping to [B * T, K, D]
-        depformer_input = depformer_input.view(B * T, K, -1)
+        depformer_input = depformer_input.view(B * T, Ka, -1)
         depformer_output = self.depformer(depformer_input)
         all_logits = []
-        for cb_index in range(self.num_audio_codebooks):
+        for cb_index in range(Ka):
             logits = quantize.linear(self.linears[cb_index], depformer_output[:, cb_index])
-            all_logits.append(logits)
-        logits = torch.stack(all_logits, 1).view(B, T, K, -1)
+            all_logits.append(logits.view(B, T, -1))
+        logits = torch.stack(all_logits, 1)
         assert logits.dim() == 4, logits.shape  # [B, Ka, T, card]
         return logits
 
@@ -496,6 +427,30 @@ class LMModel(StreamingContainer):
         logits = logits[:, None]
         assert logits.dim() == 4, logits.shape  # [B, Ka, S, card]
         return logits
+
+    def _init_weights(self):
+        """Initialization of the transformer module weights.
+        Mostly truncated gaussian, with `std = 1 / sqrt(dim_in)`.
+        Embeddings are also initialized with `1 / sqrt(dim)` rather than `1`.
+        Some layers are not going to be properly initialized:
+            - in_proj in MHA.
+            - depth transformer layers.
+        This is to match how our models were trained so far.
+        """
+
+        for emb_layer in self.emb:
+            _init_layer(emb_layer)
+        for emb_layer in self.depformer_emb:
+            _init_layer(emb_layer)
+        _init_layer(self.text_emb)
+        _init_layer(self.depformer_text_emb)
+        _init_layer(self.text_linear)
+
+        for tr_layer in self.transformer.layers:
+            tr_layer.apply(_init_layer)
+
+        for linear in self.linears:
+            _init_layer(linear)
 
 
 @dataclass
