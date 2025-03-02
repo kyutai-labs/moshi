@@ -23,7 +23,7 @@ import torch
 
 
 class State:
-    """Base State for streaming, requires to be resetable and also support the context
+    """Base State for streaming, requires to be resettable and also support the context
     protocol. The state will be entered when """
     def reset(self) -> None:
         pass

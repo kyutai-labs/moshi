@@ -25,7 +25,7 @@ ConditionTensors = dict[str, 'ConditionType']
 
 
 def stack_and_pad_audio(wavs: tp.List[torch.Tensor], max_len: tp.Optional[int] = None):
-    """Stack the given audios on the first dimenion (created), padding them with 0 if needed."""
+    """Stack the given audios on the first dimension (created), padding them with 0 if needed."""
     actual_max_len = max(wav.shape[-1] for wav in wavs)
     if max_len is None:
         max_len = actual_max_len

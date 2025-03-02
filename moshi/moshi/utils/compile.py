@@ -36,7 +36,7 @@ def no_compile():
 
 def torch_compile_lazy(fun):
     """torch.compile creates a huge pool of processes, even when not using the function at all,
-    e.g. with Dora. This can polute stderr when doing CTRL+C. So we do it in a lazy way.
+    e.g. with Dora. This can pollute stderr when doing CTRL+C. So we do it in a lazy way.
     """
     if os.environ.get("NO_TORCH_COMPILE"):
         return fun
