@@ -356,7 +356,7 @@ class LMModel(StreamingContainer):
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
         B, K, T = sequence.shape
-        Ka = self.num_audio_codebooks
+        Ka = self.dep_q
         assert (
             K == self.num_codebooks
         ), f"Codebooks for Depformer training should be passed all at once, got {K,}."
