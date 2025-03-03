@@ -319,7 +319,7 @@ class LMModel(StreamingContainer):
         logits, logits_mask = _undelay_sequence(
             self.delays[self.audio_offset:self.audio_offset + self.dep_q],
             logits, fill_value=float('NaN'))
-        logits_mask &= (codes[:, self.audio_offset:] != self.zero_token_id)
+        logits_mask &= (codes[:, self.audio_offset: self.audio_offset + self.dep_q] != self.zero_token_id)
         text_logits, text_logits_mask = _undelay_sequence(self.delays[:1], text_logits, fill_value=float('NaN'))
         text_logits_mask &= (codes[:, :1] != self.zero_token_id)
         return LMOutput(logits, logits_mask, text_logits, text_logits_mask)
