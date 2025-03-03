@@ -99,7 +99,6 @@ _lm_kwargs = {
     "depformer_dim_feedforward": int(4.125 * 1024),
     "depformer_num_heads": 16,
     "depformer_num_layers": 6,
-    "depformer_causal": True,
     "depformer_layer_scale": None,
     "depformer_multi_linear": True,
     "depformer_context": 8,
@@ -282,6 +281,10 @@ def get_moshi_lm(filename: str | Path,
         del lm_kwargs["conditioners"]
     if "fuser" in lm_kwargs:
         lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
+
+    # deprecated params.
+    lm_kwargs.pop('depformer_causal', None)
+
     model = LMModel(
         device=device,
         dtype=dtype,
