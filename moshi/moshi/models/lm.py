@@ -316,7 +316,9 @@ class LMModel(StreamingContainer):
         # map back the logits on pattern sequence to logits on original codes: [B, K, S, card] -> [B, K, T, card]
         # and provide the corresponding mask over invalid positions of tokens. We will with NaN values invalid positions
         # to ensure they properly handled.
-        logits, logits_mask = _undelay_sequence(self.delays[self.audio_offset:], logits, fill_value=float('NaN'))
+        logits, logits_mask = _undelay_sequence(
+            self.delays[self.audio_offset:self.audio_offset + self.dep_q],
+            logits, fill_value=float('NaN'))
         logits_mask &= (codes[:, self.audio_offset:] != self.zero_token_id)
         text_logits, text_logits_mask = _undelay_sequence(self.delays[:1], text_logits, fill_value=float('NaN'))
         text_logits_mask &= (codes[:, :1] != self.zero_token_id)
