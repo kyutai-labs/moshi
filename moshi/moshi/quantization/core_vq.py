@@ -66,8 +66,8 @@ def _average_tensors(tensors: tp.Sequence[torch.Tensor]) -> None:
     world_size = distributed.get_world_size()
     handles = []
     for tensor in tensors:
-        handle = torch.distributed.all_reduce(
-            tensor.data, op=torch.distributed.ReduceOp.SUM, async_op=True)
+        handle = distributed.all_reduce(
+            tensor.data, op=distributed.ReduceOp.SUM, async_op=True)
         handles.append(handle)
     for tensor, handle in zip(tensors, handles):
         handle.wait()
