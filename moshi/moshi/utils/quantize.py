@@ -13,7 +13,7 @@ We are taking from freedom from the intended use of bnb:
 
 import torch
 from torch import nn
-
+from ..modules.lora import LoRALinear
 
 def linear(module: nn.Module, x: torch.Tensor, name='weight') -> torch.Tensor:
     import bitsandbytes as bnb  # type: ignore
@@ -28,6 +28,8 @@ def linear(module: nn.Module, x: torch.Tensor, name='weight') -> torch.Tensor:
         y = bnb.matmul(x.half(), state.CB, state=state)
         assert isinstance(y, torch.Tensor)
         return y
+    elif isinstance(module, LoRALinear):
+        return module.forward(x)
     else:
         return nn.functional.linear(x, getattr(module, name))
 

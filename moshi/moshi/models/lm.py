@@ -22,6 +22,7 @@ from ..utils.sampling import sample_token
 from ..utils.compile import CUDAGraphed
 from ..utils import quantize
 from ..modules.streaming import StreamingContainer, StreamingModule, State
+from ..modules.lora import LoraArgs, maybe_lora_layer
 from ..modules.transformer import (
     StreamingTransformer,
     quantize_transformer,
@@ -97,6 +98,7 @@ class LMModel(StreamingContainer):
         quantize: bool = False,
         device=None,
         dtype=None,
+        lora_args: LoraArgs | None = None,
         **kwargs,
     ):
         super().__init__()
@@ -125,7 +127,8 @@ class LMModel(StreamingContainer):
         )
         # Unlike for audio, here we authorize the model to output the special token.
         self.text_emb = EmbeddingFactory(text_card + 1, dim)
-        self.text_linear = nn.Linear(dim, text_card, bias=bias_proj)
+        MaybeLora = maybe_lora_layer(lora_args)
+        self.text_linear = MaybeLora(dim, text_card, bias=bias_proj)
         depformer_prefix = "depformer_"
         main_kwargs = {
             k: v for k, v in kwargs.items() if not k.startswith(depformer_prefix)
@@ -140,6 +143,7 @@ class LMModel(StreamingContainer):
             quantize=quantize,
             context=context,
             causal=causal,
+            lora_args=lora_args,
             **main_kwargs,
         )
         self.out_norm = create_norm_fn(norm, dim)
@@ -162,11 +166,11 @@ class LMModel(StreamingContainer):
             if depformer_weights_per_step_schedule:
                 num_in = max(depformer_weights_per_step_schedule) + 1
             self.depformer_in = nn.ModuleList(
-                [nn.Linear(dim, depformer_dim, bias=False) for _ in range(num_in)]
+                [MaybeLora(dim, depformer_dim, bias=False) for _ in range(num_in)]
             )
         else:
             self.depformer_in = nn.ModuleList(
-                [nn.Linear(dim, depformer_dim, bias=False)]
+                [MaybeLora(dim, depformer_dim, bias=False)]
             )
         EmbeddingFactory = partial(EmbeddingFactory, low_rank=depformer_low_rank_embeddings)
         # Only using up to dep_q - 1 because the last codebook is never an input to Depformer.
@@ -185,6 +189,7 @@ class LMModel(StreamingContainer):
             quantize=quantize,
             device=device,
             dtype=dtype,
+            lora_args=lora_args,
             **kwargs_dep,
         )
         # Depformer follow its own cycle of streaming entirely contained in one time step
@@ -193,7 +198,7 @@ class LMModel(StreamingContainer):
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
         self.linears = nn.ModuleList(
-            [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
+            [MaybeLora(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
         )
         self.condition_provider = condition_provider
         self.fuser = fuser

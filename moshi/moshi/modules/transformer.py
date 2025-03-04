@@ -23,7 +23,7 @@ from ..utils import quantize
 from .gating import make_gating
 from .rope import RotaryEmbedding
 from .streaming import StreamingModule, StreamingContainer, State
-
+from .lora import maybe_lora_layer, LoraArgs
 
 def quantize_transformer(module: torch.nn.Module):
     for name, child in module.named_modules():
@@ -304,6 +304,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         weights_per_step_schedule: list[int] | None = None,
         device=None,
         dtype=None,
+        lora_args: LoraArgs | None = None,
     ):
         super().__init__()
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -325,13 +326,31 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 mult = max(weights_per_step_schedule) + 1
             else:
                 mult = weights_per_step
-        in_proj = nn.Linear(embed_dim, mult * out_dim, bias=False, **factory_kwargs)
-        # We try to follow the default PyTorch MHA convention, to easily compare results.
-        self.in_proj_weight = in_proj.weight
-        self.in_proj_bias = in_proj.bias
-        self.out_proj = nn.Linear(
-            embed_dim, mult * embed_dim, bias=False, **factory_kwargs
-        )
+                
+     
+        self.lora =  (not lora_args is None and lora_args.enable) 
+        
+        if not self.weights_per_step and self.lora:
+            MaybeLora = maybe_lora_layer(lora_args)
+            # We try to follow the default PyTorch MHA convention, to easily compare results.
+            
+            in_proj = MaybeLora(embed_dim, mult * out_dim, bias=False, **factory_kwargs)
+            self.out_proj = MaybeLora(
+                    embed_dim, mult * embed_dim, bias=False, **factory_kwargs
+                )
+            self.in_proj_weight = in_proj
+            self.in_proj_bias = None
+                
+                
+        else:
+            in_proj = nn.Linear(embed_dim, mult * out_dim, bias=False, **factory_kwargs)
+            self.out_proj = nn.Linear(
+                    embed_dim, mult * embed_dim, bias=False, **factory_kwargs
+                )
+            self.in_proj_weight = in_proj.weight
+            self.in_proj_bias = in_proj.bias
+ 
+
 
     def _init_streaming_state(self, batch_size: int) -> _MHAState:
         if self.context is None:
@@ -384,7 +403,10 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 self.weights_per_step, self.weights_per_step_schedule,
                 self, query, offset_cpu, name='in_proj_weight')
         else:
-            projected = quantize.linear(self, query, 'in_proj_weight')
+            if not self.lora:
+                projected = quantize.linear(self, query, 'in_proj_weight')
+            else:
+                projected = quantize.linear(self.in_proj_weight, query)
         q, k, v = rearrange(
             projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
         )
@@ -469,6 +491,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         skip_self_attn: bool = False,
         device=None,
         dtype=None,
+        lora_args: LoraArgs | None = None
     ):
         super().__init__()
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -477,6 +500,9 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
             "embed_dim": d_model,
             "num_heads": num_heads,
         }
+        
+        MaybeLora = maybe_lora_layer(lora_args)
+             
         if not skip_self_attn:
             self.self_attn: StreamingMultiheadAttention = StreamingMultiheadAttention(
                 causal=causal,
@@ -484,6 +510,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
                 rope=rope,
                 weights_per_step=weights_per_step,
                 weights_per_step_schedule=weights_per_step_schedule,
+                lora_args = lora_args,
                 **attn_kwargs,  # type: ignore
                 **factory_kwargs,  # type: ignore
             )  # type: ignore
@@ -517,10 +544,10 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
             assert not isinstance(
                 dim_feedforward, list
             ), "List dim_feedforward without gating not supported for now."
-            self.linear1 = nn.Linear(
+            self.linear1 = MaybeLora(
                 d_model, dim_feedforward, bias=False, **factory_kwargs
             )
-            self.linear2 = nn.Linear(
+            self.linear2 = MaybeLora(
                 dim_feedforward, d_model, bias=False, **factory_kwargs
             )
         else:
@@ -532,14 +559,14 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
                 assert isinstance(dim_feedforward, list), dim_feedforward
                 self.gating = nn.ModuleList(
                     [
-                        make_gating(gating, d_model, dim, **factory_kwargs)
+                        make_gating(gating, d_model, dim, lora_args, **factory_kwargs)
                         for dim in dim_feedforward
                     ]
                 )
             else:
                 assert isinstance(dim_feedforward, int)
                 self.gating = make_gating(
-                    gating, d_model, dim_feedforward, **factory_kwargs
+                    gating, d_model, dim_feedforward, lora_args, **factory_kwargs
                 )
 
         self.layer_scale_1: nn.Module
@@ -647,6 +674,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         quantize: bool = False,
         device=None,
         dtype=None,
+        lora_args: LoraArgs | None = None,
         **kwargs,
     ):
         super().__init__()
@@ -674,6 +702,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
                     rope=self.rope,
                     device=device,
                     dtype=dtype,
+                    lora_args=lora_args,
                     **kwargs,
                 )
             )

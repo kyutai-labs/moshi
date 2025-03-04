@@ -22,7 +22,7 @@ from ..conditioners import BaseConditioner, ConditionProvider, ConditionFuser
 from .lm import LMModel
 from ..modules import SEANetEncoder, SEANetDecoder, transformer
 from ..quantization import SplitResidualVectorQuantizer
-
+from ..modules.lora import LoraArgs 
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
@@ -273,7 +273,9 @@ def get_moshi_lm(filename: str | Path,
                  lm_kwargs: tp.Optional[tp.Dict] = None,
                  device: torch.device | str = 'cpu',
                  dtype: torch.dtype = torch.bfloat16,
-                 strict: bool = True) -> LMModel:
+                 strict: bool = True,
+                 empty_init: bool = False,
+                 lora_args: LoraArgs | None = None) -> LMModel:
     if lm_kwargs is None:
         lm_kwargs = _lm_kwargs
     if "conditioners" in lm_kwargs:
@@ -288,8 +290,13 @@ def get_moshi_lm(filename: str | Path,
     model = LMModel(
         device=device,
         dtype=dtype,
+        lora_args=lora_args,
         **lm_kwargs)
     model.eval()
+    
+    if empty_init:
+        return model
+    
     if _is_safetensors(filename):
         load_model(model, filename, strict=strict)
     else:
