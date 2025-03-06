@@ -261,7 +261,7 @@ def get_mimi(filename: str | Path,
     ).to(device=device)
     model.eval()
     if _is_safetensors(filename):
-        load_model(model, filename)
+        load_model(model, filename, device = device)
     else:
         pkg = torch.load(filename, "cpu")
         model.load_state_dict(pkg["model"])
@@ -275,30 +275,31 @@ def get_moshi_lm(filename: str | Path,
                  dtype: torch.dtype = torch.bfloat16,
                  strict: bool = True,
                  empty_init: bool = False,
-                 lora_args: LoraArgs | None = None) -> LMModel:
-    if lm_kwargs is None:
-        lm_kwargs = _lm_kwargs
-    if "conditioners" in lm_kwargs:
-        lm_kwargs["condition_provider"] = get_conditioner_provider(lm_kwargs["dim"], device, lm_kwargs)
-        del lm_kwargs["conditioners"]
-    if "fuser" in lm_kwargs:
-        lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
-
-    # deprecated params.
-    lm_kwargs.pop('depformer_causal', None)
-
-    model = LMModel(
-        device=device,
-        dtype=dtype,
-        lora_args=lora_args,
-        **lm_kwargs)
-    model.eval()
+                 model: LMModel | None = None) -> LMModel:
     
-    if empty_init:
-        return model
+    if empty_init or model is None:
+        if lm_kwargs is None:
+            lm_kwargs = _lm_kwargs
+        if "conditioners" in lm_kwargs:
+            lm_kwargs["condition_provider"] = get_conditioner_provider(lm_kwargs["dim"], device, lm_kwargs)
+            del lm_kwargs["conditioners"]
+        if "fuser" in lm_kwargs:
+            lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
+
+        # deprecated params.
+        lm_kwargs.pop('depformer_causal', None)
+
+        model = LMModel(
+            device=device,
+            dtype=dtype,
+            **lm_kwargs)
+        model.eval()
+        
+        if empty_init:
+            return model
     
     if _is_safetensors(filename):
-        load_model(model, filename, strict=strict)
+        load_model(model, filename, strict=strict, device = device)
     else:
         pkg = torch.load(
             filename,

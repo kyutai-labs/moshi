@@ -13,7 +13,7 @@ We are taking from freedom from the intended use of bnb:
 
 import torch
 from torch import nn
-from ..modules.lora import LoRALinear
+
 
 def linear(module: nn.Module, x: torch.Tensor, name='weight') -> torch.Tensor:
     import bitsandbytes as bnb  # type: ignore
@@ -28,14 +28,12 @@ def linear(module: nn.Module, x: torch.Tensor, name='weight') -> torch.Tensor:
         y = bnb.matmul(x.half(), state.CB, state=state)
         assert isinstance(y, torch.Tensor)
         return y
-    elif isinstance(module, LoRALinear):
-        return module.forward(x)
     else:
-        return nn.functional.linear(x, getattr(module, name))
+        return module(x)
 
 
 def multi_linear(num_steps: int, schedule: list[int] | None,
-                 module: nn.Module, x: torch.Tensor, offset: int, name='weight') -> torch.Tensor:
+                 module: nn.ModuleList, x: torch.Tensor, offset: int, name='weight') -> torch.Tensor:
     """Utility to apply a multi linear layer to the given input. A multi linear layer
     applies a different set of weight for each time step.
 
@@ -50,40 +48,40 @@ def multi_linear(num_steps: int, schedule: list[int] | None,
     import bitsandbytes as bnb  # type: ignore
     B, T, C = x.shape
     ys: list[torch.Tensor] = []
-    if is_quantized(module, name):
-        weight = getattr(module, name)
-        weight_scb = getattr(module, name + '_scb')
-    else:
-        weight = getattr(module, name)
-        weight_scb = None
-    assert isinstance(weight, torch.Tensor)
+    # if is_quantized(module, name):
+    #     weight = getattr(module, name)
+    #     weight_scb = getattr(module, name + '_scb')
+    # else:
+    #     weight = getattr(module, name)
+    #     weight_scb = None
+    # assert isinstance(weight, torch.Tensor)
 
-    num_linear = num_steps
-    if schedule is not None:
-        num_linear = max(schedule) + 1
+    # num_linear = num_steps
+    # if schedule is not None:
+    #     num_linear = max(schedule) + 1
 
-    chout, chin = weight.shape
-    weight = weight.view(num_linear, -1, chin)
-    if weight_scb is not None:
-        assert isinstance(weight, torch.Tensor)
-        assert weight_scb.shape == (chout,), (weight_scb, chout)
-        weight_scb = weight_scb.view(num_linear, -1)
-        assert weight_scb.dtype == torch.float, weight_scb.dtype
+    # chout, chin = weight.shape
+    # weight = weight.view(num_linear, -1, chin)
+    # if weight_scb is not None:
+    #     assert isinstance(weight, torch.Tensor)
+    #     assert weight_scb.shape == (chout,), (weight_scb, chout)
+    #     weight_scb = weight_scb.view(num_linear, -1)
+    #     assert weight_scb.dtype == torch.float, weight_scb.dtype
 
     for t in range(T):
         linear_index = t + offset
         if schedule is not None:
             linear_index = schedule[linear_index]
-        if weight_scb is None:
-            y = nn.functional.linear(x[:, t], weight[linear_index])
-        else:
-            state = bnb.MatmulLtState()
-            CB = weight[linear_index]
-            state.CB = CB  # type: ignore
-            state.SCB = weight_scb[linear_index]
-            state.has_fp16_weights = False
-            y = bnb.matmul(x[:, t].half(), CB, state=state)
-            assert isinstance(y, torch.Tensor)
+        # if weight_scb is None:
+        y = module[linear_index](x[:, t])
+        # else:
+        #     state = bnb.MatmulLtState()
+        #     CB = weight[linear_index]
+        #     state.CB = CB  # type: ignore
+        #     state.SCB = weight_scb[linear_index]
+        #     state.has_fp16_weights = False
+        #     y = bnb.matmul(x[:, t].half(), CB, state=state)
+        #     assert isinstance(y, torch.Tensor)
         ys.append(y)
     out = torch.stack(ys, 1)
     return out

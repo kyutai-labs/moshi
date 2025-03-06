@@ -17,7 +17,13 @@ class LoraArgs(Serializable):
             assert self.rank > 0
             assert self.scaling > 0.0
 
-
+def replace_all_linear_with_lora(module, rank: int, scaling: float):
+    
+    for name, child in module.named_children():
+        if isinstance(child, nn.Linear):
+            setattr(module,name,LoRALinear(child.in_features, child.out_features, rank, scaling)) 
+        else:
+            replace_all_linear_with_lora(child, rank, scaling)
 
 class LoRALinear(nn.Module):
     """
@@ -90,11 +96,7 @@ class LoRALinear(nn.Module):
         self,
         state_dict,
         prefix,
-        local_metadata, 
-        strict, 
-        missing_keys, 
-        unexpected_keys, 
-        error_msgs
+        *_
     ):
         key_name = prefix + "weight"
 
