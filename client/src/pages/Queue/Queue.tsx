@@ -27,7 +27,7 @@ export const Queue: FC = () => {
   const [showMicrophoneAccessMessage, setShowMicrophoneAccessMessage] = useState<boolean>(false);
   const [shouldConnect, setShouldConnect] = useState<boolean>(false);
   const startAsImage = getBooleanFromStorage(localStorage.getItem("isImageMode"));
-  const [isImageMode, setisImageMode] = useState<boolean>(startAsImage == undefined ? false : startAsImage);
+  const [isImageMode, setIsImageMode] = useState<boolean>(startAsImage == undefined ? false : startAsImage);
   const modelParams = useModelParams({
     textTemperature: getFloatFromStorage(localStorage.getItem("textTemperature")),
     textTopk: getIntFromStorage(localStorage.getItem("textTopk")),
@@ -108,7 +108,7 @@ export const Queue: FC = () => {
     <div className="text-white text-center h-screen w-screen p-4 flex flex-col items-center ">
       <div>
         <h1 className="text-4xl" style={{ letterSpacing: isImageMode ? "2px" : "5px" }}>M{isImageMode ? "👁️" : "o"}shi</h1>
-        <SwitchButton onClick={() => { setisImageMode(!isImageMode); modelParams.setImageUrl(undefined) }}>
+        <SwitchButton onClick={() => { setIsImageMode(!isImageMode); modelParams.setImageUrl(undefined) }}>
           {isImageMode ? "Back to Moshi" : "Go to Moshi Vision"}
         </SwitchButton>
         {/*
