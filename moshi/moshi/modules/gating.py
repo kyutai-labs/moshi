@@ -21,7 +21,7 @@ def gating_forward_kernel(
     x = F.linear(x, weight_out)
     return x
 
-@torch_compile_lazy
+
 def gating_forward_lora_kernel(
     linear_in: nn.Module, 
     linear_out: nn.Module, 
@@ -34,31 +34,6 @@ def gating_forward_lora_kernel(
     x = activation(x[..., 0, :]) * x[..., 1, :]
     x = linear_out(x)
     return x
-
-
-# RuntimeError: Output 0 of ViewBackward0 is a view and its base or another view of its base has been modified inplace. 
-# This view is the output of a function that returns multiple views. Such functions do not allow the output views to be modified inplace. You should replace the inplace operation by an out-of-place one.
-# def gating_forward_lora_kernel(
-#     linear_in_wA: torch.Tensor, 
-#     linear_in_wB: torch.Tensor, 
-#     linear_in_wW: torch.Tensor,
-#     linear_out_wA: torch.Tensor, 
-#     linear_out_wB: torch.Tensor,
-#     linear_out_wW: torch.Tensor,
-#     scaling: float,
-#     activation, 
-#     x: torch.Tensor
-# ):
-#     x = F.linear(x, linear_in_wA)
-#     x = F.linear(x, linear_in_wB)
-#     x = x * scaling + F.linear(x, linear_in_wW)
-#     B, T, _ = x.shape
-#     x = x.view(B, T, 2, -1)
-#     x = activation(x[..., 0, :]) * x[..., 1, :]
-#     x = F.linear(x, linear_out_wA)
-#     x = F.linear(x, linear_out_wB)
-#     x = x * scaling + F.linear(x, linear_out_wW)
-#     return x
 
 class ActivationGating(nn.Module):
     """
@@ -100,11 +75,13 @@ class ActivationGating(nn.Module):
             x = quantize.linear(self.linear_out, x)
             return x
 
-        if not isinstance(self.linear_in, LoRALinear) and not isinstance(self.linear_out, LoRALinear):
+        if not isinstance(self.linear_in, LoRALinear):
+            assert not isinstance(self.linear_out, LoRALinear), 'LoRA layers should be used together'
             return gating_forward_kernel(
                 self.linear_in.weight, self.linear_out.weight, self.activation, x
             )
-        elif isinstance(self.linear_in, LoRALinear) and isinstance(self.linear_out, LoRALinear):
+        elif isinstance(self.linear_in, LoRALinear):
+            assert isinstance(self.linear_out, LoRALinear), 'LoRA layers should be used together'
             return gating_forward_lora_kernel(
                 self.linear_in, 
                 self.linear_out,
