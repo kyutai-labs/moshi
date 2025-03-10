@@ -396,13 +396,26 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 )
         else:
             capacity = self.context
-        device = self.in_proj.weight.device
+        if self.in_proj is not None:
+            device = self.in_proj.weight.device
+            assert self.in_projs is None, "Cannot have both in_proj and in_projs"
+        else:
+            assert self.in_projs is not None, "Cannot have both in_proj and in_projs"
+            device = self.in_projs[0].weight.device
+            assert self.in_proj is None
+            
         # TODO: the following estimation will not work great with FSDP.
         if quantize.is_quantized(self.in_proj):
             # We are running with quantization
             dtype = torch.float16
         else:
-            dtype = self.in_proj.weight.dtype
+            if self.in_proj is not None:
+                dtype = self.in_proj.weight.dtype
+            else:
+                dtype = self.in_projs[0].weight.dtype
+
+            
+            
         dim_per_head = self.embed_dim // self.num_heads
         kv_cache = RingKVCache(
             batch_size, self.num_heads, dim_per_head, capacity, device, dtype
