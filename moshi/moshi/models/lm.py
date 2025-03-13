@@ -347,12 +347,12 @@ class LMModel(StreamingContainer):
         if sum_condition is not None:
             input_ = input_ + sum_condition.to(input_)
         transformer_out = self.transformer(input_)
-
+        
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
         assert isinstance(transformer_out, torch.Tensor)
         text_logits = quantize.linear(self.text_linear, transformer_out)
-        text_logits = text_logits[:, None]
+        text_logits = text_logits[:, None]   
         return transformer_out, text_logits
 
     def forward_depformer_training(
@@ -614,13 +614,13 @@ class LMGen(StreamingModule[_LMGenState]):
         assert text_token.shape[1] == 1, "Only one text stream supported."
         text_token = text_token[:, 0, 0]  # shape is [B]
         audio_tokens = state.graphed_depth(text_token, transformer_out)
-
+        
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
         state.offset += 1
         position = state.offset % CT
         state.cache[:, 0, position] = text_token
         state.cache[:, 1 : lm_model.dep_q + 1, position] = audio_tokens
-
+        
         if state.offset <= self.max_delay:
             return None
         B = state.cache.shape[0]

@@ -23,7 +23,7 @@ from ..utils import quantize
 from .gating import make_gating
 from .rope import RotaryEmbedding
 from .streaming import StreamingModule, StreamingContainer, State
-
+from .lora import LoRALinear
 
 def quantize_transformer(module: torch.nn.Module):
     for name, child in module.named_modules():
@@ -396,23 +396,31 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 )
         else:
             capacity = self.context
+            
+        
         if self.in_proj is not None:
-            device = self.in_proj.weight.device
+            if isinstance(self.in_proj, LoRALinear):
+                device = self.in_proj.lora_A.weight.device
+                dtype = self.in_proj.lora_A.weight.dtype
+            else:
+                device = self.in_proj.weight.device
+                dtype = self.in_proj.weight.dtype
             assert self.in_projs is None, "Cannot have both in_proj and in_projs"
         else:
             assert self.in_projs is not None, "Cannot have both in_proj and in_projs"
-            device = self.in_projs[0].weight.device
+            if isinstance(self.in_projs[0], LoRALinear):
+                device = self.in_projs[0].lora_A.weight.device
+                dtype = self.in_projs[0].lora_A.weight.dtype
+            else:
+                device = self.in_projs[0].weight.device
+                dtype = self.in_projs[0].weight.dtype
             assert self.in_proj is None
             
         # TODO: the following estimation will not work great with FSDP.
         if quantize.is_quantized(self.in_proj):
             # We are running with quantization
             dtype = torch.float16
-        else:
-            if self.in_proj is not None:
-                dtype = self.in_proj.weight.dtype
-            else:
-                dtype = self.in_projs[0].weight.dtype
+
 
             
             
@@ -673,7 +681,6 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
             if state:
                 state.offset_cpu += x.shape[1]
                 
-            assert torch.isnan(x).sum() == 0, x
             return x
 
 

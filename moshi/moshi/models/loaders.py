@@ -12,7 +12,7 @@ try:
     from huggingface_hub.errors import EntryNotFoundError
 except ImportError:
     from huggingface_hub.utils import EntryNotFoundError  # pyright: ignore
-from safetensors.torch import load_model
+from safetensors.torch import load_model, load_file
 import sentencepiece
 import torch
 import typing as tp
@@ -22,7 +22,8 @@ from ..conditioners import BaseConditioner, ConditionProvider, ConditionFuser
 from .lm import LMModel
 from ..modules import SEANetEncoder, SEANetDecoder, transformer
 from ..quantization import SplitResidualVectorQuantizer
-from ..modules.lora import LoraArgs 
+from ..modules.lora import LoraArgs, replace_all_linear_with_lora, LoRALinear, replace_lora_with_linear
+
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5
@@ -144,6 +145,7 @@ class CheckpointInfo:
     lm_config: dict | None = None
     raw_config: dict | None = None
     model_type: str = 'moshi'
+    lora_weights: Path | None = None
     lm_gen_config: dict = field(default_factory=dict)
 
     @staticmethod
@@ -151,7 +153,9 @@ class CheckpointInfo:
                      moshi_weights: Path | str | None = None,
                      mimi_weights: Path | str | None = None,
                      tokenizer: Path | str | None = None,
-                     config_path: Path | str | None = None) -> 'CheckpointInfo':
+                     config_path: Path | str | None = None,
+                     lora_weights: Path | str | None = None,
+                    ) -> 'CheckpointInfo':
         """Downloads the checkpoints from the given repo, along with its config.
 
         Extra overrides are possible for each of Moshi, Mimi, or the text tokenizer,
@@ -199,10 +203,14 @@ class CheckpointInfo:
             tokenizer_final = hf_get(tokenizer_name, hf_repo)
         else:
             tokenizer_final = hf_get(tokenizer)
+            
+        if lora_weights is not None:
+            lora_weights = hf_get(lora_weights)
 
+        
         return CheckpointInfo(
             moshi_weights_final, mimi_weights_final, tokenizer_final,
-            lm_config, raw_config, model_type, lm_gen_config)
+            lm_config, raw_config, model_type, lora_weights, lm_gen_config)
 
     def get_mimi(self, device: torch.device | str = 'cpu') -> MimiModel:
         if self.lm_config is None:
@@ -212,10 +220,10 @@ class CheckpointInfo:
         return get_mimi(self.mimi_weights, num_codebooks=num_codebooks, device=device)
 
     def get_moshi(self, strict: bool = True, device: torch.device | str = 'cpu',
-                  dtype: torch.dtype = torch.bfloat16) -> LMModel:
+                  dtype: torch.dtype = torch.bfloat16, fuse_lora: bool = False) -> LMModel:
         model = get_moshi_lm(
             self.moshi_weights, lm_kwargs=self.lm_config,
-            device=device, dtype=dtype, strict=strict)
+            device=device, dtype=dtype, strict=strict, lora_weights=self.lora_weights, fuse_lora=fuse_lora)
         if self.model_type == 'hibiki':
             # Sometime the model samples the EOS (2) too early, which we want to ignore.
             # We keep generating if the input file is not finished, and this is a way
@@ -275,7 +283,9 @@ def get_moshi_lm(filename: str | Path,
                  dtype: torch.dtype = torch.bfloat16,
                  strict: bool = True,
                  empty_init: bool = False,
-                 model: LMModel | None = None) -> LMModel:
+                 model: LMModel | None = None,
+                 lora_weights: str | Path | None = None,
+                 fuse_lora: bool = False) -> LMModel:
     
     if empty_init or model is None:
         if lm_kwargs is None:
@@ -297,6 +307,12 @@ def get_moshi_lm(filename: str | Path,
         
         if empty_init:
             return model
+        
+    #TODO Modify s.t config lora can be passed and not hardcoded
+    scaling = 2.0
+    rank = 128
+    if lora_weights is not None:
+        replace_all_linear_with_lora(model, rank, scaling)
     
     if _is_safetensors(filename):
         load_model(model, filename, strict=strict, device = device)
@@ -306,7 +322,15 @@ def get_moshi_lm(filename: str | Path,
             "cpu",
         )
         model.load_state_dict(pkg["fsdp_best_state"]["model"])
-    return model
+        
+    if lora_weights is None: 
+        return model
+    else:
+        return get_lora_moshi(model=model, 
+                              lora_weights=lora_weights, 
+                              device = device, 
+                              dtype = dtype, 
+                              fuse_params=fuse_lora)
 
 
 def get_conditioner(output_dim: int, device: torch.device | str, conditioner_cfg: dict) -> BaseConditioner:
@@ -337,3 +361,22 @@ def get_condition_fuser(cfg: dict) -> ConditionFuser:
     kwargs = {k: v for k, v in fuser_cfg.items() if k not in fuser_methods}
     fuser = ConditionFuser(fuse2cond=fuse2cond, **kwargs)
     return fuser
+
+def get_lora_moshi(model: LMModel, 
+                   lora_weights: str | Path | None, 
+                   dtype: torch.dtype | str = torch.bfloat16,
+                   device: torch.device | str = 'cpu', 
+                   fuse_params: bool = True) -> LMModel:
+    
+    
+    assert _is_safetensors(lora_weights), "LoRA weights must be a safetensors file."
+    lora_state_dict = load_file(lora_weights, device=device)
+    
+    model.load_state_dict(lora_state_dict, strict=False)
+    model = model.to(dtype = dtype, device=device)
+    if fuse_params:
+        replace_lora_with_linear(model)
+          
+    model.eval()
+
+    return model
