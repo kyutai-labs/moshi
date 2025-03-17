@@ -284,6 +284,7 @@ def get_moshi_lm(filename: str | Path,
                  strict: bool = True,
                  empty_init: bool = False,
                  model: LMModel | None = None,
+                 checkpointing: bool = False,
                  lora_weights: str | Path | None = None,
                  fuse_lora: bool = False) -> LMModel:
     
@@ -302,6 +303,7 @@ def get_moshi_lm(filename: str | Path,
         model = LMModel(
             device=device,
             dtype=dtype,
+            checkpointing=checkpointing,
             **lm_kwargs)
         model.eval()
         

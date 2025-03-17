@@ -24,6 +24,7 @@ from .gating import make_gating
 from .rope import RotaryEmbedding
 from .streaming import StreamingModule, StreamingContainer, State
 from .lora import LoRALinear
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
 def quantize_transformer(module: torch.nn.Module):
     for name, child in module.named_modules():
@@ -691,7 +692,6 @@ class _TransformerState(State):
     def reset(self):
         self.offset.zero_()
 
-
 class StreamingTransformer(StreamingModule[_TransformerState]):
     """Transformer with Streaming / Causal support.
 
@@ -727,6 +727,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         betas: tp.Optional[tp.Tuple[float, float]] = None,
         layer_class: tp.Type[StreamingTransformerLayer] = StreamingTransformerLayer,
         quantize: bool = False,
+        checkpointing: bool = False,
         device=None,
         dtype=None,
         **kwargs,
@@ -743,6 +744,8 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         self.rope: tp.Optional[RotaryEmbedding] = None
         if self.positional_embedding in {"rope", "sin_rope"}:
             self.rope = RotaryEmbedding(max_period=max_period)
+
+        self.checkpointing = checkpointing
 
         self.layers = nn.ModuleList()
         for _ in range(num_layers):
@@ -763,6 +766,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
                 # Quantizing layers one by one to avoid taking too much space during init.
                 self.layers[-1].to(device=device, dtype=dtype)
                 quantize_transformer(self.layers[-1])
+
 
     def _init_streaming_state(self, batch_size: int) -> _TransformerState:
         device = next(self.parameters()).device
@@ -787,14 +791,17 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
             x = x + self.positional_scale * pos_emb
 
         for i, layer in enumerate(self.layers):
-            x = layer(x, *args, **kwargs)
-     
+            if self.checkpointing:
+                x = torch_checkpoint(layer, x, *args, use_reentrant=False,
+                                    determinism_check='none', preserve_rng_state=False, **kwargs)
+            else:
+                x = layer(x, *args, **kwargs)
+
 
         if state is not None:
             state.offset.add_(T)
         return x.to(dtype_input)
-
-
+    
 class ProjectedTransformer(StreamingContainer):
     """Transformer with optional projections of the input and output to different dimensions when needed.
     Supports multiple outputs.

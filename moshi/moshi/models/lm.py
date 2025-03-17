@@ -97,6 +97,7 @@ class LMModel(StreamingContainer):
         quantize: bool = False,
         device=None,
         dtype=None,
+        checkpointing: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -141,6 +142,7 @@ class LMModel(StreamingContainer):
             quantize=quantize,
             context=context,
             causal=causal,
+            checkpointing=checkpointing,
             **main_kwargs,
         )
         self.out_norm = create_norm_fn(norm, dim)
