@@ -13,10 +13,8 @@ from dataclasses import dataclass, field
 from functools import partial
 import logging
 import typing as tp
-
 import torch
 from torch import nn
-
 from ..conditioners import ConditionProvider, ConditionFuser, ConditionTensors
 from ..utils.sampling import sample_token
 from ..utils.compile import CUDAGraphed
@@ -186,6 +184,7 @@ class LMModel(StreamingContainer):
             weights_per_step_schedule=depformer_weights_per_step_schedule,
             causal=causal,
             quantize=quantize,
+            checkpointing=checkpointing,
             device=device,
             dtype=dtype,
             **kwargs_dep,
@@ -311,7 +310,6 @@ class LMModel(StreamingContainer):
             assert self.fuser is not None
             sum_condition = self.fuser.get_sum(condition_tensors)
 
-        
         transformer_out, text_logits = self.forward_text(delayed_codes[:, :, :-1], sum_condition)
         assert transformer_out.shape[0] == delayed_codes.shape[0]
         assert transformer_out.shape[1] == delayed_codes.shape[2] - 1
@@ -349,7 +347,6 @@ class LMModel(StreamingContainer):
         if sum_condition is not None:
             input_ = input_ + sum_condition.to(input_)
         transformer_out = self.transformer(input_)
-        
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
         assert isinstance(transformer_out, torch.Tensor)
@@ -616,13 +613,13 @@ class LMGen(StreamingModule[_LMGenState]):
         assert text_token.shape[1] == 1, "Only one text stream supported."
         text_token = text_token[:, 0, 0]  # shape is [B]
         audio_tokens = state.graphed_depth(text_token, transformer_out)
-        
+
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
         state.offset += 1
         position = state.offset % CT
         state.cache[:, 0, position] = text_token
         state.cache[:, 1 : lm_model.dep_q + 1, position] = audio_tokens
-        
+
         if state.offset <= self.max_delay:
             return None
         B = state.cache.shape[0]

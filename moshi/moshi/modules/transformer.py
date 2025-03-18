@@ -12,12 +12,10 @@ See `StreamingTransformer` for more information.
 from contextlib import ExitStack
 from dataclasses import dataclass
 import typing as tp
-
 from einops import rearrange
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-
 from ..utils.compile import no_compile
 from ..utils import quantize
 from .gating import make_gating
@@ -317,10 +315,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         self.weights_per_step = weights_per_step
         self.weights_per_step_schedule = weights_per_step_schedule
 
-        # Which one to keep ? 
-        out_dim = embed_dim
         out_dim = 3 * embed_dim
-        
         mult = 1
         if weights_per_step:
             if weights_per_step_schedule:
@@ -329,8 +324,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             else:
                 mult = weights_per_step
         self.mult = mult
-        
-  
+
         if self.mult > 1:
             # Split in one linear per step
             self.out_projs = nn.ModuleList(
@@ -347,21 +341,21 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             )
             self.out_proj = None
             self.in_proj = None
-        
+
         else:
             self.out_proj = nn.Linear(embed_dim, mult * embed_dim, bias=False, **factory_kwargs)
             self.in_proj = nn.Linear(embed_dim, mult * out_dim, bias=False, **factory_kwargs)
             self.out_projs = None
             self.in_projs = None
-            
+
         self.register_load_state_dict_pre_hook(StreamingMultiheadAttention._load_hook)
-            
+
     @staticmethod
     def _load_hook(module, state_dict, prefix, *_):
 
         in_key_name = prefix + 'in_proj_weight'
         out_key_name = prefix + 'out_proj.weight'
-        
+
         if in_key_name in state_dict.keys():
             in_weight = state_dict[in_key_name]
             if module.mult == 1:
@@ -386,7 +380,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                     state_dict[prefix+'out_projs.'+str(i)+'.weight'] = out_weight[i]
                 state_dict.pop(out_key_name)
         return state_dict
-    
+
     def _init_streaming_state(self, batch_size: int) -> _MHAState:
         if self.context is None:
             if self.weights_per_step:
@@ -397,8 +391,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 )
         else:
             capacity = self.context
-            
-        
+
         if self.in_proj is not None:
             if isinstance(self.in_proj, LoRALinear):
                 device = self.in_proj.lora_A.weight.device
@@ -416,15 +409,11 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 device = self.in_projs[0].weight.device
                 dtype = self.in_projs[0].weight.dtype
             assert self.in_proj is None
-            
+
         # TODO: the following estimation will not work great with FSDP.
         if quantize.is_quantized(self.in_proj):
             # We are running with quantization
             dtype = torch.float16
-
-
-            
-            
         dim_per_head = self.embed_dim // self.num_heads
         kv_cache = RingKVCache(
             batch_size, self.num_heads, dim_per_head, capacity, device, dtype
@@ -556,9 +545,6 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
             "embed_dim": d_model,
             "num_heads": num_heads,
         }
-        
- 
-             
         if not skip_self_attn:
             self.self_attn: StreamingMultiheadAttention = StreamingMultiheadAttention(
                 causal=causal,
@@ -681,7 +667,6 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
             state = self._streaming_state
             if state:
                 state.offset_cpu += x.shape[1]
-                
             return x
 
 
@@ -801,7 +786,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         if state is not None:
             state.offset.add_(T)
         return x.to(dtype_input)
-    
+
 class ProjectedTransformer(StreamingContainer):
     """Transformer with optional projections of the input and output to different dimensions when needed.
     Supports multiple outputs.

@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from dataclasses import dataclass
 from simple_parsing.helpers import Serializable
-from functools import partial, reduce
+from functools import partial
 
 @dataclass
 class LoraArgs(Serializable):

@@ -12,7 +12,6 @@ import tarfile
 import time
 import secrets
 import sys
-
 import aiohttp
 from aiohttp import web
 from huggingface_hub import hf_hub_download
@@ -20,8 +19,6 @@ import numpy as np
 import sentencepiece
 import sphn
 import torch
-
-
 from .client_utils import log
 from .models import loaders, MimiModel, LMModel, LMGen
 from .run_inference import get_condition_tensors
@@ -191,6 +188,7 @@ def main():
                         help="HF repo to look into, defaults Moshiko. "
                              "Use this to select a different pre-trained model.")
     parser.add_argument("--lora-weight", type=str, help="Path to a local checkpoint file for LoRA.", default = None)
+    parser.add_argument("--lora-folder", type=str, help="LoRA folder")
     parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
     parser.add_argument("--fuse_lora", action="store_true", help="Fuse LoRA layers intot Linear layers.")
@@ -225,7 +223,9 @@ def main():
 
     log("info", "retrieving checkpoint")
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
-        args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer, lora_weights = args.lora_weight)
+        args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer, 
+        lora_weights = args.lora_weight,
+        lora_folder = args.lora_folder)
     log("info", "loading mimi")
     mimi = checkpoint_info.get_mimi(device=args.device)
     log("info", "mimi loaded")
