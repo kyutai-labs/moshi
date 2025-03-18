@@ -199,10 +199,12 @@ class CheckpointInfo:
                 if hf_repo == '':
                     moshi_weights = ft_params['moshi_paths']['moshi_path']
                     mimi_weights = ft_params['moshi_paths']['mimi_path']
+                    tokenizer = ft_params['moshi_paths']['tokenizer_path']
                 else:
                     moshi_name = ft_params['moshi_paths']['moshi_path']
                     mimi_name = ft_params['moshi_paths']['mimi_path']
-                tokenizer = ft_params['moshi_paths']['tokenizer_path']
+                    tokenizer_name = ft_params['moshi_paths']['tokenizer_path']
+
                 lora_weights = Path(lora_folder) / 'lora.safetensors'
                 lora_rank = ft_params['lora']['rank']
                 lora_scaling = ft_params['lora']['scaling']
