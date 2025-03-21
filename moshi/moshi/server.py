@@ -277,7 +277,7 @@ def main():
         tunnel = setup_tunnel('localhost', args.port, tunnel_token, None)
         log("info", f"Tunnel started, if executing on a remote GPU, you can use {tunnel}.")
         log("info", "Note that this tunnel goes through the US and you might experience high latency in Europe.")
-    web.run_app(app, port=args.port, ssl_context=ssl_context)
+    web.run_app(app, host=args.host , port=args.port, ssl_context=ssl_context)
 
 
 with torch.no_grad():
