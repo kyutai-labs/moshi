@@ -67,7 +67,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
         If set to True, or in detach mode, only a direct call to this module `.streaming(...)` method
         will set it into streaming mode, ignoring the changes from its parents.
 
-        This is useful is streaming over two different dimensions, e.g. for the RQ-Transformer
+        This is useful if streaming over two different dimensions, e.g. for the RQ-Transformer
         with the inner Depth Transformer working on the dimension of the codebooks."""
         self._streaming_detached = streaming_detached
 
