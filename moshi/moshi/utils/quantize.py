@@ -48,40 +48,33 @@ def multi_linear(num_steps: int, schedule: list[int] | None,
     import bitsandbytes as bnb  # type: ignore
     B, T, C = x.shape
     ys: list[torch.Tensor] = []
-    # if is_quantized(module, name):
-    #     weight = getattr(module, name)
-    #     weight_scb = getattr(module, name + '_scb')
-    # else:
-    #     weight = getattr(module, name)
-    #     weight_scb = None
-    # assert isinstance(weight, torch.Tensor)
+    if are_quantized(module, name):
+        #TODO test Multi linear with quantized weights
+        weights = [getattr(mod, name) for mod in module]
+        weights_scb = [getattr(mod, name + '_scb') for mod in module]
+    else:
+        weights = None
+        weights_scb = None
 
-    # num_linear = num_steps
-    # if schedule is not None:
-    #     num_linear = max(schedule) + 1
-
-    # chout, chin = weight.shape
-    # weight = weight.view(num_linear, -1, chin)
-    # if weight_scb is not None:
-    #     assert isinstance(weight, torch.Tensor)
-    #     assert weight_scb.shape == (chout,), (weight_scb, chout)
-    #     weight_scb = weight_scb.view(num_linear, -1)
-    #     assert weight_scb.dtype == torch.float, weight_scb.dtype
+    if weights_scb is not None:
+        _, chout = weights[0].shape
+        assert all([weight_scb.shape == (chout,) for weight_scb in weights_scb])
+        assert all([weight_scb.dtype == torch.float for weight_scb in weights_scb])
 
     for t in range(T):
         linear_index = t + offset
         if schedule is not None:
             linear_index = schedule[linear_index]
-        # if weight_scb is None:
-        y = module[linear_index](x[:, t])
-        # else:
-        #     state = bnb.MatmulLtState()
-        #     CB = weight[linear_index]
-        #     state.CB = CB  # type: ignore
-        #     state.SCB = weight_scb[linear_index]
-        #     state.has_fp16_weights = False
-        #     y = bnb.matmul(x[:, t].half(), CB, state=state)
-        #     assert isinstance(y, torch.Tensor)
+        if weights_scb is None:
+            y = module[linear_index](x[:, t])
+        else:
+            state = bnb.MatmulLtState()
+            CB = weights[linear_index]
+            state.CB = CB  # type: ignore
+            state.SCB = weights_scb[linear_index]
+            state.has_fp16_weights = False
+            y = bnb.matmul(x[:, t].half(), CB, state=state)
+            assert isinstance(y, torch.Tensor)
         ys.append(y)
     out = torch.stack(ys, 1)
     return out
@@ -89,6 +82,9 @@ def multi_linear(num_steps: int, schedule: list[int] | None,
 
 def is_quantized(module: nn.Module, name: str = 'weight'):
     return hasattr(module, name + '_scb')
+
+def are_quantized(module: nn.ModuleList, name: str | list[str] = 'weight') -> bool:
+    return all(is_quantized(mod, name) for mod in module)
 
 
 def quantize_param(module: nn.Module, name: str = 'weight') -> None:

@@ -8,7 +8,7 @@ from torch.nn import functional as F
 
 from ..utils.compile import torch_compile_lazy
 from ..utils import quantize
-from ..modules.lora import LoraArgs, maybe_lora_layer, LoRALinear
+from ..modules.lora import LoRALinear
 
 @torch_compile_lazy
 def gating_forward_kernel(

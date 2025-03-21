@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 from dataclasses import dataclass
 from simple_parsing.helpers import Serializable
-from functools import partial
 
 @dataclass
 class LoraArgs(Serializable):
@@ -133,21 +132,3 @@ class LoRALinear(nn.Module):
         )
         
         
-
-def maybe_lora_layer(
-    lora_args: LoraArgs | None
-) -> partial[LoRALinear] | type[nn.Linear]:
-    MaybeLora: partial[LoRALinear] | type[nn.Linear]
-    if lora_args is None or not lora_args.enable:
-        return nn.Linear
-
-    rank = lora_args.rank
-    scaling = lora_args.scaling
-
-    MaybeLora = partial(
-        LoRALinear,
-        rank=rank,
-        scaling=scaling,
-    )
-
-    return MaybeLora

@@ -29,7 +29,9 @@ def quantize_transformer(module: torch.nn.Module):
         if isinstance(child, torch.nn.Linear):
             quantize.quantize_linear(child)
         elif isinstance(child, StreamingMultiheadAttention):
-            quantize.quantize_param(child, 'in_proj_weight')
+            if isinstance(child,torch.nn.ModuleList):
+                for i in range(len(child)):
+                    quantize.quantize_param(child[i], 'weight')
 
 
 class LayerNormF32(nn.LayerNorm):

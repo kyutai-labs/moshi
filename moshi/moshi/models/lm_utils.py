@@ -45,6 +45,7 @@ def _get_init_fn(input_dim: int) -> tp.Callable[[torch.Tensor], None]:
         x_orig = x
         if x.device.type == 'cpu' and x.dtype in [torch.float16, torch.bfloat16]:
             x = x.float()
+
         torch.nn.init.trunc_normal_(x, mean=0.0, std=std, a=-3 * std, b=3 * std)
         if x_orig is not x:
             x_orig.data[:] = x.to(x_orig)

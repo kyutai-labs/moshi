@@ -20,7 +20,7 @@ from ..conditioners import BaseConditioner, ConditionProvider, ConditionFuser
 from .lm import LMModel
 from ..modules import SEANetEncoder, SEANetDecoder, transformer
 from ..quantization import SplitResidualVectorQuantizer
-from ..modules.lora import LoraArgs, replace_all_linear_with_lora, LoRALinear, replace_lora_with_linear
+from ..modules.lora import replace_all_linear_with_lora, replace_lora_with_linear
 
 
 SAMPLE_RATE = 24000
