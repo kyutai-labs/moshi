@@ -18,6 +18,7 @@ pub struct Config {
     pub text_eop_token: u32,
     pub text_start_token: u32,
     pub text_audio_delay_in_tokens: usize,
+    pub max_consecutive_pads: usize,
     pub speaker_cond_duration_s: f64,
     pub speaker_cond_dim: usize,
     pub speaker_cond_n_speakers: usize,
@@ -33,6 +34,7 @@ impl Config {
             text_pad_token: 3,
             text_start_token: 8000,
             text_audio_delay_in_tokens: 25, // aka interleaver_delay = 2s
+            max_consecutive_pads: 10,
             speaker_cond_duration_s: 10.,
             speaker_cond_dim: 2048,
             speaker_cond_n_speakers: 5,
@@ -45,10 +47,12 @@ pub struct State {
     ca_src: Option<CaSrc>,
     audio_tokens: Vec<Vec<u32>>,
     text_tokens: Vec<u32>,
+    consecutive_pads: usize,
     audio_lp: LogitsProcessor,
     text_lp: LogitsProcessor,
     step_idx: usize,
     forced_audio_tokens: crate::lm::ForcedAudioTokens,
+    cfg_alpha: Option<f64>,
     config: Config,
 }
 
@@ -66,6 +70,7 @@ impl State {
         max_step_idx: usize,
         audio_lp: LogitsProcessor,
         text_lp: LogitsProcessor,
+        cfg_alpha: Option<f64>,
         config: Config,
     ) -> Self {
         let audio_tokens: Vec<Vec<u32>> = vec![
@@ -83,10 +88,12 @@ impl State {
             ca_src,
             audio_tokens,
             text_tokens,
+            consecutive_pads: 0,
             audio_lp,
             text_lp,
             step_idx: 0,
             forced_audio_tokens,
+            cfg_alpha,
             config,
         }
     }
@@ -108,6 +115,7 @@ impl State {
     pub fn step(&mut self, prev_text_token: u32, allowed_tokens: AllowedTokens) -> Result<u32> {
         let mut codes = Vec::with_capacity(self.model.generated_audio_codebooks());
         let dev = self.model.device();
+        let batch_size = if self.cfg_alpha.is_some() { 2 } else { 1 };
         for codebook in 0..self.model.generated_audio_codebooks() {
             let t = if codebook == 0 {
                 if self.step_idx == 0 {
@@ -124,7 +132,9 @@ impl State {
                 }
             } else if self.step_idx <= self.config.acoustic_delay {
                 Some(self.audio_pad_token())
-            } else if self.step_idx <= self.config.text_audio_delay_in_tokens {
+            } else if self.step_idx
+                <= self.config.text_audio_delay_in_tokens + self.config.acoustic_delay
+            {
                 // The same comment as above applies here.
                 None
             } else {
@@ -134,17 +144,24 @@ impl State {
                 candle::bail!("internal error, ungenerated {}", self.step_idx)
             }
             let t = match t {
-                Some(t) => Some(Tensor::new(&[t], dev)?.unsqueeze(0)?),
+                Some(t) => Some(Tensor::from_vec(vec![t; batch_size], (batch_size, 1), dev)?),
                 None => None,
             };
             codes.push(t)
         }
-        let prev_text_token = Some(Tensor::from_vec(vec![prev_text_token], (1, 1), dev)?);
+        let prev_text_token =
+            Some(Tensor::from_vec(vec![prev_text_token; batch_size], (batch_size, 1), dev)?);
         let (text_logits, ys) = match self.ca_src.as_ref() {
             None => self.model.forward(prev_text_token, codes)?,
             Some(ca_src) => self.model.forward_ca(prev_text_token, codes, ca_src)?,
         };
-        let text_logits = text_logits.i((0, 0))?;
+        let text_logits = match self.cfg_alpha {
+            None => text_logits.i((0, 0))?,
+            Some(a) => match text_logits.dim(0)? {
+                2 => ((text_logits.i((0, 0))? * a)? - (text_logits.i((1, 0))? * (a - 1.))?)?,
+                b_size => candle::bail!("unexpected batch size {b_size}"),
+            },
+        };
         // When in tts mode, there are only two possible outcomes corresponding to tokens 0 and 3.
         // 0 -> EOP or the next text token, this is ambiguous, a list of consecutive 0s correspond to
         //   word + EOP + word + EOP ...
@@ -154,21 +171,39 @@ impl State {
             AllowedTokens::Text(v) => v,
             AllowedTokens::Pad => self.config.text_pad_token,
             AllowedTokens::PadOrEpad => {
-                let text_token = self.text_lp.sample(&text_logits)?;
-                if text_token == self.config.text_pad_token {
-                    self.config.text_pad_token
-                } else {
+                if self.consecutive_pads > self.config.max_consecutive_pads {
                     self.config.text_eop_token
+                } else {
+                    let text_token = self.text_lp.sample(&text_logits)?;
+                    if text_token == self.config.text_pad_token {
+                        self.config.text_pad_token
+                    } else {
+                        self.config.text_eop_token
+                    }
                 }
             }
         };
+        if text_token == self.config.text_pad_token {
+            self.consecutive_pads += 1
+        } else {
+            self.consecutive_pads = 0
+        }
         self.text_tokens[self.step_idx] = text_token;
-        let last_audio_tokens = self.model.depformer_sample(
-            &ys,
-            Some(text_token),
-            self.forced_audio_tokens.forced_tokens(self.step_idx),
-            &mut self.audio_lp,
-        )?;
+        let last_audio_tokens = match self.cfg_alpha {
+            None => self.model.depformer_sample(
+                &ys,
+                Some(text_token),
+                self.forced_audio_tokens.forced_tokens(self.step_idx),
+                &mut self.audio_lp,
+            )?,
+            Some(cfg_alpha) => self.model.depformer_sample_cfg(
+                &ys,
+                cfg_alpha,
+                Some(text_token),
+                self.forced_audio_tokens.forced_tokens(self.step_idx),
+                &mut self.audio_lp,
+            )?,
+        };
         let audio_pad_token = self.audio_pad_token();
         for c_idx in 0..self.model.generated_audio_codebooks() {
             let delay = if c_idx == 0 { 0 } else { self.config.acoustic_delay };
@@ -226,6 +261,10 @@ impl State {
             }
         }
     }
+
+    pub fn device(&self) -> &candle::Device {
+        self.model.device()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,6 +306,8 @@ pub struct SpeakerEncoder {
     learnt_padding: Tensor,
     proj: candle_nn::Linear,
     n_speakers: usize,
+    cond_dim: usize,
+    device: candle::Device,
     dtype: candle::DType,
 }
 
@@ -288,7 +329,19 @@ impl SpeakerEncoder {
             speaker_cond_dim,
             vb.pp("condition_provider.conditioners.speaker_wavs.output_proj"),
         )?;
-        Ok(Self { mimi, learnt_padding, proj, n_speakers: speaker_cond_n_speakers, dtype })
+        Ok(Self {
+            mimi,
+            learnt_padding,
+            proj,
+            n_speakers: speaker_cond_n_speakers,
+            cond_dim: speaker_cond_dim,
+            device: vb.device().clone(),
+            dtype,
+        })
+    }
+
+    pub fn device(&self) -> &candle::Device {
+        &self.device
     }
 
     pub fn sample_rate(&self) -> f64 {
@@ -320,6 +373,13 @@ impl SpeakerEncoder {
             embeddings
         };
         let embeddings = embeddings.flatten(0, 1)?.unsqueeze(0)?;
+        let embeddings = crate::tts::add_sin_embeddings(&embeddings)?;
+        embeddings.to_dtype(self.dtype)
+    }
+
+    pub fn empty(&self) -> Result<Tensor> {
+        let embeddings =
+            self.learnt_padding.broadcast_as((1, self.n_speakers * 125, self.cond_dim))?;
         let embeddings = crate::tts::add_sin_embeddings(&embeddings)?;
         embeddings.to_dtype(self.dtype)
     }

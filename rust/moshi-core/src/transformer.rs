@@ -37,6 +37,9 @@ pub struct Config {
     pub kv_repeat: usize,
     pub dim_feedforward: usize,
     pub conv_layout: bool,
+
+    #[serde(default)]
+    pub shared_cross_attn: bool,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -831,8 +834,8 @@ impl StreamingTransformer {
         for layer_idx in 0..cfg.num_layers {
             // Also send weights of first layer as only it contains the KQV proj weights
             // for shared cross-attention layers
-            let layer =
-                StreamingTransformerLayer::new(&rope, cfg, vb_l.pp(layer_idx), Some(vb_l.pp(0)))?;
+            let shared_vb = if cfg.shared_cross_attn { Some(vb_l.pp(0)) } else { None };
+            let layer = StreamingTransformerLayer::new(&rope, cfg, vb_l.pp(layer_idx), shared_vb)?;
             layers.push(layer)
         }
         Ok(Self {

@@ -61,6 +61,7 @@ impl Config {
             conv_kernel_size: 3,
             kv_repeat: 1,
             max_seq_len: 4096,
+            shared_cross_attn: false,
         };
         DepFormerConfig { num_slices, transformer: depformer_cfg, low_rank_embeddings: None }
     }
@@ -92,6 +93,7 @@ impl Config {
             conv_kernel_size: 3,
             kv_repeat: 1,
             max_seq_len: 4096,
+            shared_cross_attn: false,
         };
         Self {
             transformer: lm_cfg,
@@ -131,6 +133,7 @@ impl Config {
             conv_kernel_size: 3,
             kv_repeat: 1,
             max_seq_len: 4096,
+            shared_cross_attn: true,
         };
         Self {
             transformer: lm_cfg,
@@ -201,6 +204,7 @@ impl Config {
             conv_kernel_size: 3,
             kv_repeat: 1,
             max_seq_len: 4096,
+            shared_cross_attn: false,
         };
         Self {
             transformer: lm_cfg,
@@ -238,6 +242,7 @@ impl Config {
             conv_kernel_size: 3,
             kv_repeat: 1,
             max_seq_len: 4096,
+            shared_cross_attn: false,
         };
         Self {
             transformer: lm_cfg,
@@ -284,6 +289,7 @@ impl Config {
             conv_kernel_size: 3,
             kv_repeat: 1,
             max_seq_len: 4096,
+            shared_cross_attn: false,
         };
         Self {
             transformer: lm_cfg,
@@ -319,6 +325,7 @@ impl Config {
             conv_kernel_size: 3,
             kv_repeat: 1,
             max_seq_len: 4096,
+            shared_cross_attn: false,
         };
         Self {
             transformer: lm_cfg,
@@ -359,6 +366,7 @@ impl Config {
             conv_kernel_size: 3,
             kv_repeat: 1,
             max_seq_len: 4096,
+            shared_cross_attn: false,
         };
         Self {
             transformer: lm_cfg,
@@ -395,6 +403,7 @@ impl Config {
             conv_kernel_size: 3,
             kv_repeat: 1,
             max_seq_len: 4096,
+            shared_cross_attn: false,
         };
         Self {
             transformer: lm_cfg,
@@ -589,6 +598,9 @@ impl DepFormer {
                 b_size => candle::bail!("unexpected batch size {b_size}"),
             };
             let token = lp.sample(&logits)?;
+            if VERBOSE.with(|v| *v) {
+                println!("sampled {token} logits {slice_idx}:\n{logits}");
+            }
             tokens.push(token);
             let token_for_next_layer =
                 forced_audio_tokens.get(slice_idx).copied().flatten().unwrap_or(token);
@@ -777,6 +789,25 @@ impl LmModel {
         audio_ids: Vec<Option<Tensor>>,
         ca_src: &CaSrc,
     ) -> candle::Result<(Tensor, Tensor)> {
+        if VERBOSE.with(|v| *v) {
+            print!("text_ids ");
+            if let Some(text_ids) = text_ids.as_ref() {
+                let text_ids = text_ids.flatten_all()?.to_vec1::<u32>()?;
+                println!("{text_ids:?}");
+            } else {
+                println!("none")
+            }
+            print!("audio_ids ");
+            for audio_id in audio_ids.iter() {
+                if let Some(audio_id) = audio_id {
+                    let audio_id = audio_id.flatten_all()?.to_vec1::<u32>()?;
+                    print!(" {audio_id:?}");
+                } else {
+                    print!(" none")
+                }
+            }
+            println!();
+        }
         let b_size = match ca_src {
             CaSrc::KeysValues((cak, _)) => cak.dim(0)?,
             CaSrc::Tokens(catoks) => catoks.dim(0)?,
