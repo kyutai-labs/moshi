@@ -116,9 +116,9 @@ def make_gating(
     name: str, dim: int, dim_feedforward: int, **factory_kwargs
 ) -> nn.Module:
     gating = _make_gating(name, dim, dim_feedforward, **factory_kwargs)
-    max_params = 2 * dim * dim_feedforward
-    params = sum(p.numel() for p in gating.parameters())
     if not isinstance(gating.linear_in, LoRALinear):
+        max_params = 2 * dim * dim_feedforward
+        params = sum(p.numel() for p in gating.parameters())
         assert (
             params <= max_params
         ), f"{name} gating has {params} params, max is {max_params}"

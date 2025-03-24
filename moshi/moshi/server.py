@@ -191,7 +191,7 @@ def main():
     parser.add_argument("--lora-folder", type=str, help="LoRA folder")
     parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
-    parser.add_argument("--fuse_lora", action="store_true", help="Fuse LoRA layers intot Linear layers.")
+    parser.add_argument("--dont_fuse_lora", action="store_true", help="Do not fuse LoRA layers intot Linear layers.")
     parser.add_argument("--half", action="store_const", const=torch.float16, default=torch.bfloat16,
                         dest="dtype", help="Run inference with float16, not bfloat16, better for old GPUs.")
     parser.add_argument(
@@ -233,7 +233,7 @@ def main():
     text_tokenizer = checkpoint_info.get_text_tokenizer()
 
     log("info", "loading moshi")
-    lm = checkpoint_info.get_moshi(device=args.device, dtype=args.dtype, fuse_lora=args.fuse_lora)
+    lm = checkpoint_info.get_moshi(device=args.device, dtype=args.dtype, fuse_lora=not args.dont_fuse_lora)
     log("info", "moshi loaded")
 
     state = ServerState(checkpoint_info.model_type, mimi, text_tokenizer, lm, args.cfg_coef, args.device,

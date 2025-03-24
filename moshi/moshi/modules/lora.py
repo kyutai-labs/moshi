@@ -17,6 +17,7 @@ class LoraArgs(Serializable):
             assert self.scaling > 0.0
 
 def replace_all_linear_with_lora(module, rank: int, scaling: float):
+    """ Recursively replace all Linear layers with LoRALinear layers."""
     
     for name, child in module.named_children():
         if isinstance(child, nn.Linear):
@@ -30,13 +31,10 @@ def replace_lora_with_linear(module):
         if isinstance(child, LoRALinear):
             # Compute merged weights: W' = W + scaling * B @ A
             merged_weight = child.frozen_W.weight.data + child.scaling * (child.lora_B.weight @ child.lora_A.weight)
-            
             # Create a standard Linear layer with the same in/out features
             new_linear = nn.Linear(child.frozen_W.in_features, child.frozen_W.out_features, bias=False)
             new_linear.weight.data = merged_weight  # Transfer merged weights
-
             setattr(module, name, new_linear)  # Replace the module
-
         else:
             replace_lora_with_linear(child)  # Recursively process submodules
 
