@@ -10,7 +10,8 @@ from ..utils.compile import torch_compile_lazy
 from ..utils import quantize
 from ..modules.lora import LoRALinear
 
-@torch_compile_lazy
+# Does not work in full_finetuning mode
+# @torch_compile_lazy
 def gating_forward_kernel(
     weight_in: torch.Tensor, weight_out: torch.Tensor, activation, x: torch.Tensor
 ):
