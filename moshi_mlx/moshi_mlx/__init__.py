@@ -9,4 +9,4 @@ moshi_mlx is the MLX inference codebase for Kyutai audio generation models.
 
 from . import modules, models, utils
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
