@@ -25,7 +25,10 @@ from ..modules.transformer import (
     quantize_transformer,
     create_norm_fn,
 )
-from .lm_utils import _delay_sequence, _undelay_sequence, _init_layer, ScaledEmbedding
+from .lm_utils import (_delay_sequence,
+                       _undelay_sequence,
+                       _init_layer,
+                       ScaledEmbedding)
 
 
 logger = logging.getLogger(__name__)
@@ -95,7 +98,7 @@ class LMModel(StreamingContainer):
         quantize: bool = False,
         device=None,
         dtype=None,
-        checkpointing: bool = False,
+        gradient_checkpointing: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -140,7 +143,7 @@ class LMModel(StreamingContainer):
             quantize=quantize,
             context=context,
             causal=causal,
-            checkpointing=checkpointing,
+            checkpointing=gradient_checkpointing,
             **main_kwargs,
         )
         self.out_norm = create_norm_fn(norm, dim)
@@ -184,7 +187,7 @@ class LMModel(StreamingContainer):
             weights_per_step_schedule=depformer_weights_per_step_schedule,
             causal=causal,
             quantize=quantize,
-            checkpointing=checkpointing,
+            checkpointing=gradient_checkpointing,
             device=device,
             dtype=dtype,
             **kwargs_dep,
@@ -351,7 +354,7 @@ class LMModel(StreamingContainer):
             transformer_out = self.out_norm(transformer_out)
         assert isinstance(transformer_out, torch.Tensor)
         text_logits = quantize.linear(self.text_linear, transformer_out)
-        text_logits = text_logits[:, None]   
+        text_logits = text_logits[:, None]
         return transformer_out, text_logits
 
     def forward_depformer_training(
@@ -574,7 +577,7 @@ class LMGen(StreamingModule[_LMGenState]):
             k = lm_model.dep_q + 1 + q_other
             delay = lm_model.delays[k]
             write_position = (state.offset + delay) % CT
-            state.cache[:, k, write_position : write_position + 1] = input_tokens[
+            state.cache[:, k, write_position: write_position + 1] = input_tokens[
                 :, q_other
             ]
 
@@ -584,7 +587,7 @@ class LMGen(StreamingModule[_LMGenState]):
             # token that are delayed, and thus have no good value to take.
             if state.offset <= delay:
                 state.cache[:, k, position] = state.initial[:, k, 0]
-        input_ = state.cache[:, :, position : position + 1]
+        input_ = state.cache[:, :, position: position + 1]
 
         if self.check:
             # Check that we are not feeding in any value that is not generated yet.
@@ -618,7 +621,7 @@ class LMGen(StreamingModule[_LMGenState]):
         state.offset += 1
         position = state.offset % CT
         state.cache[:, 0, position] = text_token
-        state.cache[:, 1 : lm_model.dep_q + 1, position] = audio_tokens
+        state.cache[:, 1:lm_model.dep_q + 1, position] = audio_tokens
 
         if state.offset <= self.max_delay:
             return None

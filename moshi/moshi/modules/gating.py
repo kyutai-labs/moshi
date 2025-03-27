@@ -12,6 +12,8 @@ from ..utils import quantize
 from ..modules.lora import LoRALinear
 
 # Does not work in full_finetuning mode
+
+
 @torch_compile_lazy
 def gating_forward_kernel(
     weight_in: torch.Tensor, weight_out: torch.Tensor, activation, x: torch.Tensor
@@ -37,6 +39,7 @@ def gating_forward_lora_kernel(
     x = linear_out(x)
     return x
 
+
 class ActivationGating(nn.Module):
     """
     Gating FFN layer, using the given activation.
@@ -48,7 +51,7 @@ class ActivationGating(nn.Module):
 
     _fsdp_final = True
 
-    def __init__(self, dim: int, dim_feedforward: int, activation, quantized: bool = False,**factory_kwargs):
+    def __init__(self, dim: int, dim_feedforward: int, activation, quantized: bool = False, **factory_kwargs):
         super().__init__()
         # We should have 8 d^2 param, instead we will have
         # 2 * h * d + h * d = 3 h * d = 8 d^2
@@ -59,9 +62,7 @@ class ActivationGating(nn.Module):
             hidden = (2 * dim_feedforward) // 3
 
         self.linear_in = nn.Linear(dim, 2 * hidden, bias=False, **factory_kwargs)
-        self.linear_out = nn.Linear(
-                hidden, dim, bias=False, **factory_kwargs
-            )
+        self.linear_out = nn.Linear(hidden, dim, bias=False, **factory_kwargs)
 
         # We try to follow the default PyTorch MHA convention, to easily compare results.
 

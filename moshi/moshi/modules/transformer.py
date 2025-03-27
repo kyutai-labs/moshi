@@ -24,12 +24,13 @@ from .streaming import StreamingModule, StreamingContainer, State
 from .lora import LoRALinear
 from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
+
 def quantize_transformer(module: torch.nn.Module):
     for name, child in module.named_modules():
         if isinstance(child, torch.nn.Linear):
             quantize.quantize_linear(child)
         elif isinstance(child, StreamingMultiheadAttention):
-            if isinstance(child,torch.nn.ModuleList):
+            if isinstance(child, torch.nn.ModuleList):
                 for i in range(len(child)):
                     quantize.quantize_param(child[i], 'weight')
 
@@ -406,7 +407,6 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                     for i in range(len(module.out_projs)):
                         state_dict[prefix + f'out_projs{i}.weight' + suffix] = out_weight[i]
                     state_dict.pop(out_key_name + suffix)
-        return state_dict
 
     def _init_streaming_state(self, batch_size: int) -> _MHAState:
         if self.context is None:
@@ -469,7 +469,6 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             assert self.causal, "Streaming only available for causal"
             offset = state.offset
             offset_cpu = state.offset_cpu
-
 
         if self.mult > 1:
             assert self.in_proj is None
@@ -704,6 +703,7 @@ class _TransformerState(State):
     def reset(self):
         self.offset.zero_()
 
+
 class StreamingTransformer(StreamingModule[_TransformerState]):
     """Transformer with Streaming / Causal support.
 
@@ -779,7 +779,6 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
                 self.layers[-1].to(device=device, dtype=dtype)
                 quantize_transformer(self.layers[-1])
 
-
     def _init_streaming_state(self, batch_size: int) -> _TransformerState:
         device = next(self.parameters()).device
         return _TransformerState(offset=torch.zeros(1, device=device, dtype=torch.long))
@@ -805,14 +804,16 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         for i, layer in enumerate(self.layers):
             if self.checkpointing:
                 x = torch_checkpoint(layer, x, *args, use_reentrant=False,
-                                    determinism_check='none', preserve_rng_state=False, **kwargs)
+                                     determinism_check='none',
+                                     preserve_rng_state=False,
+                                     **kwargs)
             else:
                 x = layer(x, *args, **kwargs)
-
 
         if state is not None:
             state.offset.add_(T)
         return x.to(dtype_input)
+
 
 class ProjectedTransformer(StreamingContainer):
     """Transformer with optional projections of the input and output to different dimensions when needed.

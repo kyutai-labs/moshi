@@ -23,7 +23,10 @@ def replace_all_linear_with_lora(module, rank: int, scaling: float):
 
     for name, child in module.named_children():
         if isinstance(child, nn.Linear):
-            setattr(module,name,LoRALinear(child.in_features, child.out_features, rank, scaling))
+            setattr(module, name, LoRALinear(child.in_features,
+                                             child.out_features,
+                                             rank,
+                                             scaling))
         else:
             replace_all_linear_with_lora(child, rank, scaling)
 
@@ -33,13 +36,16 @@ def replace_lora_with_linear(module):
     for name, child in module.named_children():
         if isinstance(child, LoRALinear):
             # Compute merged weights: W' = W + scaling * B @ A
-            merged_weight = child.frozen_W.weight.data + child.scaling * (child.lora_B.weight @ child.lora_A.weight)
+            merged_weight = child.frozen_W.weight.data + \
+                child.scaling * (child.lora_B.weight @ child.lora_A.weight)
             # Create a standard Linear layer with the same in/out features
-            new_linear = nn.Linear(child.frozen_W.in_features, child.frozen_W.out_features, bias=False)
+            new_linear = nn.Linear(child.frozen_W.in_features,
+                                   child.frozen_W.out_features, bias=False)
             new_linear.weight.data = merged_weight  # Transfer merged weights
             setattr(module, name, new_linear)  # Replace the module
         else:
             replace_lora_with_linear(child)  # Recursively process submodules
+
 
 class LoRALinear(nn.Module):
     """
@@ -73,7 +79,6 @@ class LoRALinear(nn.Module):
         self.rank = rank
         self.scaling = scaling
 
-
         self.lora_A = nn.Linear(
             self.in_features,
             self.rank,
@@ -89,7 +94,11 @@ class LoRALinear(nn.Module):
             dtype=dtype,
         )
 
-        self.frozen_W = nn.Linear(self.in_features, self.out_features, bias=self.bias, device=device, dtype=dtype)
+        self.frozen_W = nn.Linear(self.in_features,
+                                  self.out_features,
+                                  bias=self.bias,
+                                  device=device,
+                                  dtype=dtype)
 
         # make sure no LoRA weights are marked as "missing" in load_state_dict
         def ignore_missing_keys(m: nn.Module, incompatible_keys: NamedTuple):
@@ -129,7 +138,4 @@ class LoRALinear(nn.Module):
 
     def __repr__(self) -> str:
         return "{}Linear(in_features={}, out_features={}, r={})".format(
-            "LoRA", self.in_features, self.out_features, self.rank
-        )
-
-
+            "LoRA", self.in_features, self.out_features, self.rank)
