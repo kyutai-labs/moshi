@@ -302,7 +302,7 @@ def get_mimi(filename: str | Path,
 
 
 def get_moshi_lm(filename: str | Path,
-                 lm_kwargs: tp.Optional[tp.Dict] = None,
+                 lm_kwargs: tp.Optional[tp.Dict[str, tp.Any]] = None,
                  device: torch.device | str = 'cpu',
                  dtype: torch.dtype = torch.bfloat16,
                  strict: bool = True,
@@ -313,8 +313,9 @@ def get_moshi_lm(filename: str | Path,
                  fuse_lora: bool = False,
                  lora_rank: float = 128,
                  lora_scaling: float = 2.,
-                 lm_kwargs_overrides = {}) -> LMModel:
-
+                 lm_kwargs_overrides={}) -> LMModel:
+    # remove model, it is never used
+    # filename: str | Path | None, and empty_init is if filename is None.
     if empty_init or model is None:
         if lm_kwargs is None:
             lm_kwargs = _lm_kwargs
@@ -327,6 +328,9 @@ def get_moshi_lm(filename: str | Path,
         # deprecated params.
         lm_kwargs.pop('depformer_causal', None)
 
+        # pop lora args from lm_kwargs, here, maybe with some default values.
+        # add `'lora'` key set to False or True, have assert to ensure consistency if lora_weight is passed.
+
         lm_kwargs = lm_kwargs | lm_kwargs_overrides
         model = LMModel(
             device=device,
@@ -338,9 +342,6 @@ def get_moshi_lm(filename: str | Path,
         if empty_init:
             return model
 
-    if lora_weights is not None:
-        replace_all_linear_with_lora(model, lora_rank, lora_scaling)
-
     if _is_safetensors(filename):
         load_model(model, filename, strict=strict, device = device)
     else:
@@ -349,10 +350,13 @@ def get_moshi_lm(filename: str | Path,
             "cpu",
         )
         model.load_state_dict(pkg["fsdp_best_state"]["model"])
+    # alex:remove strict param!
 
     if lora_weights is None:
         return model
     else:
+        # potentially move replace to get_lora_moshi
+        replace_all_linear_with_lora(model, lora_rank, lora_scaling)
         return get_lora_moshi(model=model,
                               lora_weights=lora_weights,
                               device = device,
