@@ -2,16 +2,17 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from contextlib import ExitStack
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-from ..utils.compile import torch_compile_lazy
+from ..utils.compile import torch_compile_lazy, no_compile
 from ..utils import quantize
 from ..modules.lora import LoRALinear
 
 # Does not work in full_finetuning mode
-# @torch_compile_lazy
+@torch_compile_lazy
 def gating_forward_kernel(
     weight_in: torch.Tensor, weight_out: torch.Tensor, activation, x: torch.Tensor
 ):
@@ -24,9 +25,9 @@ def gating_forward_kernel(
 
 
 def gating_forward_lora_kernel(
-    linear_in: nn.Module, 
-    linear_out: nn.Module, 
-    activation, 
+    linear_in: nn.Module,
+    linear_out: nn.Module,
+    activation,
     x: torch.Tensor
 ):
     x = linear_in(x)
@@ -76,21 +77,22 @@ class ActivationGating(nn.Module):
             x = quantize.linear(self.linear_out, x)
             return x
 
-        if not isinstance(self.linear_in, LoRALinear):
-            assert not isinstance(self.linear_out, LoRALinear), 'LoRA layers should be used together'
-            return gating_forward_kernel(
-                self.linear_in.weight, self.linear_out.weight, self.activation, x
-            )
-        elif isinstance(self.linear_in, LoRALinear):
+        if isinstance(self.linear_in, LoRALinear):
             assert isinstance(self.linear_out, LoRALinear), 'LoRA layers should be used together'
             return gating_forward_lora_kernel(
-                self.linear_in, 
+                self.linear_in,
                 self.linear_out,
                 self.activation,
                 x
             )
         else:
-            raise ValueError("LoRA layers should be used together")
+            assert not isinstance(self.linear_out, LoRALinear), 'LoRA layers should be used together'
+            with ExitStack() as stack:
+                if self.training:
+                    stack.enter_context(no_compile())
+                return gating_forward_kernel(
+                    self.linear_in.weight, self.linear_out.weight, self.activation, x
+                )
 
 
 def _get_activation(name: str):
@@ -105,7 +107,7 @@ def _get_activation(name: str):
 
 
 def _make_gating(
-    name: str, dim: int, dim_feedforward: int, 
+    name: str, dim: int, dim_feedforward: int,
     **factory_kwargs
 ) -> nn.Module:
     return ActivationGating(
