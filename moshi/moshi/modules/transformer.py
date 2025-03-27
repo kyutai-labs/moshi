@@ -261,6 +261,35 @@ class RingKVCache:
         return KVCacheResult(keys, values, positions)
 
 
+def apply_weights_per_step(
+        num_steps: int, schedule: list[int] | None,
+       module: nn.ModuleList, x: torch.Tensor, offset: int, name='weight') -> torch.Tensor:
+    """Utility to apply a multi linear layer to the given input. A multi linear layer
+    applies a different set of weight for each time step.
+
+    Args:
+        num_steps (int): Number of possible time steps.
+        schedule (list[int] or None): schedule for weight sharing.
+        weight (torch.Tensor): Weight tensor, with shape `[num_linear * chout, chin]`.
+        x (torch.Tensor): Input tensor, with shape `[B, T, C]`.
+        offset (int): offset for the current time step, in particular for decoding, with
+            time steps provided one by one.
+    """
+    import bitsandbytes as bnb  # type: ignore
+    B, T, C = x.shape
+    ys: list[torch.Tensor] = []
+
+    for t in range(T):
+        linear_index = t + offset
+        if schedule is not None:
+            linear_index = schedule[linear_index]
+        y = module[linear_index](x[:, t])
+        ys.append(y)
+    out = torch.stack(ys, 1)
+    return out
+
+
+
 @dataclass
 class _MHAState(State):
     kv_cache: RingKVCache
@@ -354,33 +383,29 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
     @staticmethod
     def _load_hook(module, state_dict, prefix, *_):
-
         in_key_name = prefix + 'in_proj_weight'
         out_key_name = prefix + 'out_proj.weight'
 
-        if in_key_name in state_dict.keys():
-            in_weight = state_dict[in_key_name]
-            if module.mult == 1:
-                module.in_proj.load_state_dict({"weight": in_weight}, assign=True)
-                state_dict[prefix+'in_proj.weight'] = in_weight
-            else:
-                chout, chin = in_weight.shape  
-                in_weight = in_weight.view(module.mult, -1, chin)   
-                for i in range(len(module.in_projs)):
-                    module.in_projs[i].load_state_dict({"weight": in_weight[i]}, assign=True)
-                    state_dict[prefix+'in_projs.'+str(i)+'.weight'] = in_weight[i]
-            state_dict.pop(in_key_name)
-        if out_key_name in state_dict.keys():
-            out_weight = state_dict[out_key_name]
-            if module.mult == 1:
-                module.out_proj.load_state_dict({"weight": out_weight}, assign=True)
-            else:
-                chout, chin = out_weight.shape
-                out_weight = out_weight.view(module.mult, -1, chin)
-                for i in range(len(module.out_projs)):
-                    module.out_projs[i].load_state_dict({"weight": out_weight[i]}, assign=True)
-                    state_dict[prefix+'out_projs.'+str(i)+'.weight'] = out_weight[i]
-                state_dict.pop(out_key_name)
+        for suffix in ['', '_scb']:
+            # _scb suffix is for quantized data.
+            if in_key_name in state_dict.keys():
+                in_weight = state_dict[in_key_name + suffix]
+                if module.mult == 1:
+                    state_dict[prefix + 'in_proj.weight' + suffix] = in_weight
+                else:
+                    _, *OD = in_weight.shape
+                    in_weight = in_weight.view(module.mult, -1, *OD)
+                    for i in range(len(module.in_projs)):
+                        state_dict[prefix + f'in_projs.{i}.weight' + suffix] = in_weight[i]
+                state_dict.pop(in_key_name + suffix)
+            if out_key_name in state_dict.keys():
+                out_weight = state_dict[out_key_name + suffix]
+                if module.mult != 1:
+                    _, *OD = out_weight.shape
+                    out_weight = out_weight.view(module.mult, -1, *OD)
+                    for i in range(len(module.out_projs)):
+                        state_dict[prefix + f'out_projs{i}.weight' + suffix] = out_weight[i]
+                    state_dict.pop(out_key_name + suffix)
         return state_dict
 
     def _init_streaming_state(self, batch_size: int) -> _MHAState:
@@ -452,7 +477,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 self.weights_per_step, self.weights_per_step_schedule,
                 self.in_projs, query, offset_cpu)
         else:
-            assert self.in_projs is None            
+            assert self.in_projs is None
             projected = quantize.linear(self.in_proj, query)
 
         q, k, v = rearrange(

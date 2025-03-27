@@ -5,6 +5,7 @@ import torch.nn as nn
 from dataclasses import dataclass
 from simple_parsing.helpers import Serializable
 
+
 @dataclass
 class LoraArgs(Serializable):
     enable: bool = False
@@ -25,6 +26,7 @@ def replace_all_linear_with_lora(module, rank: int, scaling: float):
             setattr(module,name,LoRALinear(child.in_features, child.out_features, rank, scaling))
         else:
             replace_all_linear_with_lora(child, rank, scaling)
+
 
 def replace_lora_with_linear(module):
     """Recursively replace all LoRALinear layers with Linear layers."""
