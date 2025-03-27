@@ -230,10 +230,10 @@ class CheckpointInfo:
         if lora_weights is not None:
             lora_weights = hf_get(lora_weights)
 
-
         return CheckpointInfo(
             moshi_weights_final, mimi_weights_final, tokenizer_final,
-            lm_config, raw_config, model_type, lora_weights, lora_folder, lm_gen_config = lm_gen_config, lora_rank = lora_rank, lora_scaling = lora_scaling)
+            lm_config, raw_config, model_type, lora_weights,
+            lora_folder, lm_gen_config=lm_gen_config, lora_rank=lora_rank, lora_scaling=lora_scaling)
 
     def get_mimi(self, device: torch.device | str = 'cpu') -> MimiModel:
         if self.lm_config is None:
@@ -243,11 +243,11 @@ class CheckpointInfo:
         return get_mimi(self.mimi_weights, num_codebooks=num_codebooks, device=device)
 
     def get_moshi(self, strict: bool = True, device: torch.device | str = 'cpu',
-                  dtype: torch.dtype = torch.bfloat16, fuse_lora: bool = False) -> LMModel:
+                  dtype: torch.dtype = torch.bfloat16, **kwargs) -> LMModel:
         model = get_moshi_lm(
             self.moshi_weights, lm_kwargs=self.lm_config,
-            device=device, dtype=dtype, strict=strict, lora_weights=self.lora_weights, fuse_lora=fuse_lora,
-            lora_rank=self.lora_rank, lora_scaling=self.lora_scaling)
+            device=device, dtype=dtype, strict=strict, lora_weights=self.lora_weights,
+            lora_rank=self.lora_rank, lora_scaling=self.lora_scaling, **kwargs)
         if self.model_type == 'hibiki':
             # Sometime the model samples the EOS (2) too early, which we want to ignore.
             # We keep generating if the input file is not finished, and this is a way
@@ -312,7 +312,8 @@ def get_moshi_lm(filename: str | Path,
                  checkpointing: bool = False,
                  fuse_lora: bool = False,
                  lora_rank: float = 128,
-                 lora_scaling: float = 2.) -> LMModel:
+                 lora_scaling: float = 2.,
+                 lm_kwargs_overrides = {}) -> LMModel:
 
     if empty_init or model is None:
         if lm_kwargs is None:
@@ -326,6 +327,7 @@ def get_moshi_lm(filename: str | Path,
         # deprecated params.
         lm_kwargs.pop('depformer_causal', None)
 
+        lm_kwargs = lm_kwargs | lm_kwargs_overrides
         model = LMModel(
             device=device,
             dtype=dtype,
@@ -335,7 +337,6 @@ def get_moshi_lm(filename: str | Path,
 
         if empty_init:
             return model
-
 
     if lora_weights is not None:
         replace_all_linear_with_lora(model, lora_rank, lora_scaling)

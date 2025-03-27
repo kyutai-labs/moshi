@@ -16,15 +16,16 @@ class LoraArgs(Serializable):
             assert self.rank > 0
             assert self.scaling > 0.0
 
+
 def replace_all_linear_with_lora(module, rank: int, scaling: float):
     """ Recursively replace all Linear layers with LoRALinear layers."""
-    
+
     for name, child in module.named_children():
         if isinstance(child, nn.Linear):
-            setattr(module,name,LoRALinear(child.in_features, child.out_features, rank, scaling)) 
+            setattr(module,name,LoRALinear(child.in_features, child.out_features, rank, scaling))
         else:
             replace_all_linear_with_lora(child, rank, scaling)
-            
+
 def replace_lora_with_linear(module):
     """Recursively replace all LoRALinear layers with Linear layers."""
     for name, child in module.named_children():
@@ -128,5 +129,5 @@ class LoRALinear(nn.Module):
         return "{}Linear(in_features={}, out_features={}, r={})".format(
             "LoRA", self.in_features, self.out_features, self.rank
         )
-        
-        
+
+
