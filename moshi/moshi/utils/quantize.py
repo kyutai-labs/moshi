@@ -49,7 +49,7 @@ def multi_linear(num_steps: int, schedule: list[int] | None,
     B, T, C = x.shape
     ys: list[torch.Tensor] = []
     if are_quantized(module, name):
-        #TODO test Multi linear with quantized weights
+        # test Multi linear with quantized weights
         weights = [getattr(mod, name) for mod in module]
         weights_scb = [getattr(mod, name + '_scb') for mod in module]
     else:
@@ -82,6 +82,7 @@ def multi_linear(num_steps: int, schedule: list[int] | None,
 
 def is_quantized(module: nn.Module, name: str = 'weight'):
     return hasattr(module, name + '_scb')
+
 
 def are_quantized(module: nn.ModuleList, name: str | list[str] = 'weight') -> bool:
     return all(is_quantized(mod, name) for mod in module)

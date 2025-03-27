@@ -188,7 +188,7 @@ def main():
                         help="HF repo to look into, defaults Moshiko. "
                              "Use this to select a different pre-trained model.")
     parser.add_argument("--lora-weight", type=str, help="Path to a local checkpoint file for LoRA.", default=None)
-    parser.add_argument("--lora-folder", type=str, help="LoRA folder")
+    parser.add_argument("--config-path", type=str, help="Path to a local config file.", default=None)
     parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
     parser.add_argument("--no_fuse_lora", action="store_false", dest="fuse_lora", default=True,
@@ -225,7 +225,7 @@ def main():
     log("info", "retrieving checkpoint")
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
         args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer,
-        lora_weights=args.lora_weight, lora_folder=args.lora_folder)
+        lora_weights=args.lora_weight, config_path=args.config_path)
     log("info", "loading mimi")
     mimi = checkpoint_info.get_mimi(device=args.device)
     log("info", "mimi loaded")

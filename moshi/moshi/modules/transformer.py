@@ -24,12 +24,13 @@ from .streaming import StreamingModule, StreamingContainer, State
 from .lora import LoRALinear
 from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
+
 def quantize_transformer(module: torch.nn.Module):
     for name, child in module.named_modules():
         if isinstance(child, torch.nn.Linear):
             quantize.quantize_linear(child)
         elif isinstance(child, StreamingMultiheadAttention):
-            if isinstance(child,torch.nn.ModuleList):
+            if isinstance(child, torch.nn.ModuleList):
                 for i in range(len(child)):
                     quantize.quantize_param(child[i], 'weight')
 
@@ -354,7 +355,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
     @staticmethod
     def _load_hook(module, state_dict, prefix, *_):
-
+        """Hook to load the state dict of the module, with the correct weights."""
         in_key_name = prefix + 'in_proj_weight'
         out_key_name = prefix + 'out_proj.weight'
 
@@ -362,13 +363,13 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             in_weight = state_dict[in_key_name]
             if module.mult == 1:
                 module.in_proj.load_state_dict({"weight": in_weight}, assign=True)
-                state_dict[prefix+'in_proj.weight'] = in_weight
+                state_dict[prefix + 'in_proj.weight'] = in_weight
             else:
-                chout, chin = in_weight.shape  
-                in_weight = in_weight.view(module.mult, -1, chin)   
+                chout, chin = in_weight.shape
+                in_weight = in_weight.view(module.mult, -1, chin)
                 for i in range(len(module.in_projs)):
                     module.in_projs[i].load_state_dict({"weight": in_weight[i]}, assign=True)
-                    state_dict[prefix+'in_projs.'+str(i)+'.weight'] = in_weight[i]
+                    state_dict[prefix + 'in_projs.' + str(i) + '.weight'] = in_weight[i]
             state_dict.pop(in_key_name)
         if out_key_name in state_dict.keys():
             out_weight = state_dict[out_key_name]
@@ -379,7 +380,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 out_weight = out_weight.view(module.mult, -1, chin)
                 for i in range(len(module.out_projs)):
                     module.out_projs[i].load_state_dict({"weight": out_weight[i]}, assign=True)
-                    state_dict[prefix+'out_projs.'+str(i)+'.weight'] = out_weight[i]
+                    state_dict[prefix + 'out_projs.' + str(i) + '.weight'] = out_weight[i]
                 state_dict.pop(out_key_name)
         return state_dict
 
@@ -445,14 +446,13 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             offset = state.offset
             offset_cpu = state.offset_cpu
 
-
         if self.mult > 1:
             assert self.in_proj is None
             projected = quantize.multi_linear(
                 self.weights_per_step, self.weights_per_step_schedule,
                 self.in_projs, query, offset_cpu)
         else:
-            assert self.in_projs is None            
+            assert self.in_projs is None
             projected = quantize.linear(self.in_proj, query)
 
         q, k, v = rearrange(
@@ -679,6 +679,7 @@ class _TransformerState(State):
     def reset(self):
         self.offset.zero_()
 
+
 class StreamingTransformer(StreamingModule[_TransformerState]):
     """Transformer with Streaming / Causal support.
 
@@ -754,7 +755,6 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
                 self.layers[-1].to(device=device, dtype=dtype)
                 quantize_transformer(self.layers[-1])
 
-
     def _init_streaming_state(self, batch_size: int) -> _TransformerState:
         device = next(self.parameters()).device
         return _TransformerState(offset=torch.zeros(1, device=device, dtype=torch.long))
@@ -780,14 +780,16 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         for i, layer in enumerate(self.layers):
             if self.checkpointing:
                 x = torch_checkpoint(layer, x, *args, use_reentrant=False,
-                                    determinism_check='none', preserve_rng_state=False, **kwargs)
+                                     determinism_check='none',
+                                     preserve_rng_state=False,
+                                     **kwargs)
             else:
                 x = layer(x, *args, **kwargs)
-
 
         if state is not None:
             state.offset.add_(T)
         return x.to(dtype_input)
+
 
 class ProjectedTransformer(StreamingContainer):
     """Transformer with optional projections of the input and output to different dimensions when needed.
