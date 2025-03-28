@@ -3,7 +3,6 @@ import typing as tp
 import torch
 from torch import nn
 
-from ..utils import quantize
 from ..modules.transformer import create_norm_fn
 
 
@@ -98,7 +97,7 @@ class ScaledEmbedding(nn.Embedding):
             y = self.norm(y)
         y = torch.where(is_zero[..., None], zero, y)
         if self.low_rank is not None:
-            y = quantize.linear(self.low_rank, y)
+            y = self.low_rank(y)
         return y
 
     def make_optim_group(self) -> dict:

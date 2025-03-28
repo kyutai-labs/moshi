@@ -177,6 +177,7 @@ class CheckpointInfo:
             raw_config = None
             model_type = 'moshi'
             lm_gen_config = {}
+            lora_name = None
         else:
             raw_config = json.loads(Path(config_path).read_text())
             lm_config = dict(raw_config)
@@ -184,7 +185,6 @@ class CheckpointInfo:
             mimi_name = lm_config.pop('mimi_name', MIMI_NAME)
             tokenizer_name = lm_config.pop('tokenizer_name', TEXT_TOKENIZER_NAME)
             lora_name = lm_config.pop('lora_name', None)
-            lora = lm_config.pop('lora', False)
             model_type = lm_config.pop('model_type', 'moshi')
             lm_gen_config = lm_config.pop('lm_gen_config', {})
 
@@ -203,9 +203,9 @@ class CheckpointInfo:
         else:
             tokenizer_final = hf_get(tokenizer)
 
-        if lora_weights is None and lora:
+        if lora_weights is None and lora_name:
             lora_weights_final = hf_get(lora_name, hf_repo)
-        elif lora:
+        elif lora_weights is not None:
             lora_weights_final = hf_get(lora_weights)
         else:
             lora_weights_final = None
@@ -272,7 +272,7 @@ def get_mimi(filename: str | Path,
     ).to(device=device)
     model.eval()
     if _is_safetensors(filename):
-        load_model(model, filename, device=device)
+        load_model(model, filename, device=str(device))
     else:
         pkg = torch.load(filename, "cpu")
         model.load_state_dict(pkg["model"])
@@ -290,6 +290,8 @@ def get_moshi_lm(filename: str | Path | None,
 
     if lm_kwargs is None:
         lm_kwargs = _lm_kwargs
+    assert lm_kwargs is not None
+
     if "conditioners" in lm_kwargs:
         lm_kwargs["condition_provider"] = get_conditioner_provider(lm_kwargs["dim"], device, lm_kwargs)
         del lm_kwargs["conditioners"]
@@ -297,6 +299,8 @@ def get_moshi_lm(filename: str | Path | None,
         lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
 
     lm_kwargs = lm_kwargs | lm_kwargs_overrides
+    assert lm_kwargs is not None
+
     # deprecated params.
     lm_kwargs.pop('depformer_causal', None)
     lora_rank = lm_kwargs.pop('lora_rank', 128)
@@ -307,30 +311,22 @@ def get_moshi_lm(filename: str | Path | None,
         device=device,
         dtype=dtype,
         **lm_kwargs)
-    model.eval()
 
-    if filename is None:
-        return model
-
-    if _is_safetensors(filename):
-        load_model(model, filename, device=device)
-    else:
-        pkg = torch.load(
-            filename,
-            "cpu",
-        )
-        model.load_state_dict(pkg["fsdp_best_state"]["model"])
+    if filename is not None:
+        if _is_safetensors(filename):
+            load_model(model, filename, device=str(device))
+        else:
+            pkg = torch.load(filename, "cpu",)
+            model.load_state_dict(pkg["fsdp_best_state"]["model"])
 
     if lora:
-        return get_lora_moshi(model=model,
-                              lora_rank=lora_rank,
-                              lora_scaling=lora_scaling,
-                              lora_weights=lora_weights,
-                              device=device,
-                              dtype=dtype,
-                              fuse_params=fuse_lora)
+        model = get_lora_moshi(model=model, lora_rank=lora_rank, lora_scaling=lora_scaling,
+                               lora_weights=lora_weights, device=device, dtype=dtype,
+                               fuse_params=fuse_lora)
     else:
-        return model
+        assert lora_weights is None, "`lora` is False, but received some lora_weights to load."
+    model.eval()
+    return model
 
 
 def get_conditioner(output_dim: int, device: torch.device | str, conditioner_cfg: dict) -> BaseConditioner:
@@ -367,19 +363,17 @@ def get_lora_moshi(model: LMModel,
                    lora_weights: str | Path | None,
                    lora_rank: int,
                    lora_scaling: float,
-                   dtype: torch.dtype | str = torch.bfloat16,
+                   dtype: torch.dtype = torch.bfloat16,
                    device: torch.device | str = 'cpu',
                    fuse_params: bool = True) -> LMModel:
 
-    assert _is_safetensors(lora_weights), "LoRA weights must be a safetensors file."
     replace_all_linear_with_lora(model, lora_rank, lora_scaling)
-    lora_state_dict = load_file(lora_weights, device=device)
+    if lora_weights is not None:
+        assert _is_safetensors(lora_weights), "LoRA weights must be a safetensors file."
+        lora_state_dict = load_file(lora_weights, device=str(device))
 
-    model.load_state_dict(lora_state_dict, strict=False)
-    model = model.to(dtype=dtype, device=device)
-    if fuse_params:
-        replace_lora_with_linear(model)
-
-    model.eval()
-
+        model.load_state_dict(lora_state_dict, strict=False)
+        model = model.to(dtype=dtype, device=device)
+        if fuse_params:
+            replace_lora_with_linear(model)
     return model

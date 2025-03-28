@@ -2,20 +2,6 @@ from typing import NamedTuple
 
 import torch
 import torch.nn as nn
-from dataclasses import dataclass
-from simple_parsing.helpers import Serializable
-
-
-@dataclass
-class LoraArgs(Serializable):
-    enable: bool = False
-    rank: int = 64
-    scaling: float = 2.0
-
-    def __post_init__(self) -> None:
-        if self.enable:
-            assert self.rank > 0
-            assert self.scaling > 0.0
 
 
 def replace_all_linear_with_lora(module, rank: int, scaling: float):
