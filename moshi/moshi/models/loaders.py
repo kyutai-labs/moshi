@@ -325,7 +325,7 @@ def get_moshi_lm(filename: str | Path | None,
         assert not lm_kwargs.get('quantize'), "LoRA and quantization are incompatible for now."
         model = get_lora_moshi(model=model, lora_rank=lora_rank, lora_scaling=lora_scaling,
                                lora_weights=lora_weights, device=device, dtype=dtype,
-                               fuse_params=fuse_lora)
+                               fuse_lora=fuse_lora)
     else:
         assert lora_weights is None, "`lora` is False, but received some lora_weights to load."
     model.eval()
@@ -368,7 +368,7 @@ def get_lora_moshi(model: LMModel,
                    lora_scaling: float,
                    dtype: torch.dtype = torch.bfloat16,
                    device: torch.device | str = 'cpu',
-                   fuse_params: bool = True) -> LMModel:
+                   fuse_lora: bool = True) -> LMModel:
 
     replace_all_linear_with_lora(model, lora_rank, lora_scaling)
     if lora_weights is not None:
@@ -379,6 +379,6 @@ def get_lora_moshi(model: LMModel,
         if res.unexpected_keys:
             raise RuntimeError(f"unexpected_keys in the lora weights: {res.unexpected_keys}")
         model = model.to(dtype=dtype, device=device)
-        if fuse_params:
+        if fuse_lora:
             replace_lora_with_linear(model)
     return model

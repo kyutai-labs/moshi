@@ -35,7 +35,7 @@ def main():
     print("Downloading base model.")
     info = loaders.CheckpointInfo.from_hf_repo(args.hf_repo)
     print("Creating model.")
-    model = info.get_moshi(device='cuda')
+    model = info.get_moshi(fuse_lora=True, device='cuda')
     print("Quantizing model.")
     replace_linear_with_qlinear(model)
 
