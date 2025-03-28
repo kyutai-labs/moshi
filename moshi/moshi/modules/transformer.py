@@ -379,14 +379,15 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         # _scb suffix is for quantized data.
         for suffix in ['', '_scb']:
             for source, target in mappings.items():
-                this_name = prefix + source + suffix
-                if this_name in state_dict:
-                    weight = state_dict[this_name]
+                this_source = prefix + source + suffix
+                if this_source in state_dict:
+                    weight = state_dict[this_source]
                     _, *OD = weight.shape
                     weight = weight.view(mult, -1, *OD)
                     for i in range(mult):
-                        state_dict[prefix + target.format(i=i) + suffix] = weight[i].clone()
-                    state_dict.pop(this_name)
+                        this_target = prefix + target.format(i=i) + suffix
+                        state_dict[this_target] = weight[i].clone()
+                    state_dict.pop(this_source)
 
     def _init_streaming_state(self, batch_size: int) -> _MHAState:
         if self.context is None:

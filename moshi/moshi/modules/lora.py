@@ -12,7 +12,9 @@ def replace_all_linear_with_lora(module, rank: int, scaling: float):
             setattr(module, name, LoRALinear(child.in_features,
                                              child.out_features,
                                              rank,
-                                             scaling))
+                                             scaling,
+                                             device=child.weight.device,
+                                             dtype=child.weight.dtype))
         else:
             replace_all_linear_with_lora(child, rank, scaling)
 
@@ -26,7 +28,9 @@ def replace_lora_with_linear(module):
                 child.scaling * (child.lora_B.weight @ child.lora_A.weight)
             # Create a standard Linear layer with the same in/out features
             new_linear = nn.Linear(child.frozen_W.in_features,
-                                   child.frozen_W.out_features, bias=False)
+                                   child.frozen_W.out_features, bias=False,
+                                   device=merged_weight.device,
+                                   dtype=merged_weight.dtype)
             new_linear.weight.data = merged_weight  # Transfer merged weights
             setattr(module, name, new_linear)  # Replace the module
         else:
