@@ -303,8 +303,10 @@ def get_moshi_lm(filename: str | Path | None,
 
     # deprecated params.
     lm_kwargs.pop('depformer_causal', None)
-    lora_rank = lm_kwargs.pop('lora_rank', 128)
+
+    # lora params.
     lora = lm_kwargs.pop('lora', False)
+    lora_rank = lm_kwargs.pop('lora_rank', 128)
     lora_scaling = lm_kwargs.pop('lora_scaling', 2.0)
 
     model = LMModel(
@@ -320,6 +322,7 @@ def get_moshi_lm(filename: str | Path | None,
             model.load_state_dict(pkg["fsdp_best_state"]["model"])
 
     if lora:
+        assert not lm_kwargs.get('quantize'), "LoRA and quantization are incompatible for now."
         model = get_lora_moshi(model=model, lora_rank=lora_rank, lora_scaling=lora_scaling,
                                lora_weights=lora_weights, device=device, dtype=dtype,
                                fuse_params=fuse_lora)

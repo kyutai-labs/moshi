@@ -91,6 +91,7 @@ class LoRALinear(nn.Module):
             # empty missing keys in place
             incompatible_keys.missing_keys[:] = []  # type: ignore
 
+        self.register_load_state_dict_pre_hook(LoRALinear._load_hook)
         self.register_load_state_dict_post_hook(ignore_missing_keys)
 
     def merge_weight(self):
@@ -103,20 +104,12 @@ class LoRALinear(nn.Module):
             weight += self.frozen_W.weight
         return weight
 
-    def _load_from_state_dict(
-        self,
-        state_dict,
-        prefix,
-        *_
-    ):
+    @staticmethod
+    def _load_hook(module, state_dict, prefix, *_):
         key_name = prefix + "weight"
-
-        # full checkpoint
         if key_name in state_dict:
-            w_ref = state_dict[key_name]
-
-            # load frozen weights
-            self.frozen_W.load_state_dict({"weight": w_ref}, assign=True)
+            w_ref = state_dict.pop(key_name)
+            state_dict[prefix + 'frozen_W.weight'] = w_ref
 
     def forward(self, x: torch.Tensor):
         lora = self.lora_B(self.lora_A(x))
