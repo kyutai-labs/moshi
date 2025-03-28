@@ -286,7 +286,7 @@ def get_moshi_lm(filename: str | Path | None,
                  dtype: torch.dtype = torch.bfloat16,
                  lora_weights: str | Path | None = None,
                  fuse_lora: bool = False,
-                 lm_kwargs_overrides={'gradient_checkpointing': False}) -> LMModel:
+                 lm_kwargs_overrides={}) -> LMModel:
 
     if lm_kwargs is None:
         lm_kwargs = _lm_kwargs
