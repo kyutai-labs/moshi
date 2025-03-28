@@ -375,7 +375,9 @@ def get_lora_moshi(model: LMModel,
         assert _is_safetensors(lora_weights), "LoRA weights must be a safetensors file."
         lora_state_dict = load_file(lora_weights, device=str(device))
 
-        model.load_state_dict(lora_state_dict, strict=False)
+        res = model.load_state_dict(lora_state_dict, strict=False)
+        if res.unexpected_keys:
+            raise RuntimeError(f"unexpected_keys in the lora weights: {res.unexpected_keys}")
         model = model.to(dtype=dtype, device=device)
         if fuse_params:
             replace_lora_with_linear(model)

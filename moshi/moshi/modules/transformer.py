@@ -365,27 +365,28 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
     @staticmethod
     def _load_hook(module, state_dict, prefix, *_):
-        in_key_name = prefix + 'in_proj_weight'
-        out_key_name = prefix + 'out_proj.weight'
+        mappings = {
+            'in_proj_weight': 'in_projs.{i}.weight',
+            'in_proj.weight': 'in_projs.{i}.weight',
+            'in_proj.lora_A.weight': 'in_projs.{i}.lora_A.weight',
+            'in_proj.lora_B.weight': 'in_projs.{i}.lora_B.weight',
+            'out_proj.weight': 'out_projs.{i}.weight',
+            'out_proj.lora_A.weight': 'out_projs.{i}.lora_A.weight',
+            'out_proj.lora_B.weight': 'out_projs.{i}.lora_B.weight',
+        }
 
+        mult = module.mult
+        # _scb suffix is for quantized data.
         for suffix in ['', '_scb']:
-            # _scb suffix is for quantized data.
-            this_name = in_key_name + suffix
-            if this_name in state_dict.keys():
-                in_weight = state_dict[this_name]
-                _, *OD = in_weight.shape
-                in_weight = in_weight.view(module.mult, -1, *OD)
-                for i in range(module.mult):
-                    state_dict[prefix + f'in_projs.{i}.weight' + suffix] = in_weight[i]
-                state_dict.pop(this_name)
-            this_name = out_key_name + suffix
-            if this_name in state_dict.keys():
-                out_weight = state_dict[this_name]
-                _, *OD = out_weight.shape
-                out_weight = out_weight.view(module.mult, -1, *OD)
-                for i in range(module.mult):
-                    state_dict[prefix + f'out_projs.{i}.weight' + suffix] = out_weight[i]
-                state_dict.pop(this_name)
+            for source, target in mappings.items():
+                this_name = prefix + source + suffix
+                if this_name in state_dict:
+                    weight = state_dict[this_name]
+                    _, *OD = weight.shape
+                    weight = weight.view(mult, -1, *OD)
+                    for i in range(mult):
+                        state_dict[prefix + target.format(i=i) + suffix] = weight[i].clone()
+                    state_dict.pop(this_name)
 
     def _init_streaming_state(self, batch_size: int) -> _MHAState:
         if self.context is None:
