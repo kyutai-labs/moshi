@@ -13,7 +13,7 @@ from huggingface_hub import HfApi, hf_hub_download
 from safetensors.torch import save_file
 
 from moshi.models import loaders
-from moshi.modules.transformer import quantize_transformer
+from moshi.utils.quantize import replace_linear_with_qlinear
 
 
 def get_api():
@@ -35,9 +35,9 @@ def main():
     print("Downloading base model.")
     info = loaders.CheckpointInfo.from_hf_repo(args.hf_repo)
     print("Creating model.")
-    model = info.get_moshi(device='cuda')
+    model = info.get_moshi(fuse_lora=True, device='cuda')
     print("Quantizing model.")
-    quantize_transformer(model)
+    replace_linear_with_qlinear(model)
 
     if args.new_hf_repo is None:
         new_repo = repo.rsplit('-', 1)[0] + '-q8'

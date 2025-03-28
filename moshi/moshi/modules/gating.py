@@ -8,10 +8,6 @@ from torch import nn
 from torch.nn import functional as F
 
 from ..utils.compile import torch_compile_lazy, no_compile
-from ..utils import quantize
-from ..modules.lora import LoRALinear
-
-# Does not work in full_finetuning mode
 
 
 @torch_compile_lazy
@@ -26,7 +22,7 @@ def gating_forward_kernel(
     return x
 
 
-def gating_forward_lora_kernel(
+def gating_forward_generic(
     linear_in: nn.Module,
     linear_out: nn.Module,
     activation,
@@ -69,31 +65,21 @@ class ActivationGating(nn.Module):
         self.activation = activation
 
     def forward(self, x: torch.Tensor):
-        if quantize.is_quantized(self.linear_in):
-            assert quantize.is_quantized(self.linear_out)
-            x = quantize.linear(self.linear_in, x)
-            B, T, _ = x.shape
-            x = x.view(B, T, 2, -1)
-            x = self.activation(x[..., 0, :]) * x[..., 1, :]
-            x = quantize.linear(self.linear_out, x)
-            return x
-
-        if isinstance(self.linear_in, LoRALinear):
-            assert isinstance(self.linear_out, LoRALinear), 'LoRA layers should be used together'
-            return gating_forward_lora_kernel(
-                self.linear_in,
-                self.linear_out,
-                self.activation,
-                x
-            )
-        else:
-            assert not isinstance(self.linear_out, LoRALinear), 'LoRA layers should be used together'
+        if isinstance(self.linear_in, nn.Linear):
+            assert isinstance(self.linear_out, nn.Linear)
             with ExitStack() as stack:
                 if self.training:
                     stack.enter_context(no_compile())
                 return gating_forward_kernel(
                     self.linear_in.weight, self.linear_out.weight, self.activation, x
                 )
+        else:
+            return gating_forward_generic(
+                self.linear_in,
+                self.linear_out,
+                self.activation,
+                x
+            )
 
 
 def _get_activation(name: str):
@@ -120,7 +106,7 @@ def make_gating(
     name: str, dim: int, dim_feedforward: int, **factory_kwargs
 ) -> nn.Module:
     gating = _make_gating(name, dim, dim_feedforward, **factory_kwargs)
-    if not isinstance(gating.linear_in, LoRALinear):
+    if isinstance(gating.linear_in, nn.Linear):
         max_params = 2 * dim * dim_feedforward
         params = sum(p.numel() for p in gating.parameters())
         assert (

@@ -18,13 +18,9 @@ from torch import nn
 from ..conditioners import ConditionProvider, ConditionFuser, ConditionTensors
 from ..utils.sampling import sample_token
 from ..utils.compile import CUDAGraphed
-from ..utils import quantize
+from ..utils.quantize import replace_linear_with_qlinear
 from ..modules.streaming import StreamingContainer, StreamingModule, State
-from ..modules.transformer import (
-    StreamingTransformer,
-    quantize_transformer,
-    create_norm_fn,
-)
+from ..modules.transformer import StreamingTransformer, create_norm_fn
 from .lm_utils import (_delay_sequence,
                        _undelay_sequence,
                        _init_layer,
@@ -205,7 +201,7 @@ class LMModel(StreamingContainer):
         self.to(device=device, dtype=dtype)
         self._init_weights()
         if quantize:
-            quantize_transformer(self)
+            replace_linear_with_qlinear(self)
 
     @property
     def initial_token_id(self) -> int:
@@ -353,7 +349,7 @@ class LMModel(StreamingContainer):
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
         assert isinstance(transformer_out, torch.Tensor)
-        text_logits = quantize.linear(self.text_linear, transformer_out)
+        text_logits = self.text_linear(transformer_out)
         text_logits = text_logits[:, None]
         return transformer_out, text_logits
 
@@ -373,9 +369,9 @@ class LMModel(StreamingContainer):
                 linear_index = cb_index
                 if self.depformer_weights_per_step_schedule is not None:
                     linear_index = self.depformer_weights_per_step_schedule[cb_index]
-                transformer_in = quantize.linear(self.depformer_in[linear_index], transformer_out)
+                transformer_in = self.depformer_in[linear_index](transformer_out)
             else:
-                transformer_in = quantize.linear(self.depformer_in[0], transformer_out)
+                transformer_in = self.depformer_in[0](transformer_out)
             if cb_index == 0:
                 token_in = self.depformer_text_emb(sequence[:, 0])
             else:
@@ -387,7 +383,7 @@ class LMModel(StreamingContainer):
         depformer_output = self.depformer(depformer_input)
         all_logits = []
         for cb_index in range(Ka):
-            logits = quantize.linear(self.linears[cb_index], depformer_output[:, cb_index])
+            logits = self.linears[cb_index](depformer_output[:, cb_index])
             all_logits.append(logits.view(B, T, -1))
         logits = torch.stack(all_logits, 1)
         assert logits.dim() == 4, logits.shape  # [B, Ka, T, card]
@@ -415,9 +411,9 @@ class LMModel(StreamingContainer):
             in_index = depformer_cb_index
             if self.depformer_weights_per_step_schedule is not None:
                 in_index = self.depformer_weights_per_step_schedule[in_index]
-            depformer_input = quantize.linear(self.depformer_in[in_index], depformer_input)
+            depformer_input = self.depformer_in[in_index](depformer_input)
         else:
-            depformer_input = quantize.linear(self.depformer_in[0], depformer_input)
+            depformer_input = self.depformer_in[0](depformer_input)
         if depformer_cb_index == 0:
             last_token_input = self.depformer_text_emb(sequence[:, 0])
         else:
@@ -430,7 +426,7 @@ class LMModel(StreamingContainer):
         # depformer_input is [B, 1, depformer_dim].
         # The streaming state of the depformer ensures that the proper layer is run.
         dep_output = self.depformer(depformer_input)
-        logits = quantize.linear(self.linears[depformer_cb_index], dep_output)
+        logits = self.linears[depformer_cb_index](dep_output)
         logits = logits[:, None]
         assert logits.dim() == 4, logits.shape  # [B, Ka, S, card]
         return logits
