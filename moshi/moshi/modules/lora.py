@@ -9,12 +9,10 @@ def replace_all_linear_with_lora(module, rank: int, scaling: float):
 
     for name, child in module.named_children():
         if isinstance(child, nn.Linear):
-            setattr(module, name, LoRALinear(child.in_features,
-                                             child.out_features,
-                                             rank,
-                                             scaling,
-                                             device=child.weight.device,
-                                             dtype=child.weight.dtype))
+            lora = LoRALinear(child.in_features, child.out_features,
+                              rank, scaling, device=child.weight.device, dtype=child.weight.dtype)
+            lora.frozen_W.weight[:] = child.weight.detach()
+            setattr(module, name, lora)
         else:
             replace_all_linear_with_lora(child, rank, scaling)
 
