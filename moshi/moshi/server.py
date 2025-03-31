@@ -71,7 +71,8 @@ class ServerState:
                 if tokens is None:
                     continue
                 _ = self.mimi.decode(tokens[:, 1:])
-        torch.cuda.synchronize()
+        if "cuda" in self.device.lower():
+            torch.cuda.synchronize()
 
     async def handle_chat(self, request):
         ws = web.WebSocketResponse()
