@@ -1,5 +1,3 @@
-from typing import NamedTuple
-
 import torch
 import torch.nn as nn
 
@@ -96,13 +94,7 @@ class LoRALinear(nn.Module):
                                   device=device,
                                   dtype=dtype)
 
-        # make sure no LoRA weights are marked as "missing" in load_state_dict
-        def ignore_missing_keys(m: nn.Module, incompatible_keys: NamedTuple):
-            # empty missing keys in place
-            incompatible_keys.missing_keys[:] = []  # type: ignore
-
-        self.register_load_state_dict_pre_hook(LoRALinear._load_hook)
-        self.register_load_state_dict_post_hook(ignore_missing_keys)
+        self._register_load_state_dict_pre_hook(LoRALinear._load_hook, with_module=True)
 
     def merge_weight(self):
         with torch.no_grad():
