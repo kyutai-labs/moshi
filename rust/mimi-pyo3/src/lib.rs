@@ -83,6 +83,7 @@ fn mimi_cfg(num_codebooks: usize, max_seq_len: Option<usize>) -> mimi::Config {
         kv_repeat: 1,
         conv_layout: true, // see builders.py
         cross_attention: None,
+        shared_cross_attn: true,
         max_seq_len: max_seq_len.unwrap_or(8192), // the transformer works at 25hz so this is ~5 mins.
     };
     mimi::Config {

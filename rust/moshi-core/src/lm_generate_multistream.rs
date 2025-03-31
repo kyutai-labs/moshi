@@ -77,6 +77,7 @@ pub struct State {
     // For repetition penalty, we provide the context len (in text tokens) and the penalty.
     repetition_penalty: Option<(usize, f32)>,
     forced_audio_tokens: crate::lm::ForcedAudioTokens,
+    user_rating: u32,
     cfg_alpha: Option<f64>,
     config: Config,
 }
@@ -113,6 +114,7 @@ impl State {
             pad_mult,
             repetition_penalty,
             forced_audio_tokens,
+            user_rating: 0, // 0 indicates no ratings have been submitted from the front
             cfg_alpha,
             config,
         }
@@ -130,10 +132,17 @@ impl State {
         &self.config
     }
 
+    pub fn user_rating(&self) -> u32 {
+        self.user_rating
+    }
+    pub fn set_user_rating(&mut self, grade: u32) {
+        self.user_rating = grade
+    }
+
     fn apply_repetition_penalty(&self, logits: Tensor) -> candle::Result<Tensor> {
         let logits = match self.repetition_penalty {
             None => logits,
-            Some((_, penalty)) if penalty == 1. => logits,
+            Some((_, 1.)) => logits,
             Some((context_size, penalty)) => {
                 let device = logits.device();
                 let mut logits = logits.to_dtype(candle::DType::F32)?.to_vec1::<f32>()?;

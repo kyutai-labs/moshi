@@ -5,6 +5,7 @@
 import argparse
 import asyncio
 from dataclasses import dataclass
+import inspect
 import random
 import os
 from pathlib import Path
@@ -277,7 +278,10 @@ def main():
 
     log("info", f"Access the Web UI directly at {protocol}://{args.host}:{args.port}")
     if setup_tunnel is not None:
-        tunnel = setup_tunnel('localhost', args.port, tunnel_token, None)
+        tunnel_kwargs = {}
+        if "share_server_tls_certificate" in inspect.signature(setup_tunnel).parameters:
+            tunnel_kwargs["share_server_tls_certificate"] = None
+        tunnel = setup_tunnel('localhost', args.port, tunnel_token, None, **tunnel_kwargs)
         log("info", f"Tunnel started, if executing on a remote GPU, you can use {tunnel}.")
         log("info", "Note that this tunnel goes through the US and you might experience high latency in Europe.")
     web.run_app(app, port=args.port, ssl_context=ssl_context)

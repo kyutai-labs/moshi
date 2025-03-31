@@ -16,12 +16,60 @@ repository = "https://github.com/kyutai-labs/moshi"
 keywords = ["machine-learning", "audio"]
 categories = ["science"]
 
-
 [workspace.dependencies]
-candle = { version = "0.8.2", package = "candle-core" }
-candle-nn = "0.8.2"
-candle-transformers = "0.8.2"
-candle-flash-attn = "0.8.2"
+anyhow = "1"
+axum = { version = "0.7.3", features = ["ws"] }
+axum-server = { version = "0.6", features = ["tls-rustls"] }
+base64ct = { version = "1.6.0", features = ["alloc"] }
+bincode = "1.3.3"
+byteorder = "1.5.0"
+candle = { version = "0.8.3", package = "candle-core" }
+candle-flash-attn = "0.8.3"
+candle-nn = "0.8.3"
+candle-transformers = "0.8.3"
+clap = { version = "4.4.12", features = ["derive"] }
+color-eyre = "0.6.2"
+cpal = "0.15.3"
+crossterm = { version = "0.27.0", features = ["event-stream"] }
+env_logger = "0.10.1"
+futures = "0.3.28"
+futures-util = "0.3.30"
+hf-hub = { version = "0.3.2", features = ["tokio"] }
+http = "1.1.0"
+lazy_static = "1.5.0"
+log = "0.4.20"
+moshi = { path = "./moshi-core", version = "0.5.2" }
+native-tls = "0.2.11"
+numpy = "0.23.0"
+ogg = { version = "0.9.1", features = ["async"] }
+opus = "0.3.0"
+pyo3 = "0.23.0"
+rand = { version = "0.8.5", features = ["getrandom"] }
+rand_chacha = "0.3.1"
+ratatui = "0.27.0"
+rayon = "1.8.1"
+rcgen = "0.13.1"
+regex = "1.10.3"
+rubato = "0.15.0"
+rustls = "0.23.5"
+sentencepiece = "0.11.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.115"
+sha3 = "0.10.8"
+symphonia = { version = "0.5.3", features = ["all"] }
+tokenizers = "0.15.2"
+tokio = { version = "1.35.1", features = ["full"] }
+tokio-rustls = "0.24.1"
+tokio-tungstenite = { version = "0.21.0", features = ["rustls", "native-tls"] }
+toml = "0.8.19"
+tower = "0.4.13"
+tower-http = { version = "0.5", features = ["full"] }
+tracing = "0.1.40"
+tracing-appender = "0.2.3"
+tracing-chrome = "0.7.2"
+tracing-subscriber = "0.3.18"
+tui-logger = "0.11.2"
+vergen = { version = "8.3.1", features = ["build", "cargo", "git", "gitcl", "rustc", "si"] }
 
 [profile.release]
 debug = true
