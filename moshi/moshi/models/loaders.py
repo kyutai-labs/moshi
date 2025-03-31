@@ -147,7 +147,6 @@ class CheckpointInfo:
     raw_config: dict | None = None
     model_type: str = "moshi"
     lora_weights: Path | None = None
-    load_weight: bool = True
     lm_gen_config: dict = field(default_factory=dict)
 
     @staticmethod
@@ -240,15 +239,15 @@ class CheckpointInfo:
         self,
         device: torch.device | str = "cpu",
         dtype: torch.dtype = torch.bfloat16,
+        load_weight: bool = True
         **kwargs,
     ) -> LMModel:
         model = get_moshi_lm(
-            self.moshi_weights if self.load_weight else None,
+            self.moshi_weights if load_weight else None,
             lm_kwargs=self.lm_config,
             device=device,
             dtype=dtype,
             lora_weights=self.lora_weights,
-            meta_init=self.load_weight,
             **kwargs,
         )
         if self.model_type == "hibiki":
