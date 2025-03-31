@@ -248,6 +248,7 @@ class CheckpointInfo:
             device=device,
             dtype=dtype,
             lora_weights=self.lora_weights,
+            meta_init=self.load_weight,
             **kwargs,
         )
         if self.model_type == "hibiki":
@@ -310,6 +311,7 @@ def get_moshi_lm(
     dtype: torch.dtype = torch.bfloat16,
     lora_weights: str | Path | None = None,
     fuse_lora: bool = False,
+    meta_init: bool = True,
     lm_kwargs_overrides={},
 ) -> LMModel:
     if lm_kwargs is None:
@@ -336,17 +338,28 @@ def get_moshi_lm(
     lora_rank = lm_kwargs.pop("lora_rank", 128)
     lora_scaling = lm_kwargs.pop("lora_scaling", 2.0)
 
-    model = LMModel(device=device, dtype=dtype, **lm_kwargs)
+    init_device = device
+    if meta_init:
+        assert filename is not None
+        init_device = torch.device('meta')
+
+    model = LMModel(
+        device=init_device,
+        dtype=dtype,
+        **lm_kwargs)
 
     if filename is not None:
         if _is_safetensors(filename):
-            load_model(model, filename, device=str(device))
+            state = load_file(filename, device=str(device))
+            for key, value in state.items():
+                if value.dtype.is_floating_point:
+                    value = value.to(dtype=dtype)
+                state[key] = value
+            model.load_state_dict(state, assign=meta_init)
+
         else:
-            pkg = torch.load(
-                filename,
-                "cpu",
-            )
-            model.load_state_dict(pkg["fsdp_best_state"]["model"])
+            pkg = torch.load(filename, "cpu",)
+            model.load_state_dict(pkg["fsdp_best_state"]["model"], assign=meta_init)
 
     if lora:
         assert not lm_kwargs.get("quantize"), (
@@ -418,7 +431,7 @@ def get_lora_moshi(
         assert _is_safetensors(lora_weights), "LoRA weights must be a safetensors file."
         lora_state_dict = load_file(lora_weights, device=str(device))
 
-        res = model.load_state_dict(lora_state_dict, strict=False)
+        res = model.load_state_dict(lora_state_dict, strict=False, assign=True)
         if res.unexpected_keys:
             raise RuntimeError(
                 f"unexpected_keys in the lora weights: {res.unexpected_keys}"
