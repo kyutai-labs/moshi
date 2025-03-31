@@ -386,7 +386,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                     weight = weight.view(mult, -1, *OD)
                     for i in range(mult):
                         this_target = prefix + target.format(i=i) + suffix
-                        state_dict[this_target] = weight[i].clone()
+                        state_dict[this_target] = weight[i]
                     state_dict.pop(this_source)
 
     def _init_streaming_state(self, batch_size: int) -> _MHAState:

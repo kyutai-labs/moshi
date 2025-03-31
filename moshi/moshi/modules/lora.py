@@ -4,17 +4,24 @@ import torch
 import torch.nn as nn
 
 
-def replace_all_linear_with_lora(module, rank: int, scaling: float):
+def replace_all_linear_with_lora(module, rank: int, scaling: float, device=None, dtype=None):
     """ Recursively replace all Linear layers with LoRALinear layers."""
-
     for name, child in module.named_children():
         if isinstance(child, nn.Linear):
+            if device is None:
+                this_device = child.weight.device
+            else:
+                this_device = device
+            if dtype is None:
+                this_dtype = child.weight.dtype
+            else:
+                this_dtype = dtype
             lora = LoRALinear(child.in_features, child.out_features,
-                              rank, scaling, device=child.weight.device, dtype=child.weight.dtype)
-            lora.frozen_W.weight.detach()[:] = child.weight.detach()
+                              rank, scaling, device=this_device, dtype=this_dtype)
+            lora.frozen_W = child
             setattr(module, name, lora)
         else:
-            replace_all_linear_with_lora(child, rank, scaling)
+            replace_all_linear_with_lora(child, rank, scaling, device=device, dtype=dtype)
 
 
 def replace_lora_with_linear(module):
@@ -27,9 +34,10 @@ def replace_lora_with_linear(module):
             # Create a standard Linear layer with the same in/out features
             new_linear = nn.Linear(child.frozen_W.in_features,
                                    child.frozen_W.out_features, bias=False,
-                                   device=merged_weight.device,
+                                   device=torch.device('meta'),
                                    dtype=merged_weight.dtype)
-            new_linear.weight.data = merged_weight  # Transfer merged weights
+            new_linear.weight = nn.Parameter(
+                merged_weight, requires_grad=merged_weight.requires_grad)  # Transfer merged weights
             setattr(module, name, new_linear)  # Replace the module
         else:
             replace_lora_with_linear(child)  # Recursively process submodules
