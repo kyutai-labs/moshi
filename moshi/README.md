@@ -1,5 +1,9 @@
 # Moshi - PyTorch
 
+<a target="_blank" href="https://colab.research.google.com/github//kyutai-labs/moshi/blob/main/moshi/demo_moshi.ipynb">
+  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
+</a>
+
 See the [top-level README.md][main_repo] for more information on Moshi.
 
 [Moshi][moshi] is a speech-text foundation model and full-duplex spoken dialogue framework.
