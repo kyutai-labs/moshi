@@ -361,7 +361,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             ]
         )
 
-        self.register_load_state_dict_pre_hook(StreamingMultiheadAttention._load_hook)
+        self._register_load_state_dict_pre_hook(StreamingMultiheadAttention._load_hook, with_module=True)
 
     @staticmethod
     def _load_hook(module, state_dict, prefix, *_):
