@@ -60,6 +60,20 @@ def _is_distributed() -> bool:
     return distributed.is_initialized() and distributed.get_world_size() > 1
 
 
+def _average_tensors(tensors: tp.Sequence[torch.Tensor]) -> None:
+    if not _is_distributed():
+        return
+    world_size = distributed.get_world_size()
+    handles = []
+    for tensor in tensors:
+        handle = distributed.all_reduce(
+            tensor.data, op=distributed.ReduceOp.SUM, async_op=True)
+        handles.append(handle)
+    for tensor, handle in zip(tensors, handles):
+        handle.wait()
+        tensor.data /= world_size
+
+
 def _run_kmeans(samples: torch.Tensor, num_clusters: int, num_iters: int = 50) -> tp.Tuple[torch.Tensor, torch.Tensor]:
     # Kmeans algorithm used to initialize the codebooks.
     dim = samples.shape[-1]
@@ -481,6 +495,11 @@ class ResidualVectorQuantization(nn.Module):
         if self.training:
             # Solving subtle bug with STE and RVQ: https://github.com/facebookresearch/encodec/issues/25
             quantized_out = x + (quantized_out - x).detach()
+            to_average = []
+            for layer in self.layers:
+                assert isinstance(layer, VectorQuantization)
+                to_average += [layer._codebook.cluster_usage, layer._codebook.embedding_sum]
+                _average_tensors(to_average)
 
         out_losses, out_codes = map(torch.stack, (all_losses, all_codes))
         return _VQForwardResult(quantized_out, out_codes, out_losses, all_metrics)

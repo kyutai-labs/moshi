@@ -29,9 +29,9 @@ class QLinear(nn.Module):
     def forward(self, x):
         import bitsandbytes as bnb  # type: ignore
         state = bnb.MatmulLtState()
-        state.CB = self.weight
+        state.CB = self.weight  # type: ignore
         assert isinstance(state.CB, torch.Tensor)
-        state.SCB = self.weight_scb
+        state.SCB = self.weight_scb  # type: ignore
         assert isinstance(state.SCB, torch.Tensor)
         if state.SCB.dtype != torch.float:
             raise RuntimeError(

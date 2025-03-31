@@ -290,6 +290,7 @@ def get_moshi_lm(filename: str | Path | None,
 
     if lm_kwargs is None:
         lm_kwargs = _lm_kwargs
+    lm_kwargs = dict(lm_kwargs)
     assert lm_kwargs is not None
 
     if "conditioners" in lm_kwargs:

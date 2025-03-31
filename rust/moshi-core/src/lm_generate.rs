@@ -2,53 +2,56 @@
 // This source code is licensed under the license found in the
 // LICENSE file in the root directory of this source tree.
 
-use candle::{IndexOp, Tensor};
+// The state struct in this module handles generation for a LM model:
+// - Apply the audio delays.
+// - Allow for teacher forcing of the audio/text tokens.
+// - Support "literal-zeros" tokens for both text and audio.
+// - Make no assumptions on the number of streams.
+// - TODO: Handle batch size > 1
+// - TODO: Support CFG.
+// - TODO: Use CPU based tensors for storing the tokens?
+
+use candle::{IndexOp, Result, Tensor};
 use candle_transformers::generation::LogitsProcessor;
 
-const UNGENERATED: u32 = u32::MAX;
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Token {
+    Set(u32),
+    Ungenerated,
+    LiteralZero,
+}
 
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct Config {
-    pub audio_codebooks: usize,
+    pub audio_delays: Vec<usize>,
     pub audio_vocab_size: usize,
-    pub acoustic_delay: usize,
-    pub text_bos_token: u32,
-    pub text_eos_token: u32,
     pub text_pad_token: u32,
+    pub text_eop_token: u32,
     pub text_start_token: u32,
 }
 
 impl Config {
-    pub fn v0_1() -> Self {
-        Self {
-            audio_codebooks: 8,
-            audio_vocab_size: 2049,
-            acoustic_delay: 2,
-            text_bos_token: 1,
-            text_eos_token: 2,
-            text_pad_token: 3,
-            text_start_token: 32000,
-        }
-    }
-
     pub fn audio_pad_token(&self) -> u32 {
         self.audio_vocab_size as u32 - 1
     }
 
     pub fn audio_codebooks(&self) -> usize {
-        self.audio_codebooks
+        self.audio_delays.len()
+    }
+
+    pub fn max_audio_delay(&self) -> usize {
+        self.audio_delays.iter().max().cloned().unwrap_or(0)
     }
 }
 
 pub struct State {
     model: crate::lm::LmModel,
-    audio_tokens: Vec<Vec<u32>>,
+    audio_tokens: Vec<Vec<Token>>,
+    text_tokens: Vec<Token>,
     audio_lp: LogitsProcessor,
     text_lp: LogitsProcessor,
     step_idx: usize,
-    forced_audio_tokens: crate::lm::ForcedAudioTokens,
     config: Config,
-    npads: i32,
 }
 
 impl State {
@@ -59,156 +62,109 @@ impl State {
         text_lp: LogitsProcessor,
         config: Config,
     ) -> Self {
-        let audio_tokens: Vec<Vec<u32>> =
-            vec![vec![UNGENERATED; config.audio_codebooks]; max_step_idx + config.acoustic_delay];
-        let forced_audio_tokens = crate::lm::ForcedAudioTokens::new(
-            config.audio_codebooks,
-            model.audio_pad_token(),
-            &[8, 8],
-        );
-        Self {
-            model,
-            audio_tokens,
-            audio_lp,
-            text_lp,
-            step_idx: 0,
-            npads: 0,
-            forced_audio_tokens,
-            config,
-        }
+        // TODO(laurent): handle a batch dimension.
+        let total_len = max_step_idx + config.max_audio_delay();
+        let audio_tokens = vec![vec![Token::Ungenerated; config.audio_codebooks()]; total_len];
+        let text_tokens = vec![Token::Ungenerated; total_len];
+        Self { model, audio_tokens, text_tokens, audio_lp, text_lp, step_idx: 0, config }
     }
 
-    pub fn audio_codebooks(&self) -> usize {
-        self.config.audio_codebooks
+    pub fn step_idx(&self) -> usize {
+        self.step_idx
     }
 
     pub fn audio_pad_token(&self) -> u32 {
         self.config.audio_pad_token()
     }
 
-    pub fn step_gen_no_text(&mut self, force_text_token: Option<u32>) -> candle::Result<u32> {
-        self.step(None, true, force_text_token)
+    pub fn config(&self) -> &Config {
+        &self.config
     }
 
-    pub fn step_gen(&mut self, prev_text_token: u32) -> candle::Result<u32> {
-        self.step(Some(prev_text_token), true, None)
-    }
-
-    pub fn step_text_prompt(&mut self, id: u32) -> candle::Result<u32> {
-        self.step(Some(id), false, None)
-    }
-
-    pub fn step_audio_prompt_(
-        &mut self,
-        codes: &[u32],
-        text_token: Option<u32>,
-    ) -> candle::Result<u32> {
-        if codes.len() != self.audio_codebooks() {
-            candle::bail!("unexpected codes length {} {}", codes.len(), self.audio_codebooks())
-        }
-        self.audio_tokens[self.step_idx].copy_from_slice(codes);
-        let prev_text =
-            if self.step_idx == 0 { Some(self.config.text_start_token) } else { text_token };
-        self.step(prev_text, false, None)
-    }
-
-    pub fn step_audio_prompt(&mut self, codes: &[u32]) -> candle::Result<u32> {
-        self.step_audio_prompt_(codes, None)
-    }
-
-    pub fn step_audio_prompt_with_text(&mut self, codes: &[u32], text: u32) -> candle::Result<u32> {
-        self.step_audio_prompt_(codes, Some(text))
-    }
-
-    pub fn last_audio_tokens(&self) -> Option<Vec<u32>> {
-        if self.step_idx <= self.config.acoustic_delay {
-            None
-        } else {
-            // step_idx is in advance by 1 + there is a 2 token delay on audio tokens.
-            let audio_tokens = &self.audio_tokens[self.step_idx - self.config.acoustic_delay - 1];
-            if audio_tokens.iter().any(|v| *v as usize >= self.config.audio_vocab_size - 1) {
-                None
-            } else {
-                Some(audio_tokens.clone())
+    pub fn set_audio_tokens(&mut self, audio_tokens: &[Option<Token>]) -> Result<()> {
+        for (s, at) in self.audio_tokens[self.step_idx].iter_mut().zip(audio_tokens.iter()) {
+            if let Some(at) = at {
+                *s = *at
             }
         }
+        Ok(())
     }
 
-    pub fn audio_tokens(&self) -> Vec<Vec<u32>> {
-        let l = self.step_idx - self.config.acoustic_delay - 1;
-        self.audio_tokens[..l].to_vec()
-    }
-
-    // The acoustic tokens are written with a delay, so this can create "gaps" of UNGENERATED
-    // tokens in the case where we call `step_audio_prompt` *after* `step`.
-    fn step(
-        &mut self,
-        text_token: Option<u32>,
-        gen_audio: bool,
-        force_text_token: Option<u32>,
-    ) -> candle::Result<u32> {
-        let mut codes = Vec::with_capacity(self.audio_codebooks());
+    pub fn step(&mut self, conditions: Option<&crate::conditioner::Condition>) -> Result<()> {
         let dev = self.model.device();
-        for codebook in 0..self.audio_codebooks() {
-            let t = if codebook == 0 {
-                if self.step_idx == 0 {
-                    self.audio_pad_token()
-                } else {
-                    self.audio_tokens[self.step_idx - 1][0]
-                }
-            } else if self.step_idx <= self.config.acoustic_delay {
-                self.audio_pad_token()
+
+        let mut forced_audio_tokens = Vec::with_capacity(self.config.audio_codebooks());
+        for (codebook, &delay) in self.config.audio_delays.iter().enumerate() {
+            let forced_token = if self.step_idx < delay {
+                Some(self.audio_pad_token())
             } else {
-                self.audio_tokens[self.step_idx - self.config.acoustic_delay - 1][codebook]
+                match self.audio_tokens[self.step_idx - delay][codebook] {
+                    Token::Ungenerated | Token::LiteralZero => None,
+                    Token::Set(v) => Some(v),
+                }
             };
-            if t == UNGENERATED {
-                candle::bail!("internal error, ungenerated {}", self.step_idx)
-            }
-            let t = Tensor::new(&[t], dev)?.unsqueeze(0)?;
-            codes.push(Some(t))
+            forced_audio_tokens.push(forced_token);
         }
+
+        let mut codes = Vec::with_capacity(self.config.audio_codebooks());
+        for (codebook, &delay) in self.config.audio_delays.iter().enumerate() {
+            let t = if self.step_idx <= delay {
+                Some(self.audio_pad_token())
+            } else {
+                match self.audio_tokens[self.step_idx - delay - 1][codebook] {
+                    Token::LiteralZero => None,
+                    Token::Set(v) => Some(v),
+                    Token::Ungenerated => {
+                        candle::bail!("internal error, ungenerated {} {codebook}", self.step_idx)
+                    }
+                }
+            };
+            let t = match t {
+                None => None,
+                Some(t) => Some(Tensor::from_vec(vec![t; 1], (1, 1), dev)?),
+            };
+            codes.push(t)
+        }
+        let text_token = if self.step_idx == 0 {
+            Some(self.config.text_start_token)
+        } else {
+            match self.text_tokens[self.step_idx - 1] {
+                Token::LiteralZero => None,
+                Token::Set(t) => Some(t),
+                Token::Ungenerated => {
+                    candle::bail!("internal error, ungenerated {} text", self.step_idx)
+                }
+            }
+        };
         let text_token = match text_token {
             None => None,
-            Some(text_token) => Some(Tensor::from_vec(vec![text_token], (1, 1), dev)?),
+            Some(t) => Some(Tensor::from_vec(vec![t; 1], (1, 1), dev)?),
         };
-        let (text_logits, ys) = self.model.forward(text_token, codes)?;
-        let text_logits = text_logits.i((0, 0))?;
-        let text_token = match force_text_token {
-            None => self.text_lp.sample_f(&text_logits, |prs| {
-                prs[self.config.text_bos_token as usize] = 1e-9;
-                if self.npads > 40 {
-                    let mul = 2f32.powi(self.npads - 40);
-                    prs[self.config.text_eos_token as usize] *= mul;
+        let (text_logits, ys) = self.model.forward_cond(text_token, codes, conditions)?;
+        let text_token = match self.text_tokens[self.step_idx] {
+            Token::Ungenerated => {
+                let t = self.text_lp.sample(&text_logits.i((0, 0))?)?;
+                self.text_tokens[self.step_idx] = Token::Set(t);
+                Some(t)
+            }
+            Token::Set(t) => Some(t),
+            Token::LiteralZero => None,
+        };
+        let audio_tokens = self.model.depformer_sample(
+            &ys,
+            text_token,
+            &forced_audio_tokens,
+            &mut self.audio_lp,
+        )?;
+        if let Some(audio_tokens) = audio_tokens {
+            for (codebook, audio_token) in audio_tokens.into_iter().enumerate() {
+                let delay = self.config.audio_delays[codebook];
+                if self.step_idx < delay {
+                    continue;
                 }
-            })?,
-            Some(t) => t,
-        };
-        if text_token == self.config.text_pad_token {
-            self.npads += 1;
-        } else {
-            self.npads = 0;
-        }
-
-        let last_audio_tokens = if gen_audio {
-            self.model.depformer_sample(
-                &ys,
-                Some(text_token),
-                self.forced_audio_tokens.forced_tokens(self.step_idx),
-                &mut self.audio_lp,
-            )?
-        } else {
-            None
-        };
-        let audio_pad_token = self.audio_pad_token();
-        for c_idx in 0..self.audio_codebooks() {
-            let delay = if c_idx == 0 { 0 } else { self.config.acoustic_delay };
-            let pos = &mut self.audio_tokens[self.step_idx.saturating_sub(delay)][c_idx];
-            match last_audio_tokens.as_ref() {
-                Some(lat) => *pos = lat[c_idx],
-                None => {
-                    if *pos == UNGENERATED {
-                        *pos = audio_pad_token
-                    }
+                let pos = &mut self.audio_tokens[self.step_idx - delay][codebook];
+                if *pos == Token::Ungenerated {
+                    *pos = Token::Set(audio_token)
                 }
             }
         }
@@ -216,6 +172,41 @@ impl State {
         if self.step_idx >= self.audio_tokens.len() {
             candle::bail!("max step-idx reached")
         }
-        Ok(text_token)
+        Ok(())
+    }
+
+    pub fn last_text_token(&self) -> Result<Option<u32>> {
+        if self.step_idx == 0 {
+            Ok(None)
+        } else {
+            match self.text_tokens[self.step_idx - 1] {
+                Token::Set(t) => Ok(Some(t)),
+                Token::LiteralZero => Ok(None),
+                Token::Ungenerated => {
+                    candle::bail!("internal error, ungenerated step {}, text", self.step_idx)
+                }
+            }
+        }
+    }
+
+    pub fn last_audio_tokens(&self) -> Result<Option<Vec<u32>>> {
+        let max_audio_delay = self.config.max_audio_delay();
+        if self.step_idx <= max_audio_delay {
+            Ok(None)
+        } else {
+            let mut audio_tokens = vec![];
+            for (cb, audio_token) in
+                self.audio_tokens[self.step_idx - max_audio_delay - 1].iter().enumerate()
+            {
+                match audio_token {
+                    Token::LiteralZero => return Ok(None),
+                    Token::Set(s) => audio_tokens.push(*s),
+                    Token::Ungenerated => {
+                        candle::bail!("internal error, ungenerated step {}, cb {cb}", self.step_idx)
+                    }
+                }
+            }
+            Ok(Some(audio_tokens))
+        }
     }
 }
