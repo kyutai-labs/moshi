@@ -16,7 +16,6 @@ import torch
 from torch import nn
 
 from ..modules.transformer import create_sin_embedding
-from ..utils import quantize
 
 
 logger = logging.getLogger(__name__)
@@ -212,7 +211,7 @@ class BaseConditioner(nn.Module, tp.Generic[Prepared]):
             cond = torch.zeros(B, T, C, device=cond.device, dtype=cond.dtype)
             mask = torch.zeros_like(cond[..., 0], dtype=torch.bool)
 
-        cond = quantize.linear(self.output_proj, cond)
+        cond = self.output_proj(cond)
 
         maskf = mask.float()[..., None]
         if self.learnt_padding is not None:

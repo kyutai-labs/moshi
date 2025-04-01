@@ -15,98 +15,48 @@ import torch
 from torch import nn
 
 
-def linear(module: nn.Module, x: torch.Tensor, name='weight') -> torch.Tensor:
-    import bitsandbytes as bnb  # type: ignore
-    if is_quantized(module, name):
+class QLinear(nn.Module):
+    def __init__(self, linear: nn.Linear):
+        super().__init__()
+        from bitsandbytes import functional as bnbF  # type: ignore
+        weight = linear.weight
+        assert weight.data.dtype.is_floating_point
+        assert linear.bias is None
+        CB, SCB, _ = bnbF.int8_vectorwise_quant(weight.data.to(torch.float16))  # type: ignore
+        self.weight = nn.Parameter(CB, requires_grad=False)
+        self.weight_scb = nn.Parameter(SCB, requires_grad=False)
+
+    def forward(self, x):
+        import bitsandbytes as bnb  # type: ignore
         state = bnb.MatmulLtState()
-        state.CB = getattr(module, name)
+        state.CB = self.weight  # type: ignore
         assert isinstance(state.CB, torch.Tensor)
-        state.SCB = getattr(module, name + '_scb')
+        state.SCB = self.weight_scb  # type: ignore
         assert isinstance(state.SCB, torch.Tensor)
+        if state.SCB.dtype != torch.float:
+            raise RuntimeError(
+                "Expected `weight_scb` to have type float, but got bfloat16. "
+                "When using quantized models, care should be taken not to change the dtype of "
+                "the model once initialized.")
         assert state.SCB.dtype == torch.float, state.SCB.dtype
         state.has_fp16_weights = False
         y = bnb.matmul(x.half(), state.CB, state=state)
         assert isinstance(y, torch.Tensor)
         return y
-    else:
-        return nn.functional.linear(x, getattr(module, name))
 
 
-def multi_linear(num_steps: int, schedule: list[int] | None,
-                 module: nn.Module, x: torch.Tensor, offset: int, name='weight') -> torch.Tensor:
-    """Utility to apply a multi linear layer to the given input. A multi linear layer
-    applies a different set of weight for each time step.
-
-    Args:
-        num_steps (int): Number of possible time steps.
-        schedule (list[int] or None): schedule for weight sharing.
-        weight (torch.Tensor): Weight tensor, with shape `[num_linear * chout, chin]`.
-        x (torch.Tensor): Input tensor, with shape `[B, T, C]`.
-        offset (int): offset for the current time step, in particular for decoding, with
-            time steps provided one by one.
-    """
-    import bitsandbytes as bnb  # type: ignore
-    B, T, C = x.shape
-    ys: list[torch.Tensor] = []
-    if is_quantized(module, name):
-        weight = getattr(module, name)
-        weight_scb = getattr(module, name + '_scb')
-    else:
-        weight = getattr(module, name)
-        weight_scb = None
-    assert isinstance(weight, torch.Tensor)
-
-    num_linear = num_steps
-    if schedule is not None:
-        num_linear = max(schedule) + 1
-
-    chout, chin = weight.shape
-    weight = weight.view(num_linear, -1, chin)
-    if weight_scb is not None:
-        assert isinstance(weight, torch.Tensor)
-        assert weight_scb.shape == (chout,), (weight_scb, chout)
-        weight_scb = weight_scb.view(num_linear, -1)
-        assert weight_scb.dtype == torch.float, weight_scb.dtype
-
-    for t in range(T):
-        linear_index = t + offset
-        if schedule is not None:
-            linear_index = schedule[linear_index]
-        if weight_scb is None:
-            y = nn.functional.linear(x[:, t], weight[linear_index])
+def replace_linear_with_qlinear(module):
+    """Recursively replace all Linear layers with QLinear layers."""
+    for name, child in module.named_children():
+        if isinstance(child, nn.Linear):
+            setattr(module, name, QLinear(child))
+        elif isinstance(child, QLinear):
+            # Slight issue with the way we implement things: the scale param
+            # might get casted with the rest of the model to bfloat16, altough
+            # we most likely want to keep it as float. For the LM model we might call this function twice,
+            # first layer by layer to avoid to big of a memory usage, and second, at the end
+            # of the LM init, after all other modules are initialized and properly dtyped.
+            # In any case that should happen before loading the state dict to avoid a loss of precision.
+            child.float()
         else:
-            state = bnb.MatmulLtState()
-            CB = weight[linear_index]
-            state.CB = CB  # type: ignore
-            state.SCB = weight_scb[linear_index]
-            state.has_fp16_weights = False
-            y = bnb.matmul(x[:, t].half(), CB, state=state)
-            assert isinstance(y, torch.Tensor)
-        ys.append(y)
-    out = torch.stack(ys, 1)
-    return out
-
-
-def is_quantized(module: nn.Module, name: str = 'weight'):
-    return hasattr(module, name + '_scb')
-
-
-def quantize_param(module: nn.Module, name: str = 'weight') -> None:
-    from bitsandbytes import functional as bnbF  # type: ignore
-    if is_quantized(module, name):
-        # Due to model casting, the type of SCB might be wrong, althought
-        # that would only happen during the init. Let's recast it to float.
-        SCB = getattr(module, name + '_scb')
-        if SCB.dtype != torch.float:
-            setattr(module, name + '_scb', nn.Parameter(SCB.to(torch.float), requires_grad=False))
-        return
-    weight = getattr(module, name)
-    assert weight.data.dtype.is_floating_point
-    CB, SCB, _ = bnbF.int8_vectorwise_quant(weight.data.to(torch.float16))  # type: ignore
-    setattr(module, name, nn.Parameter(CB, requires_grad=False))
-    setattr(module, name + '_scb', nn.Parameter(SCB, requires_grad=False))
-
-
-def quantize_linear(linear: nn.Module) -> None:
-    assert linear.bias is None
-    quantize_param(linear)
+            replace_linear_with_qlinear(child)

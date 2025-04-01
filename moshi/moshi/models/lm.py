@@ -13,59 +13,31 @@ from dataclasses import dataclass, field
 from functools import partial
 import logging
 import typing as tp
-
 import torch
 from torch import nn
-
 from ..conditioners import ConditionProvider, ConditionFuser, ConditionTensors
 from ..utils.sampling import sample_token
 from ..utils.compile import CUDAGraphed
-from ..utils import quantize
+from ..utils.quantize import replace_linear_with_qlinear
 from ..modules.streaming import StreamingContainer, StreamingModule, State
-from ..modules.transformer import (
-    StreamingTransformer,
-    quantize_transformer,
-    create_norm_fn,
-)
+from ..modules.transformer import StreamingTransformer, create_norm_fn
+from .lm_utils import (_delay_sequence,
+                       _undelay_sequence,
+                       _init_layer,
+                       ScaledEmbedding)
 
 
 logger = logging.getLogger(__name__)
 
 
-class ScaledEmbedding(nn.Embedding):
-    """Boost learning rate for embeddings (with `scale`).
-
-    Args:
-        norm (bool): if True, uses a layer norm after the embedding.
-        zero_idx (int): special value indicating that the output should be exactly 0.
-        low_rank (int | None): if provided, uses low rank embedding with a linear layer to reach
-            the desired dimension. Quite efficient for reducing the number of weights for very large vocabs.
-    """
-
-    def __init__(self, num_embeddings: int, embedding_dim: int,
-                 *args, norm: bool = False, zero_idx: int = -1,
-                 low_rank: int | None = None, **kwargs):
-        super().__init__(num_embeddings, low_rank or embedding_dim, *args, **kwargs)
-        self.norm = None
-        if norm:
-            self.norm = create_norm_fn("layer_norm", self.embedding_dim)
-        assert zero_idx < 0, "Please use negative values for the zero_idx."
-        self.zero_idx = zero_idx
-        self.low_rank = None
-        if low_rank is not None:
-            self.low_rank = nn.Linear(low_rank, embedding_dim, bias=False)
-
-    def forward(self, input, *args, **kwargs):
-        is_zero = input == self.zero_idx
-        zero = torch.zeros(1, dtype=input.dtype, device=input.device)
-        input = input.clamp(min=0)
-        y = super().forward(input, *args, **kwargs)
-        if self.norm is not None:
-            y = self.norm(y)
-        y = torch.where(is_zero[..., None], zero, y)
-        if self.low_rank is not None:
-            y = quantize.linear(self.low_rank, y)
-        return y
+@dataclass
+class LMOutput:
+    # The logits are already re-aligned with the input codes
+    # hence no extra shift is required, e.g. when computing CE
+    logits: torch.Tensor  # [B, K, T, card]
+    mask: torch.Tensor  # [B, K, T]
+    text_logits: torch.Tensor  # [B, 1, T, text_card]
+    text_mask: torch.Tensor  # [B, 1, T]
 
 
 class LMModel(StreamingContainer):
@@ -88,8 +60,7 @@ class LMModel(StreamingContainer):
         depformer_dim_feedforward (int| list[int]| None): If None, defaults to hidden_scale * depformer_dim.
         depformer_weights_per_step_schedule (list[int] | None): mapping `CODEBOOK_INDEX -> WEIGHT_INDEX`, allowing
         depformer_low_rank_embeddings (int | None): if provided, uses low rank embeddings, with a linear
-        existing_text_padding_id (bool): if True, will use a different token for the initial text token, and
-            the text padding token.
+        existing_text_padding_id (int): token to use for the padding.
         same_initial (bool): if True, uses the same initial tokens for both text and audio mode.
         **kwargs: Additional parameters for the transformer encoder.
     """
@@ -114,13 +85,16 @@ class LMModel(StreamingContainer):
         depformer_weights_per_step_schedule: list[int] | None = None,
         depformer_low_rank_embeddings: int | None = None,
         depformer_pos_emb: str = "sin",
-        existing_text_padding_id: tp.Optional[int] = None,
+        existing_text_padding_id: int = 3,
+        existing_text_end_padding_id: int = 0,
         context: tp.Optional[int] = None,
+        causal: bool = True,
         condition_provider: tp.Optional[ConditionProvider] = None,
         fuser: tp.Optional[ConditionFuser] = None,
         quantize: bool = False,
         device=None,
         dtype=None,
+        gradient_checkpointing: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -132,11 +106,11 @@ class LMModel(StreamingContainer):
         self.delays = delays
         self.dim = dim
         self.existing_text_padding_id = existing_text_padding_id
+        self.existing_text_end_padding_id = existing_text_end_padding_id
         self.context = context
         self.depformer_weights_per_step_schedule = depformer_weights_per_step_schedule
         if depformer_weights_per_step_schedule is not None:
             assert len(depformer_weights_per_step_schedule) == dep_q
-        kwargs["context"] = context
         EmbeddingFactory = partial(
             ScaledEmbedding,
             norm=norm_emb,
@@ -147,11 +121,10 @@ class LMModel(StreamingContainer):
         self.emb = nn.ModuleList(
             [EmbeddingFactory(self.card + 1, dim) for _ in range(n_q)]
         )
-        # Text card + padding token (if not in the original tokenizer)
-        extra_text = self.existing_text_padding_id is None
         # Unlike for audio, here we authorize the model to output the special token.
         self.text_emb = EmbeddingFactory(text_card + 1, dim)
-        self.text_linear = nn.Linear(dim, text_card + extra_text, bias=bias_proj)
+
+        self.text_linear = nn.Linear(dim, text_card, bias=bias_proj)
         depformer_prefix = "depformer_"
         main_kwargs = {
             k: v for k, v in kwargs.items() if not k.startswith(depformer_prefix)
@@ -164,6 +137,9 @@ class LMModel(StreamingContainer):
             device=device,
             dtype=dtype,
             quantize=quantize,
+            context=context,
+            causal=causal,
+            checkpointing=gradient_checkpointing,
             **main_kwargs,
         )
         self.out_norm = create_norm_fn(norm, dim)
@@ -205,7 +181,9 @@ class LMModel(StreamingContainer):
             dim_feedforward=depformer_dim_feedforward,
             norm=norm,
             weights_per_step_schedule=depformer_weights_per_step_schedule,
+            causal=causal,
             quantize=quantize,
+            checkpointing=gradient_checkpointing,
             device=device,
             dtype=dtype,
             **kwargs_dep,
@@ -221,8 +199,9 @@ class LMModel(StreamingContainer):
         self.condition_provider = condition_provider
         self.fuser = fuser
         self.to(device=device, dtype=dtype)
+        self._init_weights()
         if quantize:
-            quantize_transformer(self)
+            replace_linear_with_qlinear(self)
 
     @property
     def initial_token_id(self) -> int:
@@ -237,15 +216,12 @@ class LMModel(StreamingContainer):
     @property
     def text_padding_token_id(self) -> int:
         """Token id for text padding."""
-        if self.existing_text_padding_id is None:
-            return self.text_card
-        else:
-            return self.existing_text_padding_id
+        return self.existing_text_padding_id
 
     @property
     def end_of_text_padding_id(self) -> int:
         """Token id for optionally marking the last padding step for a word."""
-        return 0
+        return self.existing_text_end_padding_id
 
     @property
     def zero_token_id(self) -> int:
@@ -294,6 +270,61 @@ class LMModel(StreamingContainer):
         token = torch.cat([text_token, audio_token], dim=1)
         return token
 
+    def forward(
+            self, codes: torch.Tensor,
+            condition_tensors: tp.Optional[ConditionTensors] = None) -> LMOutput:
+        """Given an input tensor of codes [B, K, T] and list of conditions, returns the logits
+        along with masks indicating the valid positions at which to compute the loss.
+        The logits time steps are aligned with those in the input `code`.
+        Should only be used for training, not inference (use `LMGen` for that).
+
+        Args:
+            codes (torch.Tensor): Input codes of shape [B, K, T] with B the batch size,
+                K the number of codebooks and T the number of timesteps. When text is supported,
+                the first 'codebook' corresponds to the text, and the remaining codebooks are for the  audio.
+            condition_tensors (dict[str, ConditionType], optional): pre-computed conditioning tensors.
+        Returns:
+            LMOutput: Language model outputs, containing either text or audio logits, or both.
+                logits (torch.Tensor, or None) of shape [B, K, T, card] corresponding to the provided codes,
+                    i.e. the first item corresponds to logits to predict the first code, meaning that
+                    no additional shifting of codes and logits is required.
+                mask (torch.Tensor, or None) of shape [B, K, T], mask over valid and invalid positions.
+                    Given the specified interleaving strategies, parts of the logits and codes should
+                    not be considered as valid predictions because of invalid context.
+                text_logits (torch.Tensor, or None) of shape [B, 1, T, text_card].
+                text_mask (torch.Tensor, or None) of shape [B, 1, T], mask over the valid positions for the text.
+        """
+        B, K, T = codes.shape
+        assert K == self.num_codebooks, (K, self.num_codebooks)
+        # Delaying codes and removing the last time step that will never be an input.
+        initial = self._get_initial_token().expand(B, -1, -1)
+        delayed_codes = _delay_sequence(self.delays, codes, initial)
+        # Inserting the empty tokens for the first time step.
+        delayed_codes = torch.cat([initial, delayed_codes], dim=2)
+
+        sum_condition: torch.Tensor | None = None
+        if condition_tensors is None:
+            assert self.fuser is None
+        else:
+            assert self.fuser is not None
+            sum_condition = self.fuser.get_sum(condition_tensors)
+
+        transformer_out, text_logits = self.forward_text(delayed_codes[:, :, :-1], sum_condition)
+        assert transformer_out.shape[0] == delayed_codes.shape[0]
+        assert transformer_out.shape[1] == delayed_codes.shape[2] - 1
+        logits = self.forward_depformer_training(delayed_codes[:, :, 1:], transformer_out)
+
+        # map back the logits on pattern sequence to logits on original codes: [B, K, S, card] -> [B, K, T, card]
+        # and provide the corresponding mask over invalid positions of tokens. We will with NaN values invalid positions
+        # to ensure they properly handled.
+        logits, logits_mask = _undelay_sequence(
+            self.delays[self.audio_offset:self.audio_offset + self.dep_q],
+            logits, fill_value=float('NaN'))
+        logits_mask &= (codes[:, self.audio_offset: self.audio_offset + self.dep_q] != self.zero_token_id)
+        text_logits, text_logits_mask = _undelay_sequence(self.delays[:1], text_logits, fill_value=float('NaN'))
+        text_logits_mask &= (codes[:, :1] != self.zero_token_id)
+        return LMOutput(logits, logits_mask, text_logits, text_logits_mask)
+
     def forward_text(
         self,
         sequence: torch.Tensor, sum_condition: torch.Tensor | None = None
@@ -310,17 +341,53 @@ class LMModel(StreamingContainer):
             )
             input_ = audio_emb if input_ is None else input_ + audio_emb
         text_emb = self.text_emb(input_sequence[:, 0])
+
         input_ = text_emb if input_ is None else input_ + text_emb
         if sum_condition is not None:
             input_ = input_ + sum_condition.to(input_)
         transformer_out = self.transformer(input_)
-
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
         assert isinstance(transformer_out, torch.Tensor)
-        text_logits = quantize.linear(self.text_linear, transformer_out)
+        text_logits = self.text_linear(transformer_out)
         text_logits = text_logits[:, None]
         return transformer_out, text_logits
+
+    def forward_depformer_training(
+        self,
+        sequence: torch.Tensor,
+        transformer_out: torch.Tensor,
+    ) -> torch.Tensor:
+        B, K, T = sequence.shape
+        Ka = self.dep_q
+        assert (
+            K == self.num_codebooks
+        ), f"Codebooks for Depformer training should be passed all at once, got {K,}."
+        depformer_inputs = []
+        for cb_index in range(Ka):
+            if self.depformer_multi_linear:
+                linear_index = cb_index
+                if self.depformer_weights_per_step_schedule is not None:
+                    linear_index = self.depformer_weights_per_step_schedule[cb_index]
+                transformer_in = self.depformer_in[linear_index](transformer_out)
+            else:
+                transformer_in = self.depformer_in[0](transformer_out)
+            if cb_index == 0:
+                token_in = self.depformer_text_emb(sequence[:, 0])
+            else:
+                token_in = self.depformer_emb[cb_index - 1](sequence[:, cb_index + self.audio_offset - 1])
+            depformer_inputs.append(token_in + transformer_in)
+        depformer_input = torch.stack(depformer_inputs, 2)
+        # depformer_input is [B, T, K, depformer_dim], reshaping to [B * T, K, D]
+        depformer_input = depformer_input.view(B * T, Ka, -1)
+        depformer_output = self.depformer(depformer_input)
+        all_logits = []
+        for cb_index in range(Ka):
+            logits = self.linears[cb_index](depformer_output[:, cb_index])
+            all_logits.append(logits.view(B, T, -1))
+        logits = torch.stack(all_logits, 1)
+        assert logits.dim() == 4, logits.shape  # [B, Ka, T, card]
+        return logits
 
     def forward_depformer(
         self,
@@ -344,9 +411,9 @@ class LMModel(StreamingContainer):
             in_index = depformer_cb_index
             if self.depformer_weights_per_step_schedule is not None:
                 in_index = self.depformer_weights_per_step_schedule[in_index]
-            depformer_input = quantize.linear(self.depformer_in[in_index], depformer_input)
+            depformer_input = self.depformer_in[in_index](depformer_input)
         else:
-            depformer_input = quantize.linear(self.depformer_in[0], depformer_input)
+            depformer_input = self.depformer_in[0](depformer_input)
         if depformer_cb_index == 0:
             last_token_input = self.depformer_text_emb(sequence[:, 0])
         else:
@@ -359,10 +426,34 @@ class LMModel(StreamingContainer):
         # depformer_input is [B, 1, depformer_dim].
         # The streaming state of the depformer ensures that the proper layer is run.
         dep_output = self.depformer(depformer_input)
-        logits = quantize.linear(self.linears[depformer_cb_index], dep_output)
+        logits = self.linears[depformer_cb_index](dep_output)
         logits = logits[:, None]
         assert logits.dim() == 4, logits.shape  # [B, Ka, S, card]
         return logits
+
+    def _init_weights(self):
+        """Initialization of the transformer module weights.
+        Mostly truncated gaussian, with `std = 1 / sqrt(dim_in)`.
+        Embeddings are also initialized with `1 / sqrt(dim)` rather than `1`.
+        Some layers are not going to be properly initialized:
+            - in_proj in MHA.
+            - depth transformer layers.
+        This is to match how our models were trained so far.
+        """
+
+        for emb_layer in self.emb:
+            _init_layer(emb_layer)
+        for emb_layer in self.depformer_emb:
+            _init_layer(emb_layer)
+        _init_layer(self.text_emb)
+        _init_layer(self.depformer_text_emb)
+        _init_layer(self.text_linear)
+
+        for tr_layer in self.transformer.layers:
+            tr_layer.apply(_init_layer)
+
+        for linear in self.linears:
+            _init_layer(linear)
 
 
 @dataclass
@@ -482,7 +573,7 @@ class LMGen(StreamingModule[_LMGenState]):
             k = lm_model.dep_q + 1 + q_other
             delay = lm_model.delays[k]
             write_position = (state.offset + delay) % CT
-            state.cache[:, k, write_position : write_position + 1] = input_tokens[
+            state.cache[:, k, write_position: write_position + 1] = input_tokens[
                 :, q_other
             ]
 
@@ -492,7 +583,7 @@ class LMGen(StreamingModule[_LMGenState]):
             # token that are delayed, and thus have no good value to take.
             if state.offset <= delay:
                 state.cache[:, k, position] = state.initial[:, k, 0]
-        input_ = state.cache[:, :, position : position + 1]
+        input_ = state.cache[:, :, position: position + 1]
 
         if self.check:
             # Check that we are not feeding in any value that is not generated yet.
@@ -526,7 +617,7 @@ class LMGen(StreamingModule[_LMGenState]):
         state.offset += 1
         position = state.offset % CT
         state.cache[:, 0, position] = text_token
-        state.cache[:, 1 : lm_model.dep_q + 1, position] = audio_tokens
+        state.cache[:, 1:lm_model.dep_q + 1, position] = audio_tokens
 
         if state.offset <= self.max_delay:
             return None

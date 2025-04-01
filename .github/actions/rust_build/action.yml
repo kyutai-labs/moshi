@@ -31,3 +31,6 @@ runs:
       run: |
         sudo apt-get update
         sudo apt-get install libasound2-dev
+        echo "test"
+        cmake --version
+        apt-cache show cmake

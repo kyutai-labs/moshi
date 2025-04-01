@@ -12,25 +12,18 @@ See `StreamingTransformer` for more information.
 from contextlib import ExitStack
 from dataclasses import dataclass
 import typing as tp
-
 from einops import rearrange
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-
 from ..utils.compile import no_compile
 from ..utils import quantize
+from ..utils.quantize import replace_linear_with_qlinear
 from .gating import make_gating
 from .rope import RotaryEmbedding
 from .streaming import StreamingModule, StreamingContainer, State
-
-
-def quantize_transformer(module: torch.nn.Module):
-    for name, child in module.named_modules():
-        if isinstance(child, torch.nn.Linear):
-            quantize.quantize_linear(child)
-        elif isinstance(child, StreamingMultiheadAttention):
-            quantize.quantize_param(child, 'in_proj_weight')
+from .lora import LoRALinear
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
 
 class LayerNormF32(nn.LayerNorm):
@@ -260,6 +253,34 @@ class RingKVCache:
         return KVCacheResult(keys, values, positions)
 
 
+def apply_weights_per_step(modules: nn.ModuleList, schedule: list[int] | None,
+                           x: torch.Tensor, offset: int) -> torch.Tensor:
+    """Utility to apply a multi linear layer to the given input. A multi linear layer
+    applies a different set of weight for each time step.
+
+    Args:
+        modules (nn.ModuleList): apply weights per step.
+        schedule (list[int] or None): schedule for weight sharing.
+        x (torch.Tensor): Input tensor, with shape `[B, T, C]`.
+        offset (int): offset for the current time step, in particular for decoding, with
+            time steps provided one by one.
+    """
+
+    if len(modules) == 1:
+        return modules[0](x)
+
+    ys: list[torch.Tensor] = []
+    B, T, C = x.shape
+    for t in range(T):
+        module_index = t + offset
+        if schedule is not None:
+            module_index = schedule[module_index]
+        y = modules[module_index](x[:, t: t + 1])
+        ys.append(y)
+    out = torch.cat(ys, 1)
+    return out
+
+
 @dataclass
 class _MHAState(State):
     kv_cache: RingKVCache
@@ -316,7 +337,6 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         self.weights_per_step = weights_per_step
         self.weights_per_step_schedule = weights_per_step_schedule
 
-        out_dim = embed_dim
         out_dim = 3 * embed_dim
         mult = 1
         if weights_per_step:
@@ -325,13 +345,49 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 mult = max(weights_per_step_schedule) + 1
             else:
                 mult = weights_per_step
-        in_proj = nn.Linear(embed_dim, mult * out_dim, bias=False, **factory_kwargs)
-        # We try to follow the default PyTorch MHA convention, to easily compare results.
-        self.in_proj_weight = in_proj.weight
-        self.in_proj_bias = in_proj.bias
-        self.out_proj = nn.Linear(
-            embed_dim, mult * embed_dim, bias=False, **factory_kwargs
+        self.mult = mult
+
+        # Split in one linear per step
+        self.out_projs = nn.ModuleList(
+            [
+                nn.Linear(embed_dim, embed_dim, bias=False, **factory_kwargs)
+                for _ in range(mult)
+            ]
         )
+        self.in_projs = nn.ModuleList(
+            [
+                nn.Linear(embed_dim, out_dim, bias=False, **factory_kwargs)
+                for _ in range(mult)
+            ]
+        )
+
+        self._register_load_state_dict_pre_hook(StreamingMultiheadAttention._load_hook, with_module=True)
+
+    @staticmethod
+    def _load_hook(module, state_dict, prefix, *_):
+        mappings = {
+            'in_proj_weight': 'in_projs.{i}.weight',
+            'in_proj.weight': 'in_projs.{i}.weight',
+            'in_proj.lora_A.weight': 'in_projs.{i}.lora_A.weight',
+            'in_proj.lora_B.weight': 'in_projs.{i}.lora_B.weight',
+            'out_proj.weight': 'out_projs.{i}.weight',
+            'out_proj.lora_A.weight': 'out_projs.{i}.lora_A.weight',
+            'out_proj.lora_B.weight': 'out_projs.{i}.lora_B.weight',
+        }
+
+        mult = module.mult
+        # _scb suffix is for quantized data.
+        for suffix in ['', '_scb']:
+            for source, target in mappings.items():
+                this_source = prefix + source + suffix
+                if this_source in state_dict:
+                    weight = state_dict[this_source]
+                    _, *OD = weight.shape
+                    weight = weight.view(mult, -1, *OD)
+                    for i in range(mult):
+                        this_target = prefix + target.format(i=i) + suffix
+                        state_dict[this_target] = weight[i]
+                    state_dict.pop(this_source)
 
     def _init_streaming_state(self, batch_size: int) -> _MHAState:
         if self.context is None:
@@ -343,13 +399,20 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 )
         else:
             capacity = self.context
-        device = self.in_proj_weight.device
-        # TODO: the following estimation will not work great with FSDP.
-        if quantize.is_quantized(self, 'in_proj_weight'):
-            # We are running with quantization
+
+        in_proj = self.in_projs[0]
+        if isinstance(in_proj, LoRALinear):
+            device = in_proj.lora_A.weight.device
+            dtype = in_proj.lora_A.weight.dtype
+        elif isinstance(in_proj, nn.Linear):
+            device = in_proj.weight.device
+            dtype = in_proj.weight.dtype
+        elif isinstance(in_proj, quantize.QLinear):
+            device = in_proj.weight.device
             dtype = torch.float16
         else:
-            dtype = self.in_proj_weight.dtype
+            raise RuntimeError(f"Unknown type {type(in_proj)} for linear.")
+
         dim_per_head = self.embed_dim // self.num_heads
         kv_cache = RingKVCache(
             batch_size, self.num_heads, dim_per_head, capacity, device, dtype
@@ -379,16 +442,12 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             offset = state.offset
             offset_cpu = state.offset_cpu
 
-        if self.weights_per_step:
-            projected = quantize.multi_linear(
-                self.weights_per_step, self.weights_per_step_schedule,
-                self, query, offset_cpu, name='in_proj_weight')
-        else:
-            projected = quantize.linear(self, query, 'in_proj_weight')
+        projected = apply_weights_per_step(
+            self.in_projs, self.weights_per_step_schedule, query, offset_cpu)
+
         q, k, v = rearrange(
             projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
         )
-
         if self.rope:
             q, k = self.rope(q, k, offset, time_before_heads=False)
 
@@ -407,12 +466,9 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)
 
         x = rearrange(x, "b h t d -> b t (h d)")
-        if self.weights_per_step:
-            x = quantize.multi_linear(
-                self.weights_per_step, self.weights_per_step_schedule,
-                self.out_proj, x, offset_cpu)
-        else:
-            x = quantize.linear(self.out_proj, x)
+        x = apply_weights_per_step(
+            self.out_projs, self.weights_per_step_schedule, x, offset_cpu)
+
         if state is not None:
             state.offset.add_(T)
             state.offset_cpu += T
@@ -565,19 +621,11 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         if self.gating is None:
             assert self.linear1 is not None
             assert self.linear2 is not None
-            update = quantize.linear(self.linear2, self.activation(quantize.linear(self.linear1, x)))
+            update = self.linear2(self.activation(self.linear1(x)))
         else:
             if self.weights_per_step:
                 assert isinstance(self.gating, nn.ModuleList)
-                B, T, D = x.shape
-                ys = []
-                for t in range(T):
-                    linear_index = offset + t
-                    if self.weights_per_step_schedule:
-                        linear_index = self.weights_per_step_schedule[linear_index]
-                    y = self.gating[linear_index](x[:, t:t + 1])
-                    ys.append(y)
-                update = torch.cat(ys, dim=1)
+                update = apply_weights_per_step(self.gating, self.weights_per_step_schedule, x, offset)
             else:
                 update = self.gating(x)
         return x_orig.to(update) + self.layer_scale_2(update)
@@ -645,6 +693,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         betas: tp.Optional[tp.Tuple[float, float]] = None,
         layer_class: tp.Type[StreamingTransformerLayer] = StreamingTransformerLayer,
         quantize: bool = False,
+        checkpointing: bool = False,
         device=None,
         dtype=None,
         **kwargs,
@@ -661,6 +710,8 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         self.rope: tp.Optional[RotaryEmbedding] = None
         if self.positional_embedding in {"rope", "sin_rope"}:
             self.rope = RotaryEmbedding(max_period=max_period)
+
+        self.checkpointing = checkpointing
 
         self.layers = nn.ModuleList()
         for _ in range(num_layers):
@@ -680,7 +731,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
             if quantize:
                 # Quantizing layers one by one to avoid taking too much space during init.
                 self.layers[-1].to(device=device, dtype=dtype)
-                quantize_transformer(self.layers[-1])
+                replace_linear_with_qlinear(self.layers[-1])
 
     def _init_streaming_state(self, batch_size: int) -> _TransformerState:
         device = next(self.parameters()).device
@@ -705,7 +756,16 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
             x = x + self.positional_scale * pos_emb
 
         for layer in self.layers:
-            x = layer(x, *args, **kwargs)
+            if self.checkpointing:
+                y = torch_checkpoint(
+                    layer, x, *args, use_reentrant=False,
+                    determinism_check='none',
+                    preserve_rng_state=False,
+                    **kwargs)
+                assert isinstance(y, torch.Tensor)
+                x = y
+            else:
+                x = layer(x, *args, **kwargs)
 
         if state is not None:
             state.offset.add_(T)

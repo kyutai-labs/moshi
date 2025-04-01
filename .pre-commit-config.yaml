@@ -13,6 +13,12 @@ repos:
       entry: scripts/run_ci_when_installed.sh moshi 'cd moshi && pyright'
       pass_filenames: false
       always_run: true
+    - id: tests-moshi
+      name: pytests on moshi package
+      language: system
+      entry: scripts/run_ci_when_installed.sh moshi 'cd moshi && pytest tests'
+      pass_filenames: false
+      always_run: true
     - id: flake8-moshi_mlx
       name: flake8 on moshi_mlx package
       language: system
