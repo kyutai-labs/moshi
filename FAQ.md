@@ -4,7 +4,7 @@ Here is the answer to a number of frequently asked questions.
 
 ### Will you release training code?
 
-We will release some training / fine-tuning code, but we do not have any timeline yet. Please be patient.
+Some finetuning code can be found in the [kyutai-labs/moshi-finetune repo](https://github.com/kyutai-labs/moshi-finetune).
 
 ### Will you release the dataset?
 
