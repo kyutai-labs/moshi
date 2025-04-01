@@ -55,6 +55,8 @@ There are three separate versions of the moshi inference stack in this repo.
 
 Finally, the code for the live demo is provided in the [`client/`](client/) directory.
 
+If you want to fine tune Moshi, head out to [kyutai-labs/moshi-finetune](https://github.com/kyutai-labs/moshi-finetune).
+
 
 ## Models
 
