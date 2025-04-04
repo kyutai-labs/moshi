@@ -4,6 +4,7 @@
 
 import argparse
 import asyncio
+import json
 import queue
 import os
 import tarfile
@@ -75,7 +76,7 @@ class PrinterType(Enum):
     QSIZE = 9
 
 
-def full_warmup(audio_tokenizer, client_to_server, server_to_client):
+def full_warmup(audio_tokenizer, client_to_server, server_to_client, max_delay: int):
     for i in range(4):
         pcm_data = np.array([0.0] * 1920).astype(np.float32)
         audio_tokenizer.encode(pcm_data)
@@ -85,7 +86,7 @@ def full_warmup(audio_tokenizer, client_to_server, server_to_client):
             if data is not None:
                 break
         client_to_server.put_nowait(data)
-        if i == 0:
+        if i < max_delay:
             continue
         while True:
             kind, data = server_to_client.get()
@@ -99,11 +100,24 @@ def full_warmup(audio_tokenizer, client_to_server, server_to_client):
                 break
 
 
-def model_server(client_to_server, server_to_client, args):
+def hf_get(filename: str) -> str:
+    if filename.startswith("hf://"):
+        parts = filename[5:].split("/")
+        repo_name = parts[0] + "/" + parts[1]
+        filename = "/".join(parts[2:])
+        log("info", f"retrieving {filename} from hf repo {repo_name}")
+        return hf_hub_download(repo_name, filename)
+    else:
+        return filename
+
+
+def model_server(client_to_server, server_to_client, lm_config, args):
     model_file = args.moshi_weight
     tokenizer_file = args.tokenizer
     if model_file is None:
-        if args.quantized == 8:
+        if "moshi_name" in lm_config:
+            model_file = hf_hub_download(args.hf_repo, lm_config["moshi_name"])
+        elif args.quantized == 8:
             model_file = hf_hub_download(args.hf_repo, "model.q8.safetensors")
         elif args.quantized == 4:
             model_file = hf_hub_download(args.hf_repo, "model.q4.safetensors")
@@ -111,14 +125,19 @@ def model_server(client_to_server, server_to_client, args):
             raise ValueError(f"Invalid quantized value: {args.quantized}")
         else:
             model_file = hf_hub_download(args.hf_repo, "model.safetensors")
+    model_file = hf_get(model_file)
     if tokenizer_file is None:
-        tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
+        if "tokenizer_name" in lm_config:
+            tokenizer_file = hf_hub_download(args.hf_repo, lm_config["tokenizer_name"])
+        else:
+            tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
+    tokenizer_file = hf_get(tokenizer_file)
     steps = args.steps
 
     log("info", f"[SERVER] loading text tokenizer {tokenizer_file}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)  # type: ignore
     mx.random.seed(299792458)
-    lm_config = models.config_v0_1()
+    lm_config = models.LmConfig.from_config_dict(lm_config)
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if args.quantized is not None:
@@ -129,7 +148,13 @@ def model_server(client_to_server, server_to_client, args):
     model.load_weights(model_file, strict=True)
     log("info", "[SERVER] weights loaded")
 
-    model.warmup()
+    if model.condition_provider is not None:
+        ct = model.condition_provider.condition_tensor("description", "very_good")
+    else:
+        ct = None
+
+    log("info", "[SERVER] warming up the model")
+    model.warmup(ct)
     log("info", "[SERVER] model warmed up")
     gen = models.LmGen(
         model=model,
@@ -145,7 +170,7 @@ def model_server(client_to_server, server_to_client, args):
         while True:
             data = client_to_server.get()
             data = mx.array(data).transpose(1, 0)[:, :8]
-            text_token = gen.step(data)
+            text_token = gen.step(data, ct=ct)
             text_token = text_token[0].item()
             audio_tokens = gen.last_audio_tokens()
             if text_token not in (0, 3):
@@ -159,12 +184,16 @@ def model_server(client_to_server, server_to_client, args):
         pass
 
 
-def web_server(client_to_server, server_to_client, args):
+def web_server(client_to_server, server_to_client, lm_config, args):
     mimi_file = args.mimi_weight
     if mimi_file is None:
-        mimi_file = hf_hub_download(
-            args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors"
-        )
+        if "mimi_name" in lm_config:
+            mimi_file = hf_hub_download(args.hf_repo, lm_config["mimi_name"])
+        else:
+            mimi_file = hf_hub_download(
+                args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors"
+            )
+    mimi_file = hf_get(mimi_file)
     input_queue = queue.Queue()
     output_queue = queue.Queue()
     text_queue = queue.Queue()
@@ -172,7 +201,8 @@ def web_server(client_to_server, server_to_client, args):
     start = server_to_client.get()
     log("info", f"[CLIENT] received '{start}' from server, starting...")
 
-    full_warmup(audio_tokenizer, client_to_server, server_to_client)
+    max_delay = max(lm_config["delays"])
+    full_warmup(audio_tokenizer, client_to_server, server_to_client, max_delay)
 
     async def send_loop():
         while True:
@@ -368,6 +398,7 @@ def main():
     parser.add_argument("--static", type=str)
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
+    parser.add_argument("--lm-config", type=str, help="The LM config as a json file.")
     parser.add_argument(
         "--ssl",
         type=str,
@@ -393,8 +424,21 @@ def main():
     client_to_server = multiprocessing.Queue()
     server_to_client = multiprocessing.Queue()
 
+    # Get the model config
+    lm_config = args.lm_config
+    if lm_config is None:
+        try:
+            lm_config = hf_hub_download(args.hf_repo, "config.json")
+        except Exception:
+            log("warning", "Cannot download config, using defaults.")
+    if lm_config is None:
+        lm_config = models.config_v0_1()
+    else:
+        with open(hf_get(lm_config), "r") as fobj:
+            lm_config = json.load(fobj)
+
     # Create two processes
-    subprocess_args = client_to_server, server_to_client, args
+    subprocess_args = client_to_server, server_to_client, lm_config, args
     p1 = multiprocessing.Process(target=web_server, args=subprocess_args)
     p2 = multiprocessing.Process(target=model_server, args=subprocess_args)
 
