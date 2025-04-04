@@ -76,7 +76,7 @@ class PrinterType(Enum):
     QSIZE = 9
 
 
-def full_warmup(audio_tokenizer, client_to_server, server_to_client):
+def full_warmup(audio_tokenizer, client_to_server, server_to_client, max_delay: int):
     for i in range(4):
         pcm_data = np.array([0.0] * 1920).astype(np.float32)
         audio_tokenizer.encode(pcm_data)
@@ -86,7 +86,7 @@ def full_warmup(audio_tokenizer, client_to_server, server_to_client):
             if data is not None:
                 break
         client_to_server.put_nowait(data)
-        if i == 0:
+        if i < max_delay:
             continue
         while True:
             kind, data = server_to_client.get()
@@ -201,7 +201,8 @@ def web_server(client_to_server, server_to_client, lm_config, args):
     start = server_to_client.get()
     log("info", f"[CLIENT] received '{start}' from server, starting...")
 
-    full_warmup(audio_tokenizer, client_to_server, server_to_client)
+    max_delay = max(lm_config["delays"])
+    full_warmup(audio_tokenizer, client_to_server, server_to_client, max_delay)
 
     async def send_loop():
         while True:
@@ -332,7 +333,6 @@ def web_server(client_to_server, server_to_client, lm_config, args):
         return ws
 
     async def go():
-        print("hello!!!")
         app = web.Application()
         app.router.add_get("/api/chat", handle_chat)
         static_path: None | str = None
