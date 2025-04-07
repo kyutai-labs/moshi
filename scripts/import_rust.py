@@ -54,7 +54,7 @@ def import_model(
         model[name] = tch_model[name]
 
     for k, v in sorted(tch_model.items()):
-        if k.startswith("transformer"):
+        if k.startswith("transformer") or k.startswith("extra_heads"):
             model[k] = v
 
     # Only export the first slices of the depformer (main).
