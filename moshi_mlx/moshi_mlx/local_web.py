@@ -169,7 +169,7 @@ def model_server(client_to_server, server_to_client, lm_config, args):
     try:
         while True:
             data = client_to_server.get()
-            data = mx.array(data).transpose(1, 0)[:, :8]
+            data = mx.array(data).transpose(1, 0)[:, :gen.main_codebooks]
             text_token = gen.step(data, ct=ct)
             text_token = text_token[0].item()
             audio_tokens = gen.last_audio_tokens()
@@ -197,7 +197,9 @@ def web_server(client_to_server, server_to_client, lm_config, args):
     input_queue = queue.Queue()
     output_queue = queue.Queue()
     text_queue = queue.Queue()
-    audio_tokenizer = rustymimi.StreamTokenizer(mimi_file)  # type: ignore
+    print(lm_config)
+    nc = lm_config.get("dep_q", 8)
+    audio_tokenizer = rustymimi.StreamTokenizer(mimi_file, num_codebooks=nc)  # type: ignore
     start = server_to_client.get()
     log("info", f"[CLIENT] received '{start}' from server, starting...")
 
