@@ -232,7 +232,7 @@ class CheckpointInfo:
         if self.lm_config is None:
             num_codebooks = 8
         else:
-            num_codebooks = self.lm_config["dep_q"]
+            num_codebooks = max(self.lm_config["dep_q"], self.lm_config["n_q"] - self.lm_config["dep_q"])
         return get_mimi(self.mimi_weights, num_codebooks=num_codebooks, device=device)
 
     def get_moshi(
