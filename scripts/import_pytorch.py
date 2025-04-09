@@ -41,23 +41,24 @@ def import_model(
     else:
         exported_out_n_q = out_n_q
 
-    for idx in range(DEPFORMER_LAYERS):
-        in_proj_key = f"depformer.layers.{idx}.self_attn.in_proj_weight"
-        in_proj = model[in_proj_key]
-        model[in_proj_key] = in_proj[: in_proj.shape[0] // 2]
-        out_proj_key = f"depformer.layers.{idx}.self_attn.out_proj.weight"
-        out_proj = model[out_proj_key]
-        model[out_proj_key] = out_proj[: out_proj.shape[0] // 2]
-
-    # For mimi inference, we trim the depformer layer that are unused.
-    for dep_idx in range(exported_out_n_q - 1, in_n_q - 1):
-        del model[f"depformer_emb.{dep_idx}.weight"]
-    for dep_idx in range(exported_out_n_q, in_n_q):
-        del model[f"linears.{dep_idx}.weight"]
-        del model[f"depformer_in.{dep_idx}.weight"]
+    if exported_out_n_q > 0:
         for idx in range(DEPFORMER_LAYERS):
-            del model[f"depformer.layers.{idx}.gating.{dep_idx}.linear_in.weight"]
-            del model[f"depformer.layers.{idx}.gating.{dep_idx}.linear_out.weight"]
+            in_proj_key = f"depformer.layers.{idx}.self_attn.in_proj_weight"
+            in_proj = model[in_proj_key]
+            model[in_proj_key] = in_proj[: in_proj.shape[0] // 2]
+            out_proj_key = f"depformer.layers.{idx}.self_attn.out_proj.weight"
+            out_proj = model[out_proj_key]
+            model[out_proj_key] = out_proj[: out_proj.shape[0] // 2]
+
+        # For mimi inference, we trim the depformer layer that are unused.
+        for dep_idx in range(exported_out_n_q - 1, in_n_q - 1):
+            del model[f"depformer_emb.{dep_idx}.weight"]
+        for dep_idx in range(exported_out_n_q, in_n_q):
+            del model[f"linears.{dep_idx}.weight"]
+            del model[f"depformer_in.{dep_idx}.weight"]
+            for idx in range(DEPFORMER_LAYERS):
+                del model[f"depformer.layers.{idx}.gating.{dep_idx}.linear_in.weight"]
+                del model[f"depformer.layers.{idx}.gating.{dep_idx}.linear_out.weight"]
 
     save_file(model, out_path)
 
