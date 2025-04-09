@@ -143,58 +143,63 @@ class LMModel(StreamingContainer):
             **main_kwargs,
         )
         self.out_norm = create_norm_fn(norm, dim)
-        self.depformer_multi_linear = depformer_multi_linear
-        kwargs_dep = main_kwargs.copy()
-        kwargs_dep.update(
-            {
-                k.removeprefix(depformer_prefix): v
-                for k, v in kwargs.items()
-                if k.startswith(depformer_prefix)
-            }
-        )
-        kwargs_dep["positional_embedding"] = depformer_pos_emb
-        kwargs_dep["context"] = None
-        if depformer_weights_per_step:
-            kwargs_dep["weights_per_step"] = dep_q
-        if depformer_multi_linear:
-            # One linear layer per codebook to project different informations from the main model.
-            num_in = dep_q
-            if depformer_weights_per_step_schedule:
-                num_in = max(depformer_weights_per_step_schedule) + 1
-            self.depformer_in = nn.ModuleList(
-                [nn.Linear(dim, depformer_dim, bias=False) for _ in range(num_in)]
+        if dep_q > 0:
+            self.depformer_multi_linear = depformer_multi_linear
+            kwargs_dep = main_kwargs.copy()
+            kwargs_dep.update(
+                {
+                    k.removeprefix(depformer_prefix): v
+                    for k, v in kwargs.items()
+                    if k.startswith(depformer_prefix)
+                }
             )
+            kwargs_dep["positional_embedding"] = depformer_pos_emb
+            kwargs_dep["context"] = None
+            if depformer_weights_per_step:
+                kwargs_dep["weights_per_step"] = dep_q
+            if depformer_multi_linear:
+                # One linear layer per codebook to project different informations from the main model.
+                num_in = dep_q
+                if depformer_weights_per_step_schedule:
+                    num_in = max(depformer_weights_per_step_schedule) + 1
+                self.depformer_in = nn.ModuleList(
+                    [nn.Linear(dim, depformer_dim, bias=False) for _ in range(num_in)]
+                )
+            else:
+                self.depformer_in = nn.ModuleList(
+                    [nn.Linear(dim, depformer_dim, bias=False)]
+                )
+            EmbeddingFactory = partial(EmbeddingFactory, low_rank=depformer_low_rank_embeddings)
+            # Only using up to dep_q - 1 because the last codebook is never an input to Depformer.
+            self.depformer_emb = nn.ModuleList(
+                [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
+            )
+            self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim)
+            if depformer_dim_feedforward is None:
+                depformer_dim_feedforward = int(hidden_scale * depformer_dim)
+            self.depformer = StreamingTransformer(
+                d_model=depformer_dim,
+                dim_feedforward=depformer_dim_feedforward,
+                norm=norm,
+                weights_per_step_schedule=depformer_weights_per_step_schedule,
+                causal=causal,
+                quantize=quantize,
+                checkpointing=gradient_checkpointing,
+                device=device,
+                dtype=dtype,
+                **kwargs_dep,
+            )
+            # Depformer follow its own cycle of streaming entirely contained in one time step
+            # and should not follow the streaming of the steps dimensions.
+            self.depformer.set_streaming_detached(True)
         else:
-            self.depformer_in = nn.ModuleList(
-                [nn.Linear(dim, depformer_dim, bias=False)]
-            )
-        EmbeddingFactory = partial(EmbeddingFactory, low_rank=depformer_low_rank_embeddings)
-        # Only using up to dep_q - 1 because the last codebook is never an input to Depformer.
-        self.depformer_emb = nn.ModuleList(
-            [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
-        )
-        self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim)
-        if depformer_dim_feedforward is None:
-            depformer_dim_feedforward = int(hidden_scale * depformer_dim)
-        self.depformer = StreamingTransformer(
-            d_model=depformer_dim,
-            dim_feedforward=depformer_dim_feedforward,
-            norm=norm,
-            weights_per_step_schedule=depformer_weights_per_step_schedule,
-            causal=causal,
-            quantize=quantize,
-            checkpointing=gradient_checkpointing,
-            device=device,
-            dtype=dtype,
-            **kwargs_dep,
-        )
-        # Depformer follow its own cycle of streaming entirely contained in one time step
-        # and should not follow the streaming of the steps dimensions.
-        self.depformer.set_streaming_detached(True)
+            self.depformer_emb = None
+            self.depformer_text_emb = None
+            self.depformer = None
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
         self.linears = nn.ModuleList(
-            [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
+            [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(n_q)]
         )
         self.condition_provider = condition_provider
         self.fuser = fuser
@@ -443,10 +448,12 @@ class LMModel(StreamingContainer):
 
         for emb_layer in self.emb:
             _init_layer(emb_layer)
-        for emb_layer in self.depformer_emb:
-            _init_layer(emb_layer)
+        if self.depformer_emb is not None:
+            for emb_layer in self.depformer_emb:
+                _init_layer(emb_layer)
         _init_layer(self.text_emb)
-        _init_layer(self.depformer_text_emb)
+        if self.depformer_text_emb is not None:
+            _init_layer(self.depformer_text_emb)
         _init_layer(self.text_linear)
 
         for tr_layer in self.transformer.layers:
@@ -535,7 +542,10 @@ class LMGen(StreamingModule[_LMGenState]):
 
         disable = lm_model.device.type != 'cuda'
         graphed_main = CUDAGraphed(lm_model.forward_text, disable=disable)
-        graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
+        if lm_model.depformer is not None:
+            graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
+        else:
+            graphed_depth = None
 
         state = _LMGenState(
             batch_size, cache, initial, graphed_main, graphed_depth,
@@ -611,13 +621,17 @@ class LMGen(StreamingModule[_LMGenState]):
         assert text_token.shape[2] == 1
         assert text_token.shape[1] == 1, "Only one text stream supported."
         text_token = text_token[:, 0, 0]  # shape is [B]
-        audio_tokens = state.graphed_depth(text_token, transformer_out)
+        if state.graphed_depth is not None:
+            audio_tokens = state.graphed_depth(text_token, transformer_out)
+        else:
+            audio_tokens = None
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
         state.offset += 1
         position = state.offset % CT
         state.cache[:, 0, position] = text_token
-        state.cache[:, 1:lm_model.dep_q + 1, position] = audio_tokens
+        if audio_tokens is not None:
+            state.cache[:, 1:lm_model.dep_q + 1, position] = audio_tokens
 
         if state.offset <= self.max_delay:
             return None

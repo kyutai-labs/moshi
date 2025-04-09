@@ -94,8 +94,16 @@ class InferenceState:
         self.printer.print_header()
         while not all(eos_reached):
             if chunks:
-                chunk = chunks.popleft()
-                codes = self.mimi.encode(chunk)
+                if ntokens < 25:
+                    codes = torch.full(
+                        (self.batch_size, self.mimi.num_codebooks, 1),
+                        -1,
+                        device=device,
+                        dtype=torch.long,
+                    )
+                else:
+                    chunk = chunks.popleft()
+                    codes = self.mimi.encode(chunk)
             else:
                 if self.model_type == 'hibiki':
                     if need_eos_input:
@@ -116,33 +124,42 @@ class InferenceState:
                 # Ensure that the first slice of codes is properly seen by the transformer
                 # as otherwise the first slice is replaced by the initial tokens.
                 tokens = self.lm_gen.step(codes)
-                assert tokens is None
+                # assert tokens is None
                 first_frame = False
             tokens = self.lm_gen.step(codes)
             if tokens is None:
                 continue
             assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
-            out_pcm = self.mimi.decode(tokens[:, 1:]).cpu()
-            for b, (one_text, one_pcm) in enumerate(zip(tokens[:, 0].cpu(), out_pcm)):
-                if eos_reached[b]:
-                    continue
-                elif one_text.item() == self.text_tokenizer.eos_id():
-                    if need_eos_input:
-                        # We sampled the EOS before the end of the file! Not possible.
-                        self.printer.log("warning", "EOS sampled too early.")
-                    else:
-                        eos_reached[b] = True
+            if self.lm_gen.lm_model.dep_q > 0:
+                out_pcm = self.mimi.decode(tokens[:, 1:]).cpu()
+                for b, (one_text, one_pcm) in enumerate(zip(tokens[:, 0].cpu(), out_pcm)):
+                    if eos_reached[b]:
+                        continue
+                    elif one_text.item() == self.text_tokenizer.eos_id():
+                        if need_eos_input:
+                            # We sampled the EOS before the end of the file! Not possible.
+                            self.printer.log("warning", "EOS sampled too early.")
+                        else:
+                            eos_reached[b] = True
 
-                out_text_tokens_per_item[b].append(one_text)
-                out_pcms_per_item[b].append(one_pcm)
-                if b == 0:
-                    if one_text.item() not in [0, 3]:
-                        text = self.text_tokenizer.id_to_piece(one_text.item())  # pyright: ignore
-                        text = text.replace("▁", " ")
-                        self.printer.print_token(text)
+                    out_text_tokens_per_item[b].append(one_text)
+                    out_pcms_per_item[b].append(one_pcm)
+                    if b == 0:
+                        if one_text.item() not in [0, 3]:
+                            text = self.text_tokenizer.id_to_piece(one_text.item())  # pyright: ignore
+                            text = text.replace("▁", " ")
+                            self.printer.print_token(text)
+            else:
+                one_text = tokens[0, 0, 0]
+                if one_text.item() not in [0, 3]:
+                    text = self.text_tokenizer.id_to_piece(one_text.item())  # pyright: ignore
+                    text = text.replace("▁", " ")
+                    self.printer.print_token(text)
             ntokens += 1
         dt = time.time() - start_time
         self.printer.log("info", f"processed {ntokens} steps in {dt:.0f}s, {1000 * dt / ntokens:.2f}ms/step")
+        if self.lm_gen.lm_model.dep_q == 0:
+            return None
         out = [
             (torch.cat(one_texts, dim=0), torch.cat(one_pcms, dim=1))
             for one_texts, one_pcms in zip(out_text_tokens_per_item, out_pcms_per_item)
@@ -191,15 +208,16 @@ def main():
         args.batch_size, args.cfg_coef, args.device, **checkpoint_info.lm_gen_config)
     out_items = state.run(in_pcms)
 
-    outfile = Path(args.outfile)
-    for index, (_, out_pcm) in enumerate(out_items):
-        if len(out_items) > 1:
-            outfile_ = outfile.with_name(f"{outfile.stem}-{index}{outfile.suffix}")
-        else:
-            outfile_ = outfile
-        duration = out_pcm.shape[1] / mimi.sample_rate
-        log("info", f"writing {outfile_} with duration {duration:.1f} sec.")
-        sphn.write_wav(str(outfile_), out_pcm[0].numpy(), sample_rate=mimi.sample_rate)
+    if args.outfile is not None:
+        outfile = Path(args.outfile)
+        for index, (_, out_pcm) in enumerate(out_items):
+            if len(out_items) > 1:
+                outfile_ = outfile.with_name(f"{outfile.stem}-{index}{outfile.suffix}")
+            else:
+                outfile_ = outfile
+            duration = out_pcm.shape[1] / mimi.sample_rate
+            log("info", f"writing {outfile_} with duration {duration:.1f} sec.")
+            sphn.write_wav(str(outfile_), out_pcm[0].numpy(), sample_rate=mimi.sample_rate)
 
 
 if __name__ == "__main__":
