@@ -182,7 +182,7 @@ def main():
     parser.add_argument("--config", "--lm-config", dest="config", type=str, help="The config as a json file.")
     parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
     parser.add_argument("infile", type=str, help="Input audio file.")
-    parser.add_argument("outfile", type=str, help="Output audio file in wav format.")
+    parser.add_argument("outfile", type=str, help="Output audio file in wav format.", nargs="?", default="")
 
     args = parser.parse_args()
     seed_all(4242)
@@ -208,7 +208,7 @@ def main():
         args.batch_size, args.cfg_coef, args.device, **checkpoint_info.lm_gen_config)
     out_items = state.run(in_pcms)
 
-    if args.outfile is not None:
+    if args.outfile: 
         outfile = Path(args.outfile)
         for index, (_, out_pcm) in enumerate(out_items):
             if len(out_items) > 1:

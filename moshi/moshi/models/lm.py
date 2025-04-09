@@ -574,8 +574,11 @@ class LMGen(StreamingModule[_LMGenState]):
         assert S == 1, "Only support being given steps one by one."
         needed_tokens = lm_model.num_codebooks - lm_model.dep_q - 1
         assert (
-            Ki == needed_tokens
+            Ki >= needed_tokens
         ), f"We expect {needed_tokens} tokens from the user stream, got {Ki}."
+
+        if Ki > needed_tokens:
+            input_tokens = input_tokens[:, :needed_tokens, :]
 
         CT = state.cache.shape[2]
 
