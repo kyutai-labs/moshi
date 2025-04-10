@@ -56,7 +56,9 @@ class InferenceState:
     lm_gen: LMGen
 
     def __init__(self, model_type: str, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
-                 lm: LMModel, batch_size: int, cfg_coef: float, device: str | torch.device, **kwargs):
+                 lm: LMModel, batch_size: int, cfg_coef: float, device: str | torch.device,
+                 asr_delay_in_tokens: int = 0,
+                 **kwargs):
         self.model_type = model_type
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
@@ -68,6 +70,7 @@ class InferenceState:
         self.mimi.streaming_forever(batch_size)
         self.lm_gen.streaming_forever(batch_size)
         self.printer: AnyPrinter
+        self.asr_delay_in_tokens = asr_delay_in_tokens
         if sys.stdout.isatty():
             self.printer = Printer()
         else:
@@ -94,7 +97,7 @@ class InferenceState:
         self.printer.print_header()
         while not all(eos_reached):
             if chunks:
-                if ntokens < 25:
+                if ntokens < self.asr_delay_in_tokens:
                     codes = torch.full(
                         (self.batch_size, self.mimi.num_codebooks, 1),
                         -1,
