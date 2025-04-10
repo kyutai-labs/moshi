@@ -59,6 +59,9 @@ def import_model(
             for idx in range(DEPFORMER_LAYERS):
                 del model[f"depformer.layers.{idx}.gating.{dep_idx}.linear_in.weight"]
                 del model[f"depformer.layers.{idx}.gating.{dep_idx}.linear_out.weight"]
+    else:
+        for dep_idx in range(exported_out_n_q, in_n_q):
+            del model[f"linears.{dep_idx}.weight"]
 
     save_file(model, out_path)
 

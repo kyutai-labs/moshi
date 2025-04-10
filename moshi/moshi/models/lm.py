@@ -199,7 +199,7 @@ class LMModel(StreamingContainer):
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
         self.linears = nn.ModuleList(
-            [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(n_q)]
+            [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
         )
         self.condition_provider = condition_provider
         self.fuser = fuser
