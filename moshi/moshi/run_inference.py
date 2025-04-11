@@ -211,7 +211,7 @@ def main():
         args.batch_size, args.cfg_coef, args.device, **checkpoint_info.lm_gen_config)
     out_items = state.run(in_pcms)
 
-    if args.outfile: 
+    if args.outfile:
         outfile = Path(args.outfile)
         for index, (_, out_pcm) in enumerate(out_items):
             if len(out_items) > 1:
