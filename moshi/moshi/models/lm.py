@@ -369,6 +369,10 @@ class LMModel(StreamingContainer):
             K == self.num_codebooks
         ), f"Codebooks for Depformer training should be passed all at once, got {K,}."
         depformer_inputs = []
+        assert self.depformer_in is not None
+        assert self.depformer_text_emb is not None
+        assert self.depformer_emb is not None
+        assert self.depformer is not None
         for cb_index in range(Ka):
             if self.depformer_multi_linear:
                 linear_index = cb_index
@@ -412,6 +416,10 @@ class LMModel(StreamingContainer):
         ), "Transformer out should be a for a single step."
         last_token_input: tp.Optional[torch.Tensor] = None
         depformer_input = transformer_out
+        assert self.depformer_in is not None
+        assert self.depformer_text_emb is not None
+        assert self.depformer_emb is not None
+        assert self.depformer is not None
         if self.depformer_multi_linear:
             in_index = depformer_cb_index
             if self.depformer_weights_per_step_schedule is not None:
@@ -469,7 +477,7 @@ class _LMGenState(State):
     cache: torch.Tensor
     initial: torch.Tensor
     graphed_main: CUDAGraphed
-    graphed_depth: CUDAGraphed
+    graphed_depth: CUDAGraphed | None
     condition_sum: torch.Tensor | None = None
     offset: int = 0
     exit_stack: ExitStack = field(default_factory=ExitStack)
@@ -659,6 +667,7 @@ class LMGen(StreamingModule[_LMGenState]):
             B_cfg = 2 * B
         prev_token = text_token
         lm_model = self.lm_model
+        assert lm_model.depformer is not None
         depformer_tokens: list[torch.Tensor] = []
         assert not lm_model.depformer.is_streaming
         with lm_model.depformer.streaming(B_cfg):

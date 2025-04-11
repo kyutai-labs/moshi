@@ -162,7 +162,7 @@ class InferenceState:
         dt = time.time() - start_time
         self.printer.log("info", f"processed {ntokens} steps in {dt:.0f}s, {1000 * dt / ntokens:.2f}ms/step")
         if self.lm_gen.lm_model.dep_q == 0:
-            return None
+            return []
         out = [
             (torch.cat(one_texts, dim=0), torch.cat(one_pcms, dim=1))
             for one_texts, one_pcms in zip(out_text_tokens_per_item, out_pcms_per_item)
