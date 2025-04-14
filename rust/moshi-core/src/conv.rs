@@ -249,7 +249,13 @@ impl StreamableConv1d {
         pad_mode: PadMode,
         vb: VarBuilder,
     ) -> Result<Self> {
-        let cfg = candle_nn::Conv1dConfig { padding: 0, stride, dilation, groups };
+        let cfg = candle_nn::Conv1dConfig {
+            padding: 0,
+            stride,
+            dilation,
+            groups,
+            cudnn_fwd_algo: Some(candle::conv::CudnnFwdAlgo::ImplicitGemm),
+        };
         let conv = NormConv1d::new(in_c, out_c, k_size, causal, norm, bias, cfg, vb.pp("conv"))?;
         if k_size < stride {
             candle::bail!("kernel-size {k_size} is smaller than stride {stride}")
