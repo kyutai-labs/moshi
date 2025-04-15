@@ -75,13 +75,15 @@ mimi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MIMI_NAME)
 mimi = loaders.get_mimi(mimi_weight, device='cpu')
 mimi.set_num_codebooks(8)  # up to 32 for mimi, but limited to 8 for moshi.
 
+# wav should be 24kHz, if not, resample using for instance torchaudio.functional.resample
 wav = torch.randn(1, 1, 24000 * 10)  # should be [B, C=1, T]
+
 with torch.no_grad():
     codes = mimi.encode(wav)  # [B, K = 8, T]
     decoded = mimi.decode(codes)
 
     # Supports streaming too.
-    frame_size = int(mimi.sample_rate / mimi.frame_rate)
+    frame_size = mimi.frame_size
     all_codes = []
     with mimi.streaming(batch_size=1):
         for offset in range(0, wav.shape[-1], frame_size):
@@ -91,9 +93,9 @@ with torch.no_grad():
             all_codes.append(codes)
 
 ## WARNING: When streaming, make sure to always feed a total amount of audio that is a multiple
-#           of the frame size (1920), otherwise the last frame will not be complete, and thus
-#           will not be encoded. For simplicity, we recommend feeding in audio always in multiple
-#           of the frame size, so that you always know how many time steps you get back in `codes`.
+#           of the frame size (1920). You should pad or buffer accordingly. Since version 0.2.5a,
+            Mimi no longer supports partial frames in streaming mode. Besides, when executing on GPU,
+            you should always pass the same amount of audio, as the calls are CUDAGraphed for efficiency.
 
 # Now if you have a GPU around.
 mimi.cuda()
@@ -111,6 +113,24 @@ with torch.no_grad(), lm_gen.streaming(1), mimi.streaming(1):
             out_wav_chunks.append(wav_chunk)
         print(idx, end='\r')
 out_wav = torch.cat(out_wav_chunks, dim=-1)
+```
+
+
+### Streaming execution mask
+
+It is possible to run on desynchronized batches, e.g. batch for which not all items are coming in
+at the same rate. You should set the execution mask on both `lm_gen` and `mimi` to indicate which inputs
+are valid for processing, and which should be ignored. While you will still get a value back for the ignored
+entries, the internal state will be left unchanged until the next call, e.g.
+
+```
+with torch.no_grad(), mimi.streaming(4):
+    mask = torch.tensor([False, True, False, True])
+    mimi.set_exec_mask(mask)
+    frame = torch.randn(4, 1, mimi.frame_size)
+    codes = mimi.encode(frame)
+    # From the point of view of the first and third entries, nothing has happen.
+    # The codes for those two should simply be discarded.
 ```
 
 ## Development
