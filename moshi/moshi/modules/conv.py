@@ -9,6 +9,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass
+import itertools
 import math
 import typing as tp
 import warnings
@@ -18,7 +19,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils import weight_norm
 
-from .streaming import RawStreamingConv1d, RawStreamingConvTranspose1d, StreamingModule, State
+from .streaming import StreamingModule, State
 
 
 CONV_NORMALIZATIONS = frozenset(["none", "weight_norm"])
@@ -124,7 +125,7 @@ class NormConv1d(nn.Module):
     ):
         super().__init__()
         self.conv = apply_parametrization_norm(
-            RawStreamingConv1d(*args, **kwargs), norm
+            nn.Conv1d(*args, **kwargs), norm
         )
         self.norm_type = norm
 
@@ -148,7 +149,7 @@ class NormConvTranspose1d(nn.Module):
     ):
         super().__init__()
         self.convtr = apply_parametrization_norm(
-            RawStreamingConvTranspose1d(*args, **kwargs), norm
+            nn.ConvTranspose1d(*args, **kwargs), norm
         )
         self.norm_type = norm
 
@@ -159,11 +160,12 @@ class NormConvTranspose1d(nn.Module):
 
 @dataclass
 class _StreamingConv1dState(State):
-    padding_to_add: int
-    original_padding_to_add: int
+    previous: torch.Tensor
+    first: torch.Tensor
 
     def reset(self):
-        self.padding_to_add = self.original_padding_to_add
+        self.previous.zero_()
+        self.first.fill_(True)
 
 
 class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
@@ -183,9 +185,12 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
         causal: bool = False,
         norm: str = "none",
         norm_kwargs: tp.Dict[str, tp.Any] = {},
-        pad_mode: str = "reflect",
+        pad_mode: str = "constant",
     ):
         super().__init__()
+        assert pad_mode in ['constant', 'replicate'], pad_mode
+        self.pad_mode = pad_mode
+        assert causal
         # warn user on unusual setup between dilation and stride
         if stride > 1 and dilation > 1:
             warnings.warn(
@@ -204,8 +209,6 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
             norm=norm,
             norm_kwargs=norm_kwargs,
         )
-        self.causal = causal
-        self.pad_mode = pad_mode
 
     @property
     def _stride(self) -> int:
@@ -227,40 +230,55 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
         return self._effective_kernel_size - self._stride
 
     def _init_streaming_state(self, batch_size: int) -> _StreamingConv1dState:
-        assert self.causal, "streaming is only supported for causal convs"
-        return _StreamingConv1dState(self._padding_total, self._padding_total)
+        stride = self._stride
+        # Effective kernel size accounting for dilation.
+        kernel = self._effective_kernel_size
+        param = next(iter(self.parameters()))
+        dtype = param.dtype
+        device = param.device
+        previous = torch.zeros(batch_size, self.conv.conv.in_channels, kernel - stride,
+                               dtype=dtype, device=device)
+        first = torch.ones(batch_size, device=device, dtype=torch.bool)
+        return _StreamingConv1dState(batch_size, device, previous, first)
 
     def forward(self, x):
         B, C, T = x.shape
-        padding_total = self._padding_total
-        extra_padding = get_extra_padding_for_conv1d(
-            x, self._effective_kernel_size, self._stride, padding_total
-        )
+        S = self._stride
+        assert T > 0 and T % S == 0, "Steps must be multiple of stride"
         state = self._streaming_state
         if state is None:
-            if self.causal:
-                # Left padding for causal
-                x = pad1d(x, (padding_total, extra_padding), mode=self.pad_mode)
-            else:
-                # Asymmetric padding required for odd strides
-                padding_right = padding_total // 2
-                padding_left = padding_total - padding_right
-                x = pad1d(
-                    x, (padding_left, padding_right + extra_padding), mode=self.pad_mode
+            state = self._init_streaming_state(B)
+        TP = state.previous.shape[-1]
+        if TP and self.pad_mode == 'replicate':
+            assert T >= TP, "Not enough content to pad streaming."
+            init = x[..., :1]
+            state.previous[:] = torch.where(
+                state.first.view(-1, 1, 1) & state.exec_mask.view(-1, 1, 1),
+                init,
+                state.previous)
+        if TP:
+            x = torch.cat([state.previous, x], dim=-1)
+        y = self.conv(x)
+        if TP:
+            state.previous[:] = torch.where(
+                state.exec_mask.view(-1, 1, 1),
+                x[..., -TP:],
+                state.previous)
+            if self.pad_mode == 'replicate':
+                state.first = torch.where(
+                    state.exec_mask,
+                    torch.zeros_like(state.first),
+                    state.first,
                 )
-        else:
-            if state.padding_to_add > 0 and x.shape[-1] > 0:
-                x = pad1d(x, (state.padding_to_add, 0), mode=self.pad_mode)
-                state.padding_to_add = 0
-        return self.conv(x)
+        return y
 
 
 @dataclass
 class _StreamingConvTr1dState(State):
-    pass
+    partial: torch.Tensor
 
     def reset(self):
-        pass
+        self.partial.zero_()
 
 
 class StreamingConvTranspose1d(StreamingModule[_StreamingConvTr1dState]):
@@ -282,6 +300,8 @@ class StreamingConvTranspose1d(StreamingModule[_StreamingConvTr1dState]):
         norm_kwargs: tp.Dict[str, tp.Any] = {},
     ):
         super().__init__()
+        assert trim_right_ratio == 1.
+        assert causal
         self.convtr = NormConvTranspose1d(
             in_channels,
             out_channels,
@@ -293,38 +313,106 @@ class StreamingConvTranspose1d(StreamingModule[_StreamingConvTr1dState]):
             norm=norm,
             norm_kwargs=norm_kwargs,
         )
-        self.causal = causal
-        self.trim_right_ratio = trim_right_ratio
-        assert (
-            self.causal or self.trim_right_ratio == 1.0
-        ), "`trim_right_ratio` != 1.0 only makes sense for causal convolutions"
-        assert self.trim_right_ratio >= 0.0 and self.trim_right_ratio <= 1.0
+
+    @property
+    def _stride(self) -> int:
+        return self.convtr.convtr.stride[0]
+
+    @property
+    def _kernel_size(self) -> int:
+        return self.convtr.convtr.kernel_size[0]
 
     def _init_streaming_state(self, batch_size: int) -> _StreamingConvTr1dState:
-        assert self.causal, "streaming is only supported for causal convtrs"
-        return _StreamingConvTr1dState()
+        param = next(iter(self.parameters()))
+        dtype = param.dtype
+        device = param.device
+        K = self._kernel_size
+        S = self._stride
+        partial = torch.zeros(batch_size, self.convtr.convtr.out_channels, K - S,
+                              device=device, dtype=dtype)
+        return _StreamingConvTr1dState(batch_size, device, partial)
 
     def forward(self, x):
-        kernel_size = self.convtr.convtr.kernel_size[0]
-        stride = self.convtr.convtr.stride[0]
-        padding_total = kernel_size - stride
+        B, C, T = x.shape
+        K = self._kernel_size
+        S = self._stride
+        state = self._streaming_state
 
         y = self.convtr(x)
-
-        if not self.is_streaming:
-            # We will only trim fixed padding. Extra padding from `pad_for_conv1d` would be
-            # removed at the very end, when keeping only the right length for the output,
-            # as removing it here would require also passing the length at the matching layer
-            # in the encoder.
-            if self.causal:
-                # Trim the padding on the right according to the specified ratio
-                # if trim_right_ratio = 1.0, trim everything from right
-                padding_right = math.ceil(padding_total * self.trim_right_ratio)
-                padding_left = padding_total - padding_right
-                y = unpad1d(y, (padding_left, padding_right))
-            else:
-                # Asymmetric padding required for odd strides
-                padding_right = padding_total // 2
-                padding_left = padding_total - padding_right
-                y = unpad1d(y, (padding_left, padding_right))
+        if state is None:
+            y = unpad1d(y, (0, K - S))
+        else:
+            PT = state.partial.shape[-1]
+            if PT > 0:
+                y[..., :PT] += state.partial
+                bias = self.convtr.convtr.bias
+                for_partial = y[..., -PT:]
+                if bias is not None:
+                    for_partial -= bias[:, None]
+                state.partial[:] = torch.where(
+                    state.exec_mask.view(-1, 1, 1),
+                    for_partial,
+                    state.partial)
+                y = y[..., :-PT]
         return y
+
+
+def test():
+    torch.manual_seed(1234)
+    device = "cpu"
+    if torch.cuda.is_available():
+        # Avoid the cuda optimizations that would take place on single precision
+        # floats for convolutions.
+        torch.backends.cudnn.enabled = True
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        device = "cuda:0"
+
+    kernel_sizes = [1, 3, 4, 8, 15, 16]
+    strides = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    chin = 6
+    chout = 12
+
+    for kernel, stride in itertools.product(kernel_sizes, strides):
+        if stride > kernel:
+            continue
+        conv = StreamingConv1d(chin, chout, kernel, stride, causal=True).to(device)
+        convtr = StreamingConvTranspose1d(chout, chin, kernel, stride, causal=True).to(device)
+
+        for frames in [1, 4, 8, 32, 54, 65, 128]:
+            print(f"ksize {kernel} strides {stride} frames {frames}")
+            batch_size = 3
+            length = frames * stride
+            x = torch.randn(batch_size, chin, length).to(device)
+            y = conv(x)
+            z = convtr(y)
+            for chunk_frames in [1, 2, 8]:
+                if frames % chunk_frames != 0:
+                    continue
+                ys = []
+                zs = []
+                chunk_length = chunk_frames * stride
+                with conv.streaming(batch_size), convtr.streaming(batch_size):
+                    for offset in range(0, length, chunk_length):
+                        chunk = x[..., offset : offset + chunk_length]
+                        ys.append(conv(chunk))
+                        zs.append(convtr(ys[-1]))
+                y_stream = torch.cat(ys, dim=-1)
+                z_stream = torch.cat(zs, dim=-1)
+                y = y[..., : y_stream.shape[-1]]
+                z = z[..., : z_stream.shape[-1]]
+                assert y.shape == y_stream.shape, (y.shape, y_stream.shape)
+                delta = (y_stream - y).norm() / y.norm()
+                assert delta <= 1e-6, delta
+                assert frames == y_stream.shape[-1], (frames, y_stream.shape)
+
+                assert z.shape == z_stream.shape, (z.shape, z_stream.shape)
+                delta = (z_stream - z).norm() / z.norm()
+                assert delta <= 1e-6, (delta, (z_stream - z).abs().mean(dim=(0, 1)))
+
+
+if __name__ == "__main__":
+    with torch.no_grad():
+        test()

@@ -225,7 +225,7 @@ class MimiModel(CompressionModel[_MimiState]):
             graphed_tr_enc = CUDAGraphed(self.encoder_transformer, disable=disable)
         if self.decoder_transformer is not None:
             graphed_tr_dec = CUDAGraphed(self.decoder_transformer, disable=disable)
-        return _MimiState(graphed_tr_enc, graphed_tr_dec)
+        return _MimiState(batch_size, device, graphed_tr_enc, graphed_tr_dec)
 
     @property
     def channels(self) -> int:

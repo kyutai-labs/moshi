@@ -36,11 +36,11 @@ def apply_rope(
 
     ds = torch.arange(D // 2, device=q.device, dtype=torch.float32)
     freqs = torch.exp(ds * (-math.log(max_period) * 2 / D))
-    ts = offset.float() + torch.arange(T, device=q.device, dtype=torch.float32)
+    ts = offset.float().view(-1, 1) + torch.arange(T, device=q.device, dtype=torch.float32)
     if time_before_heads:
-        ts = ts.view(-1, 1, 1)
+        ts = ts.view(B, -1, 1, 1)
     else:
-        ts = ts.view(1, -1, 1)
+        ts = ts.view(B, 1, -1, 1)
 
     dims = q.shape[:-1]
     q = q.view(*dims, D // 2, 2)
