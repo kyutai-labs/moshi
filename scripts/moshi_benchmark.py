@@ -6,9 +6,7 @@ import argparse
 import random
 import time
 
-from huggingface_hub import hf_hub_download
 import numpy as np
-import sentencepiece
 import sphn
 import torch
 from torch.profiler import profile, ProfilerActivity
@@ -18,20 +16,16 @@ from moshi.models import loaders, LMGen
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
-parser.add_argument(
-    "--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi."
-)
-parser.add_argument(
-    "--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi."
-)
-parser.add_argument(
-    "--hf-repo",
-    type=str,
-    default=loaders.DEFAULT_REPO,
-    help="HF repo to look into, defaults Moshiko. "
-    "Use this to select a different pre-trained model.",
-)
+parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
+parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
+parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO,
+                    help="HF repo to look into, defaults Moshiko. "
+                         "Use this to select a different pre-trained model.")
+parser.add_argument("--lora-weight", type=str, help="Path to a local checkpoint file for LoRA.", default=None)
+parser.add_argument("--config-path", type=str, help="Path to a local config file.", default=None)
 parser.add_argument("--steps", default=100, type=int)
+parser.add_argument("--no_fuse_lora", action="store_false", dest="fuse_lora", default=True,
+                    help="Do not fuse LoRA layers intot Linear layers.")
 parser.add_argument("--profile", action="store_true")
 parser.add_argument("--device", type=str, default="cuda")
 args = parser.parse_args()
@@ -50,23 +44,20 @@ def seed_all(seed):
 
 seed_all(42424242)
 
-if args.tokenizer is None:
-    args.tokenizer = hf_hub_download(args.hf_repo, loaders.TEXT_TOKENIZER_NAME)
-text_tokenizer = sentencepiece.SentencePieceProcessor(args.tokenizer)  # type: ignore
-
+print("retrieving checkpoint")
+checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
+    args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer,
+    lora_weights=args.lora_weight, config_path=args.config_path)
 print("loading mimi")
-if args.mimi_weight is None:
-    args.mimi_weight = hf_hub_download(args.hf_repo, loaders.MIMI_NAME)
-mimi = loaders.get_mimi(args.mimi_weight, args.device)
+mimi = checkpoint_info.get_mimi(device=args.device)
 print("mimi loaded")
 
-print("loading moshi")
-if args.moshi_weight is None:
-    args.moshi_weight = hf_hub_download(args.hf_repo, loaders.MOSHI_NAME)
-lm = loaders.get_moshi_lm(args.moshi_weight, args.device)
-lm_gen = LMGen(lm)
-print("lm loaded")
+text_tokenizer = checkpoint_info.get_text_tokenizer()
 
+print("loading moshi")
+lm = checkpoint_info.get_moshi(device=args.device, dtype=torch.bfloat16, fuse_lora=args.fuse_lora)
+lm_gen = LMGen(lm)
+print("moshi loaded")
 
 def cb(step, total):
     print(f"{step:06d} / {total:06d}", end="\r")

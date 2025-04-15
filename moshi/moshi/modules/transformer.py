@@ -180,7 +180,7 @@ class KVCacheResult(tp.NamedTuple):
         B, H, T, D = keys.shape
         assert tuple(values.shape[:-1]) == (B, H, T)
         positions = torch.arange(T, device=keys.device, dtype=torch.long)
-        return KVCacheResult(keys, values, positions)
+        return KVCacheResult(keys, values, positions.expand(B, -1))
 
 
 class RingKVCache:
@@ -200,6 +200,7 @@ class RingKVCache:
         num_heads: int,
         dim_per_head: int,
         capacity: int,
+        respect_exec_mask: bool = True,
         device: torch.device = torch.device("cuda"),
         dtype: torch.dtype = torch.bfloat16,
     ):
@@ -209,19 +210,33 @@ class RingKVCache:
             device=device,
             dtype=dtype,
         )
-        self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
+        self.respect_exec_mask = respect_exec_mask
+        if self.respect_exec_mask:
+            self.end_offset = torch.zeros(batch_size, device=device, dtype=torch.long)
+        else:
+            self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
 
     def reset(self):
         self.end_offset.zero_()
 
-    def complete(self, k: torch.Tensor, v: torch.Tensor) -> KVCacheResult:
+    def complete(self, k: torch.Tensor, v: torch.Tensor, exec_mask: torch.Tensor) -> KVCacheResult:
         assert k.shape[:-1] == v.shape[:-1], (k.shape, v.shape)
         B, H, T, D = k.shape
         assert T > 0
-        indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype) + self.end_offset
+        indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype)
+        indexes = indexes + self.end_offset.view(-1, 1)
         indexes = indexes % self.capacity
-        self.cache[0].index_copy_(2, indexes, k)
-        self.cache[1].index_copy_(2, indexes, v)
+        if self.respect_exec_mask:
+            # indexes is [B, T]
+            # k is [B, H, T, D]
+            # cache is [B, H, T', D]
+            this_indexes = indexes.view(B, 1, T, 1)
+            this_indexes = this_indexes.expand(-1, H, T, D)
+            self.cache[0].scatter_(2, this_indexes, k)
+            self.cache[1].scatter_(2, this_indexes, v)
+        else:
+            self.cache[0].index_copy_(2, indexes[0], k)
+            self.cache[1].index_copy_(2, indexes[0], v)
 
         keys = self.cache[0]
         values = self.cache[1]
@@ -231,7 +246,7 @@ class RingKVCache:
         )
 
         # end_index correspond to the actual index where the last value was written.
-        last_offset = self.end_offset + T - 1
+        last_offset = self.end_offset.view(-1, 1) + T - 1
         end_index = last_offset % self.capacity
         delta = indexes - end_index
 
@@ -246,8 +261,14 @@ class RingKVCache:
             last_offset + delta,
             last_offset + delta - self.capacity,
         )
-        self.end_offset.add_(T)
-        invalid = indexes >= self.end_offset
+        if self.respect_exec_mask:
+            self.end_offset[:] = torch.where(
+                exec_mask,
+                self.end_offset + T,
+                self.end_offset)
+        else:
+            self.end_offset.add_(T)
+        invalid = indexes >= self.end_offset.view(-1, 1)
         positions = torch.where(invalid, torch.full_like(positions, -1), positions)
 
         return KVCacheResult(keys, values, positions)
@@ -415,11 +436,14 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
         dim_per_head = self.embed_dim // self.num_heads
         kv_cache = RingKVCache(
-            batch_size, self.num_heads, dim_per_head, capacity, device, dtype
+            batch_size, self.num_heads, dim_per_head, capacity,
+            respect_exec_mask=not self.weights_per_step, device=device, dtype=dtype
         )
         return _MHAState(
+            batch_size,
+            device,
             kv_cache,
-            offset=torch.zeros(1, device=device, dtype=torch.long),
+            offset=torch.zeros(batch_size, device=device, dtype=torch.long),
             offset_cpu=0,
         )
 
@@ -428,14 +452,14 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         if state is None:
             return KVCacheResult.from_kv(k, v)
         else:
-            return state.kv_cache.complete(k, v)
+            return state.kv_cache.complete(k, v, state.exec_mask)
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
         state = self._streaming_state
-        T = query.shape[1]
+        B, T = query.shape[:2]
 
         if state is None:
-            offset = torch.zeros(1, device=query.device, dtype=torch.long)
+            offset = torch.zeros(B, device=query.device, dtype=torch.long)
             offset_cpu = 0
         else:
             assert self.causal, "Streaming only available for causal"
@@ -452,15 +476,15 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             q, k = self.rope(q, k, offset, time_before_heads=False)
 
         k, v, pos_k = self._complete_kv(k, v)
+        pos_k = pos_k[:, None]
         if self.causal:
-            pos_k = pos_k.view(1, -1)
-            pos_q = offset + torch.arange(T, device=q.device, dtype=torch.long).view(
-                -1, 1
-            )
+            pos_q = offset.view(-1, 1, 1) + torch.arange(T, device=q.device, dtype=torch.long).view(
+                -1, 1)
             delta = pos_q - pos_k
             attn_bias = (pos_k >= 0) & (delta >= 0)
             if self.context is not None:
                 attn_bias = attn_bias & (delta < self.context)
+            attn_bias = attn_bias[:, None]
         else:
             attn_bias = None
         x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)
@@ -470,7 +494,10 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             self.out_projs, self.weights_per_step_schedule, x, offset_cpu)
 
         if state is not None:
-            state.offset.add_(T)
+            state.offset[:] = torch.where(
+                state.exec_mask,
+                state.offset + T,
+                state.offset)
             state.offset_cpu += T
         return x
 
@@ -608,7 +635,8 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
             self.layer_scale_2 = LayerScale(d_model, layer_scale, **factory_kwargs)  # type: ignore
 
     def _init_streaming_state(self, batch_size: int) -> _LayerState:
-        return _LayerState(offset_cpu=0)
+        device = next(iter(self.parameters())).device
+        return _LayerState(batch_size, device, offset_cpu=0)
 
     # feed forward block
     def _ff_block(self, x: torch.Tensor) -> torch.Tensor:
@@ -735,7 +763,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
 
     def _init_streaming_state(self, batch_size: int) -> _TransformerState:
         device = next(self.parameters()).device
-        return _TransformerState(offset=torch.zeros(1, device=device, dtype=torch.long))
+        return _TransformerState(batch_size, device, offset=torch.zeros(1, device=device, dtype=torch.long))
 
     def forward(self, x: torch.Tensor, *args, **kwargs):
         B, T, C = x.shape

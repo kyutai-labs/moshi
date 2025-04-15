@@ -243,6 +243,9 @@ class CUDAGraphed:
                     if source.shape != target.shape:
                         raise ValueError(
                             f"Argument #{idx} had shape {target.shape}, but got shape {source.shape}"
+                            "When using CUDAGraph, every call must be done with exactly the same shapes. "
+                            "Feel free to deactivate with the env variable NO_CUDA_GRAPH=1, or the decorator "
+                            "`with no_cuda_graph():`"
                         )
                     target.copy_(source)
                 else:

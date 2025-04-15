@@ -14,8 +14,7 @@ import numpy as np
 import torch.nn as nn
 
 from .conv import StreamingConv1d, StreamingConvTranspose1d
-from .streaming import StreamingContainer, StreamingAdd
-from ..utils.compile import torch_compile_lazy
+from .streaming import StreamingContainer
 
 
 class SEANetResnetBlock(StreamingContainer):
@@ -74,7 +73,6 @@ class SEANetResnetBlock(StreamingContainer):
                 ),
             ]
         self.block = nn.Sequential(*block)
-        self.add = StreamingAdd()
         self.shortcut: nn.Module
         if true_skip:
             self.shortcut = nn.Identity()
@@ -91,7 +89,8 @@ class SEANetResnetBlock(StreamingContainer):
 
     def forward(self, x):
         u, v = self.shortcut(x), self.block(x)
-        return self.add(u, v)
+        assert u.shape == v.shape, (u.shape, v.shape, x.shape)
+        return u + v
 
 
 class SEANetEncoder(StreamingContainer):
@@ -236,7 +235,6 @@ class SEANetEncoder(StreamingContainer):
 
         self.model = nn.Sequential(*model)
 
-    @torch_compile_lazy
     def forward(self, x):
         return self.model(x)
 
@@ -389,7 +387,6 @@ class SEANetDecoder(StreamingContainer):
             model += [final_act(**final_activation_params)]
         self.model = nn.Sequential(*model)
 
-    @torch_compile_lazy
     def forward(self, z):
         y = self.model(z)
         return y

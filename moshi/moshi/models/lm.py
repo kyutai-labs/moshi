@@ -458,7 +458,6 @@ class LMModel(StreamingContainer):
 
 @dataclass
 class _LMGenState(State):
-    batch_size: int
     cache: torch.Tensor
     initial: torch.Tensor
     graphed_main: CUDAGraphed
@@ -538,7 +537,7 @@ class LMGen(StreamingModule[_LMGenState]):
         graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
 
         state = _LMGenState(
-            batch_size, cache, initial, graphed_main, graphed_depth,
+            batch_size, lm_model.device, cache, initial, graphed_main, graphed_depth,
             condition_sum=condition_sum)
 
         if self.cfg_coef != 1.:
