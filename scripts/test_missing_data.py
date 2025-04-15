@@ -31,7 +31,7 @@ print("Going streaming")
 with mimi.streaming(B), torch.no_grad():
     while any(remaining):
         inputs = []
-        exec_mask = torch.rand(B) < 1.
+        exec_mask = torch.rand(B) < 0.5
         offsets = []
         for b, this_remaining in enumerate(remaining):
             offset = min(total - this_remaining, total - 1)

@@ -14,7 +14,6 @@ for Mimi. Also defines the main interface that a model must follow to be usable 
 """
 
 from abc import abstractmethod
-from contextlib import nullcontext
 from dataclasses import dataclass
 import logging
 import typing as tp
@@ -31,7 +30,7 @@ from ..quantization import (
 )
 from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
 from ..modules.streaming import StreamingModule, State, StateT
-from ..utils.compile import no_compile, CUDAGraphed
+from ..utils.compile import CUDAGraphed
 
 
 logger = logging.getLogger()
@@ -94,6 +93,8 @@ class CompressionModel(StreamingModule[StateT]):
 class _MimiState(State):
     graphed_tr_enc: CUDAGraphed | None
     graphed_tr_dec: CUDAGraphed | None
+    graphed_encoder: CUDAGraphed
+    graphed_decoder: CUDAGraphed
 
 
 class MimiModel(CompressionModel[_MimiState]):
@@ -117,10 +118,6 @@ class MimiModel(CompressionModel[_MimiState]):
         freeze_encoder: whether to freeze the encoder weights.
         freeze_quantizer: whether to freeze the quantizer weights.
         freeze_quantizer_level: If positive, freeze the quantizer up to this level.
-        torch_compile_encoder_decoder (bool): if True, uses torch.compile on the encoder / decoder.
-            Deactivated by default for training as this is incompatible at the moment with weight norm.
-            See https://github.com/pytorch/pytorch/issues/121902
-            Also this seems to work well with 2.2.0, but completely fail with 2.4.0.
     """
 
     def __init__(
@@ -140,7 +137,6 @@ class MimiModel(CompressionModel[_MimiState]):
         freeze_encoder: bool = False,
         freeze_quantizer: bool = False,
         freeze_quantizer_level: int = -1,
-        torch_compile_encoder_decoder: bool = False,
     ):
         super().__init__()
         self.encoder = encoder
@@ -152,7 +148,6 @@ class MimiModel(CompressionModel[_MimiState]):
         self._sample_rate = sample_rate
         self._channels = channels
         self.encoder_frame_rate = encoder_frame_rate
-        self.torch_compile_encoder_decoder = torch_compile_encoder_decoder
 
         if freeze_encoder:
             for p in self.encoder.parameters():
@@ -225,7 +220,9 @@ class MimiModel(CompressionModel[_MimiState]):
             graphed_tr_enc = CUDAGraphed(self.encoder_transformer, disable=disable)
         if self.decoder_transformer is not None:
             graphed_tr_dec = CUDAGraphed(self.decoder_transformer, disable=disable)
-        return _MimiState(batch_size, device, graphed_tr_enc, graphed_tr_dec)
+        graphed_encoder = CUDAGraphed(self.encoder, disable=disable)
+        graphed_decoder = CUDAGraphed(self.decoder, disable=disable)
+        return _MimiState(batch_size, device, graphed_tr_enc, graphed_tr_dec, graphed_encoder, graphed_decoder)
 
     @property
     def channels(self) -> int:
@@ -284,13 +281,6 @@ class MimiModel(CompressionModel[_MimiState]):
         else:
             return self.upsample(x)
 
-    @property
-    def _context_for_encoder_decoder(self):
-        if self.torch_compile_encoder_decoder:
-            return nullcontext()
-        else:
-            return no_compile()
-
     def forward(self, x: torch.Tensor) -> QuantizedResult:
         assert x.dim() == 3
         length = x.shape[-1]
@@ -309,8 +299,7 @@ class MimiModel(CompressionModel[_MimiState]):
             else:
                 raise ValueError(f"Unsupported quantizer type {type(self.quantizer)}")
 
-        with self._context_for_encoder_decoder:
-            emb = self.encoder(x)
+        emb = self.encoder(x)
         if self.encoder_transformer is not None:
             (emb,) = self.encoder_transformer(emb)
         emb = self._to_framerate(emb)
@@ -327,8 +316,7 @@ class MimiModel(CompressionModel[_MimiState]):
         if self.decoder_transformer is not None:
             (emb,) = self.decoder_transformer(emb)
 
-        with self._context_for_encoder_decoder:
-            out = self.decoder(emb)
+        out = self.decoder(emb)
 
         # remove extra padding added by the encoder and decoder
         assert out.shape[-1] >= length, (out.shape[-1], length)
@@ -351,8 +339,10 @@ class MimiModel(CompressionModel[_MimiState]):
             x.dim() == 3
         ), f"CompressionModel._encode_to_unquantized_latent expects audio of shape [B, C, T] but got {x.shape}"
         state = self._streaming_state
-        with self._context_for_encoder_decoder:
+        if state is None:
             emb = self.encoder(x)
+        else:
+            emb = state.graphed_encoder(x)
         if self.encoder_transformer is not None:
             if state is None:
                 (emb,) = self.encoder_transformer(emb)
@@ -410,8 +400,10 @@ class MimiModel(CompressionModel[_MimiState]):
             else:
                 assert state.graphed_tr_dec is not None
                 (emb,) = state.graphed_tr_dec(emb)
-        with self._context_for_encoder_decoder:
+        if state is None:
             out = self.decoder(emb)
+        else:
+            out = state.graphed_decoder(emb)
         # out contains extra padding added by the encoder and decoder
         return out
 
