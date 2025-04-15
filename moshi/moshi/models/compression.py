@@ -28,6 +28,7 @@ from ..quantization import (
     SplitResidualVectorQuantizer,
     ResidualVectorQuantizer,
 )
+from ..modules.conv import pad_for_conv1d
 from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
 from ..modules.streaming import StreamingModule, State, StateT
 from ..utils.compile import CUDAGraphed
@@ -62,6 +63,10 @@ class CompressionModel(StreamingModule[StateT]):
     @property
     @abstractmethod
     def channels(self) -> int: ...
+
+    @property
+    @abstractmethod
+    def frame_size(self) -> int: ...
 
     @property
     @abstractmethod
@@ -237,6 +242,10 @@ class MimiModel(CompressionModel[_MimiState]):
         return self._sample_rate
 
     @property
+    def frame_size(self) -> int:
+        return int(self.sample_rate / self.frame_rate)
+
+    @property
     def total_codebooks(self):
         """Total number of quantizer codebooks available."""
         return self.quantizer.total_codebooks
@@ -338,10 +347,22 @@ class MimiModel(CompressionModel[_MimiState]):
         assert (
             x.dim() == 3
         ), f"CompressionModel._encode_to_unquantized_latent expects audio of shape [B, C, T] but got {x.shape}"
+
         state = self._streaming_state
+        frame_size = self.frame_size
+
         if state is None:
+            # The underlying convolutions no longer accept partial inputs,
+            # `x` needs to be exactly a multiple of the frame size,
+            # reproducing the previous padding behavior here.
+            x = pad_for_conv1d(x, frame_size, frame_size)
             emb = self.encoder(x)
         else:
+            if x.shape[-1] % frame_size != 0 or x.shape[-1] == 0:
+                raise RuntimeError(
+                    f"Invalid input x of length {x.shape[-1]}. The length must be "
+                    f"a positive multiple of the frame size {frame_size}. "
+                    "You are responsible for buffering accordingly before feeding audio to Mimi.")
             emb = state.graphed_encoder(x)
         if self.encoder_transformer is not None:
             if state is None:
@@ -449,6 +470,10 @@ class WrapperCompressionModel(CompressionModel[State]):
     @property
     def sample_rate(self) -> int:
         return self.model.sample_rate
+
+    @property
+    def frame_size(self) -> int:
+        return self.model.frame_size
 
     @property
     def cardinality(self) -> int:

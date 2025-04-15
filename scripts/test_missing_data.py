@@ -1,3 +1,5 @@
+"""Testing exec_mask feature of the streaming module, where each batch entry
+can advance at its own pace, while retaining full compat with CUDA Graph."""
 import sys
 import sphn
 import torch

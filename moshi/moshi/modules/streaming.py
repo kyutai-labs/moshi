@@ -23,7 +23,10 @@ import torch
 @dataclass
 class State(abc.ABC):
     """Base State for streaming, requires to be resetable and also support the context
-    protocol. The state will be entered when """
+    protocol. The state __enter__ and __exit__ will be called upon entering and exiting
+    streaming in the parent module, but not upon `reset()` calls.
+    """
+
     batch_size: int
     device: torch.device
 
@@ -50,7 +53,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
 
     To set a streaming component in streaming state, use
 
-        with module.streaming():
+        with module.streaming(batch_size):
             ...
 
     This will automatically void the streaming state when exiting the context manager.
@@ -161,6 +164,17 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
             raise RuntimeError(f"Some states were not consumed: {list(state.keys())}")
 
     def set_exec_mask(self, exec_mask: torch.Tensor):
+        """Set the execution mask, a tensor of boolean of shape `(B,), indicating
+        for each batch item whether the internal state should be updated or not as if
+        real data had been received.
+
+        This is useful for running desynchronized streams with batching, e.g. when
+        the mask is False for an entry, the internal state will be unchanged by the provided
+        data, e.g. will be on the next step as if the previous one had never happened.
+
+        There is no magic here, each StreamingModule subclass is responsible for respecting
+        the exec_mask.
+        """
         def _set_exec_mask(name: str, module: StreamingModule):
             nonlocal exec_mask
             state = module._streaming_state
