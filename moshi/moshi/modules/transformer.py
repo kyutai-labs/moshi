@@ -329,6 +329,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             number of possible time steps.
         weights_per_step_schedule (list[int] | None): if provided, some steps will share weights when
             `weights_per_step` is True, e.g. step `I` will use weights `schedule[I]`.
+        cross_attention (bool): True if this is to be used as a cross attention.
         device (torch.device, optional): Device on which to initialize.
         dtype (torch.dtype, optional): dtype to use.
     """
@@ -344,6 +345,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         rope: tp.Optional[RotaryEmbedding] = None,
         weights_per_step: int = 0,
         weights_per_step_schedule: list[int] | None = None,
+        cross_attention: bool = False,
         device=None,
         dtype=None,
     ):
@@ -357,6 +359,13 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         self.num_heads = num_heads
         self.weights_per_step = weights_per_step
         self.weights_per_step_schedule = weights_per_step_schedule
+        self.cross_attention = cross_attention
+        if cross_attention:
+            assert not weights_per_step, "weights_per_step not supported for cross attention."
+            assert rope is None, "rope and cross_attention makes no sense."
+            assert not causal, "causal and cross attention makes no sense."
+            # We do not want to activate the streaming KVCache if we are a cross attention.
+            self.set_streaming_detached(True)
 
         out_dim = 3 * embed_dim
         mult = 1
@@ -466,12 +475,23 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             offset = state.offset
             offset_cpu = state.offset_cpu
 
-        projected = apply_weights_per_step(
-            self.in_projs, self.weights_per_step_schedule, query, offset_cpu)
+        if self.cross_attention:
+            assert state is None
+            assert len(self.in_projs) == 1
+            in_proj = self.in_projs[0]
+            assert in_proj.bias is None
+            assert isinstance(in_proj, nn.Linear)
+            dim = in_proj.weight.shape[0] // 3
+            q = nn.functional.linear(query, in_proj.weight[:dim])
+            k = nn.functional.linear(key, in_proj.weight[dim: 2 * dim])
+            v = nn.functional.linear(value, in_proj.weight[2 * dim:])
+        else:
+            projected = apply_weights_per_step(
+                self.in_projs, self.weights_per_step_schedule, query, offset_cpu)
 
-        q, k, v = rearrange(
-            projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
-        )
+            q, k, v = rearrange(
+                projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
+            )
         if self.rope:
             q, k = self.rope(q, k, offset, time_before_heads=False)
 
@@ -519,7 +539,6 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         dim_feedforward (int): Intermediate dimension of FF module.
         causal (bool): Causal mask applied automatically.
         context (int, optional): Receptive field for the causal mask, infinite if None.
-        custom (bool): Use custom MHA implementation, for testing / benchmarking.
         rope (`RotaryEmbedding`, optional): Rope embedding to use.
         norm (str): Normalization to use. Currently, only 'layer_norm' is supported.
         layer_scale (float, optional): If not None, LayerScale will be used with the given value as initial scale.
@@ -529,6 +548,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         weights_per_step_schedule (list[int] | None): if provided, some steps will share weights when
             `weights_per_step` is True, e.g. step `I` will use weights `schedule[I]`.
         skip_self_attn: If true, skips the self attention module and the norm
+        cross_attention (bool): If True, expect to get secondary input for cross-attention.
         device (torch.device, optional): Device on which to initialize.
         dtype (torch.dtype, optional): dtype to use.
     """
@@ -550,6 +570,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         weights_per_step_schedule: list[int] | None = None,
         activation=F.gelu,
         skip_self_attn: bool = False,
+        cross_attention: bool = False,
         device=None,
         dtype=None,
     ):
@@ -625,14 +646,24 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
                     gating, d_model, dim_feedforward, **factory_kwargs
                 )
 
+        self.cross_attention: StreamingMultiheadAttention | None = None
+        if cross_attention:
+            self.cross_attention = StreamingMultiheadAttention(
+                cross_attention=True, **attn_kwargs, **factory_kwargs)  # type: ignore
+            self.norm_cross = nn.LayerNorm(d_model, eps=1e-5, **factory_kwargs)  # type: ignore
+
         self.layer_scale_1: nn.Module
         self.layer_scale_2: nn.Module
         if layer_scale is None:
             self.layer_scale_1 = nn.Identity()
             self.layer_scale_2 = nn.Identity()
+            if cross_attention:
+                self.layer_scale_cross = nn.Identity()
         else:
             self.layer_scale_1 = LayerScale(d_model, layer_scale, **factory_kwargs)  # type: ignore
             self.layer_scale_2 = LayerScale(d_model, layer_scale, **factory_kwargs)  # type: ignore
+            if cross_attention:
+                self.layer_scale_cross = LayerScale(d_model, layer_scale, **factory_kwargs)  # type: ignore
 
     def _init_streaming_state(self, batch_size: int) -> _LayerState:
         device = next(iter(self.parameters())).device
@@ -666,11 +697,25 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         update = self.self_attn(x, x, x)
         return x_orig.to(update) + self.layer_scale_1(update)
 
-    def forward(self, x: torch.Tensor):
+    def _cross_attention_block(self, x: torch.Tensor,
+                               cross_attention_src: torch.Tensor) -> torch.Tensor:
+        assert self.cross_attention is not None
+        x_orig = x
+        x = self.norm_cross(x)
+        # queries are from src, keys and values from cross_attention_src.
+        update = self.cross_attention(x, cross_attention_src, cross_attention_src)
+        return x_orig + self.layer_scale_cross(update)
+
+    def forward(self, x: torch.Tensor, cross_attention_src: torch.Tensor | None = None):
         with ExitStack() as stack:
             if x.device.type != 'cuda':
                 stack.enter_context(no_compile())
             x = self._sa_block(x)
+            if self.cross_attention is not None:
+                assert cross_attention_src is not None
+                x = self._cross_attention_block(x, cross_attention_src)
+            else:
+                assert cross_attention_src is None
             x = self._ff_block(x)
             state = self._streaming_state
             if state:

@@ -11,7 +11,7 @@ def import_model(
     out_path: Path,
     weights_per_step_schedule: list[int] | None = None,
 ) -> None:
-    pkg = torch.load(in_path, map_location=torch.device("cpu"))
+    pkg = torch.load(in_path, map_location=torch.device("cpu"), weights_only=False)
     tch_model = pkg["fsdp_best_state"]["model"]
     for k, v in sorted(tch_model.items()):
         print(k, v.shape, v.dtype)
@@ -82,9 +82,9 @@ def import_model(
             if "depformer_text_emb.low_rank.weight" in tch_model:
                 model[base + "emb.low_rank.weight"] = tch_model["depformer_text_emb.low_rank.weight"].clone()
         else:
-            model[base + "emb.weight"] = tch_model[f"depformer_emb.{tch_idx-1}.weight"].clone()
-            if f"depformer_emb.{tch_idx-1}.low_rank.weight" in tch_model:
-                model[base + "emb.low_rank.weight"] = tch_model[f"depformer_emb.{tch_idx-1}.low_rank.weight"].clone()
+            model[base + "emb.weight"] = tch_model[f"depformer_emb.{idx-1}.weight"].clone()
+            if f"depformer_emb.{idx-1}.low_rank.weight" in tch_model:
+                model[base + "emb.low_rank.weight"] = tch_model[f"depformer_emb.{idx-1}.low_rank.weight"].clone()
 
         for layer_idx in range(depformer_layers):
             layer = base + f"transformer.layers.{layer_idx}."
@@ -133,6 +133,8 @@ def main():
     if args.wpss is not None:
         if args.wpss == "hibiki-2b":
             wpss = [0, 1, 2, 3, 4, 5, 6, 7] + [8] * 8 + [9] * 16
+        elif args.wpss == "secret":
+            wpss = [0, 1, 2, 3, 4, 5, 6, 7] + [8] * 8 + [9] * 8 + [10] * 8
         else:
             raise ValueError(f"unknown wpss {args.wpss}")
 

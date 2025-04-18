@@ -19,7 +19,7 @@ def import_model(
     if in_path.suffix == ".safetensors":
         tch_model = load_file(in_path)
     else:
-        pkg = torch.load(in_path, map_location=torch.device("cpu"))
+        pkg = torch.load(in_path, map_location=torch.device("cpu"), weights_only=False)
         tch_model = pkg["fsdp_best_state"]["model"]
 
     in_n_q: int | None = None
@@ -99,7 +99,7 @@ def import_model(
                 model[base + "emb.low_rank.weight"] = tch_model["depformer_text_emb.low_rank.weight"].clone()
         else:
             model[base + "emb.weight"] = tch_model[f"depformer_emb.{idx-1}.weight"].clone()
-            if f"depformer_emb.{tch_idx-1}.low_rank.weight" in tch_model:
+            if f"depformer_emb.{idx-1}.low_rank.weight" in tch_model:
                 model[base + "emb.low_rank.weight"] = tch_model[f"depformer_emb.{idx-1}.low_rank.weight"].clone()
 
         for layer_idx in range(depformer_layers):
