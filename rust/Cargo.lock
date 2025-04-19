@@ -2549,7 +2549,7 @@ dependencies = [
 
 [[package]]
 name = "mimi-pyo3"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "moshi",
@@ -2627,7 +2627,7 @@ dependencies = [
 
 [[package]]
 name = "moshi"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "candle-core",
  "candle-flash-attn",
@@ -2640,7 +2640,7 @@ dependencies = [
 
 [[package]]
 name = "moshi-backend"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -2685,7 +2685,7 @@ dependencies = [
 
 [[package]]
 name = "moshi-cli"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "byteorder",

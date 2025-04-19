@@ -19,6 +19,7 @@ pub struct Config {
     pub text_start_token: u32,
     pub text_audio_delay_in_tokens: usize,
     pub max_consecutive_pads: usize,
+    pub extra_steps: usize,
     pub speaker_cond_duration_s: f64,
     pub speaker_cond_dim: usize,
     pub speaker_cond_n_speakers: usize,
@@ -35,6 +36,7 @@ impl Config {
             text_start_token: 8000,
             text_audio_delay_in_tokens: 25, // aka interleaver_delay = 2s
             max_consecutive_pads: 10,
+            extra_steps: 5,
             speaker_cond_duration_s: 10.,
             speaker_cond_dim: 2048,
             speaker_cond_n_speakers: 5,
@@ -112,7 +114,12 @@ impl State {
 
     // The acoustic tokens are written with a delay, so this can create "gaps" of UNGENERATED
     // tokens in the case where we call `step_audio_prompt` *after* `step`.
-    pub fn step(&mut self, prev_text_token: u32, allowed_tokens: AllowedTokens) -> Result<u32> {
+    pub fn step(
+        &mut self,
+        prev_text_token: u32,
+        allowed_tokens: AllowedTokens,
+        conditions: Option<&crate::conditioner::Condition>,
+    ) -> Result<u32> {
         let mut codes = Vec::with_capacity(self.model.generated_audio_codebooks());
         let dev = self.model.device();
         let batch_size = if self.cfg_alpha.is_some() { 2 } else { 1 };
@@ -152,8 +159,8 @@ impl State {
         let prev_text_token =
             Some(Tensor::from_vec(vec![prev_text_token; batch_size], (batch_size, 1), dev)?);
         let (text_logits, ys) = match self.ca_src.as_ref() {
-            None => self.model.forward(prev_text_token, codes)?,
-            Some(ca_src) => self.model.forward_ca(prev_text_token, codes, ca_src)?,
+            None => self.model.forward_cond(prev_text_token, codes, conditions)?,
+            Some(ca_src) => self.model.forward_ca(prev_text_token, codes, ca_src, conditions)?,
         };
         let text_logits = match self.cfg_alpha {
             None => text_logits.i((0, 0))?,
@@ -189,20 +196,24 @@ impl State {
             self.consecutive_pads = 0
         }
         self.text_tokens[self.step_idx] = text_token;
-        let last_audio_tokens = match self.cfg_alpha {
-            None => self.model.depformer_sample(
-                &ys,
-                Some(text_token),
-                self.forced_audio_tokens.forced_tokens(self.step_idx),
-                &mut self.audio_lp,
-            )?,
-            Some(cfg_alpha) => self.model.depformer_sample_cfg(
-                &ys,
-                cfg_alpha,
-                Some(text_token),
-                self.forced_audio_tokens.forced_tokens(self.step_idx),
-                &mut self.audio_lp,
-            )?,
+        let last_audio_tokens = if self.step_idx < self.config.text_audio_delay_in_tokens {
+            None
+        } else {
+            match self.cfg_alpha {
+                None => self.model.depformer_sample(
+                    &ys,
+                    Some(text_token),
+                    self.forced_audio_tokens.forced_tokens(self.step_idx),
+                    &mut self.audio_lp,
+                )?,
+                Some(cfg_alpha) => self.model.depformer_sample_cfg(
+                    &ys,
+                    cfg_alpha,
+                    Some(text_token),
+                    self.forced_audio_tokens.forced_tokens(self.step_idx),
+                    &mut self.audio_lp,
+                )?,
+            }
         };
         let audio_pad_token = self.audio_pad_token();
         for c_idx in 0..self.model.generated_audio_codebooks() {
@@ -226,6 +237,17 @@ impl State {
             candle::bail!("max step-idx reached")
         }
         Ok(text_token)
+    }
+
+    pub fn overwrite_last_text_token(&mut self, text_token: u32) -> Result<()> {
+        if self.step_idx == 0 {
+            candle::bail!("cannot overwrite first token")
+        }
+        if text_token == UNGENERATED {
+            candle::bail!("cannot overwrite with UNGENERATED")
+        }
+        self.text_tokens[self.step_idx - 1] = text_token;
+        Ok(())
     }
 
     /// If include_all is set, all the time steps are returned. Otherwise only the timesteps that
@@ -262,8 +284,16 @@ impl State {
         }
     }
 
+    pub fn audio_codebooks(&self) -> usize {
+        self.model.generated_audio_codebooks()
+    }
+
     pub fn device(&self) -> &candle::Device {
         self.model.device()
+    }
+
+    pub fn dtype(&self) -> candle::DType {
+        self.model.dtype()
     }
 }
 
@@ -281,20 +311,19 @@ pub fn tokenize_prompt<E>(
 ) -> std::result::Result<Vec<(Vec<u32>, Speaker)>, E> {
     let mut prompt = vec![];
     for (turn_idx, turn) in text.iter().enumerate() {
-        let speaker = if turn_idx % 2 == 1 { Speaker::Main } else { Speaker::Other };
-        let mut inserted_bos = false;
+        let (speaker, turn_token) = if turn_idx % 2 == 0 {
+            (Speaker::Main, text_bos_token)
+        } else {
+            (Speaker::Other, text_eos_token)
+        };
         for (word_idx, word) in turn.split(' ').enumerate() {
             let mut word = encode(word)?.into_iter().collect::<Vec<_>>();
             if word_idx == 0 && speaker == Speaker::Main {
-                inserted_bos = true;
-                word.insert(0, text_bos_token)
+                word.insert(0, turn_token)
             }
             if !word.is_empty() {
                 prompt.push((word, speaker))
             }
-        }
-        if speaker == Speaker::Main && inserted_bos {
-            prompt.push((vec![text_eos_token], Speaker::Main))
         }
     }
     Ok(prompt)

@@ -2,7 +2,7 @@
 // This source code is licensed under the license found in the
 // LICENSE file in the root directory of this source tree.
 
-use candle::{Result, Tensor};
+use candle::{IndexOp, Result, Tensor};
 
 pub trait Dim: candle::shape::Dim + Copy {}
 impl<T: candle::shape::Dim + Copy> Dim for T {}
@@ -185,6 +185,20 @@ impl StreamingBinOp {
         self.prev_lhs = prev_lhs;
         self.prev_rhs = prev_rhs;
         Ok(ys)
+    }
+
+    pub fn reset_batch_idx(&mut self, batch_idx: usize, _batch_size: usize) -> Result<()> {
+        if let Some(v) = self.prev_lhs.as_option() {
+            let v = v.contiguous()?;
+            v.i(batch_idx..(1 + batch_idx))?.zero_set()?;
+            self.prev_lhs = StreamTensor::from_tensor(v);
+        }
+        if let Some(v) = self.prev_rhs.as_option() {
+            let v = v.contiguous()?;
+            v.i(batch_idx..(1 + batch_idx))?.zero_set()?;
+            self.prev_rhs = StreamTensor::from_tensor(v);
+        }
+        Ok(())
     }
 }
 

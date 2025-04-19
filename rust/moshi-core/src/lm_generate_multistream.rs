@@ -238,7 +238,7 @@ impl State {
                 if self.cfg_alpha.is_some() {
                     candle::bail!("cfg is not supported with cross attention")
                 }
-                let (logits, ys) = self.model.forward_ca(text_token, codes, ca_src)?;
+                let (logits, ys) = self.model.forward_ca(text_token, codes, ca_src, None)?;
                 (logits.i((0, 0))?, ys)
             }
         };
