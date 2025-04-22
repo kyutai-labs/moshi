@@ -650,6 +650,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         if cross_attention:
             self.cross_attention = StreamingMultiheadAttention(
                 cross_attention=True, **attn_kwargs, **factory_kwargs)  # type: ignore
+            # Cross attentio norm is always a layer norm, for no specific reason.
             self.norm_cross = nn.LayerNorm(d_model, eps=1e-5, **factory_kwargs)  # type: ignore
 
         self.layer_scale_1: nn.Module
