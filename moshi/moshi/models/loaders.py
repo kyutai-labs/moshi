@@ -138,6 +138,11 @@ class CheckpointInfo:
             Can be None if the original Moshi 7B config should be used.
         raw_config: raw config, including original keys not intended for the LM.
         model_type: indicate the intended use, should be `moshi` or `hibiki`.
+        lora_weights: path to an optional checkpoint with lora weights.
+        lm_gen_config: optional default params to use for generation with this model.
+        tts_config: optional TTS specific configuration.
+        model_id: optional dict containing tracability information on the model origin, in particular
+            its signature and epoch.
     """
 
     moshi_weights: Path
@@ -149,6 +154,7 @@ class CheckpointInfo:
     lora_weights: Path | None = None
     lm_gen_config: dict = field(default_factory=dict)
     tts_config: dict = field(default_factory=dict)
+    model_id: dict = field(default_factory=dict)
 
     @staticmethod
     def from_hf_repo(
@@ -186,6 +192,7 @@ class CheckpointInfo:
             model_type = "moshi"
             lm_gen_config = {}
             tts_config = {}
+            model_id = {}
             lora_name = None
         else:
             raw_config = json.loads(Path(config_path).read_text())
@@ -197,6 +204,7 @@ class CheckpointInfo:
             model_type = lm_config.pop("model_type", "moshi")
             lm_gen_config = lm_config.pop("lm_gen_config", {})
             tts_config = lm_config.pop("tts_config", {})
+            model_id = lm_config.pop("model_id", {})
 
         if moshi_weights is None:
             moshi_weights_final = hf_get(moshi_name, hf_repo)
@@ -230,6 +238,7 @@ class CheckpointInfo:
             lora_weights_final,
             lm_gen_config=lm_gen_config,
             tts_config=tts_config,
+            model_id=model_id,
         )
 
     def get_mimi(self, device: torch.device | str = "cpu") -> MimiModel:
