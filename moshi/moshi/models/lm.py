@@ -102,7 +102,7 @@ class LMModel(StreamingContainer):
         self.dep_q = dep_q
         self.card = card
         self.text_card = text_card
-        assert len(delays) == self.num_codebooks, "unexpected number of delays"
+        assert len(delays) == self.num_codebooks, f"expected {self.num_codebooks} delays, got {len(delays)}."
         self.delays = delays
         self.dim = dim
         self.existing_text_padding_id = existing_text_padding_id
@@ -154,6 +154,7 @@ class LMModel(StreamingContainer):
         )
         kwargs_dep["positional_embedding"] = depformer_pos_emb
         kwargs_dep["context"] = None
+        kwargs_dep["cross_attention"] = False
         if depformer_weights_per_step:
             kwargs_dep["weights_per_step"] = dep_q
         if depformer_multi_linear:

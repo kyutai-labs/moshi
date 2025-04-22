@@ -481,10 +481,10 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             in_proj = self.in_projs[0]
             assert in_proj.bias is None
             assert isinstance(in_proj, nn.Linear)
-            dim = in_proj.weight.shape[0] // 3
-            q = nn.functional.linear(query, in_proj.weight[:dim])
-            k = nn.functional.linear(key, in_proj.weight[dim: 2 * dim])
-            v = nn.functional.linear(value, in_proj.weight[2 * dim:])
+            qw, kw, vw = in_proj.weight.chunk(3)
+            q = nn.functional.linear(query, qw)
+            k = nn.functional.linear(key, kw)
+            v = nn.functional.linear(value, vw)
         else:
             projected = apply_weights_per_step(
                 self.in_projs, self.weights_per_step_schedule, query, offset_cpu)
