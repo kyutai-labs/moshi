@@ -362,10 +362,11 @@ def get_moshi_lm(
         if _is_safetensors(filename):
             state = load_file(filename, device=str(device))
             for key, value in state.items():
-                if key.startswith('condition_provider.') or key.startswith('fuser.'):
-                    value = value.float()
-                else:
-                    value = value.to(dtype)
+                if value.dtype.is_floating_point:
+                    if key.startswith('condition_provider.') or key.startswith('fuser.'):
+                        value = value.float()
+                    else:
+                        value = value.to(dtype)
                 state[key] = value
             model.load_state_dict(state, assign=True)
 
