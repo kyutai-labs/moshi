@@ -219,6 +219,17 @@ impl Mimi {
         self.decoder.reset_state();
         self.decoder_transformer.reset_state();
         self.upsample.reset_state();
+        self.downsample.reset_state();
+    }
+
+    pub fn reset_batch_idx(&mut self, batch_idx: usize, batch_size: usize) -> Result<()> {
+        self.encoder_transformer.reset_batch_idx(batch_idx, batch_size)?;
+        self.encoder_transformer.reset_batch_idx(batch_idx, batch_size)?;
+        self.encoder.reset_batch_idx(batch_idx, batch_size)?;
+        self.decoder.reset_batch_idx(batch_idx, batch_size)?;
+        self.upsample.reset_batch_idx(batch_idx, batch_size)?;
+        self.downsample.reset_batch_idx(batch_idx, batch_size)?;
+        Ok(())
     }
 }
 

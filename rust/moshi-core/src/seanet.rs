@@ -99,6 +99,17 @@ impl SeaNetResnetBlock {
             span: tracing::span!(tracing::Level::TRACE, "sea-resnet"),
         })
     }
+
+    pub fn reset_batch_idx(&mut self, batch_idx: usize, batch_size: usize) -> Result<()> {
+        for b in self.block.iter_mut() {
+            b.reset_batch_idx(batch_idx, batch_size)?;
+        }
+        if let Some(shortcut) = self.shortcut.as_mut() {
+            shortcut.reset_batch_idx(batch_idx, batch_size)?;
+        }
+        self.skip_op.reset_batch_idx(batch_idx, batch_size)?;
+        Ok(())
+    }
 }
 
 impl Module for SeaNetResnetBlock {
@@ -239,6 +250,18 @@ impl SeaNetEncoder {
             final_conv1d,
             span: tracing::span!(tracing::Level::TRACE, "sea-encoder"),
         })
+    }
+
+    pub fn reset_batch_idx(&mut self, batch_idx: usize, batch_size: usize) -> Result<()> {
+        self.init_conv1d.reset_batch_idx(batch_idx, batch_size)?;
+        self.final_conv1d.reset_batch_idx(batch_idx, batch_size)?;
+        for layer in self.layers.iter_mut() {
+            layer.downsample.reset_batch_idx(batch_idx, batch_size)?;
+            for l in layer.residuals.iter_mut() {
+                l.reset_batch_idx(batch_idx, batch_size)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -382,6 +405,18 @@ impl SeaNetDecoder {
             final_activation: cfg.final_activation,
             span: tracing::span!(tracing::Level::TRACE, "sea-decoder"),
         })
+    }
+
+    pub fn reset_batch_idx(&mut self, batch_idx: usize, batch_size: usize) -> Result<()> {
+        self.init_conv1d.reset_batch_idx(batch_idx, batch_size)?;
+        self.final_conv1d.reset_batch_idx(batch_idx, batch_size)?;
+        for layer in self.layers.iter_mut() {
+            layer.upsample.reset_batch_idx(batch_idx, batch_size)?;
+            for l in layer.residuals.iter_mut() {
+                l.reset_batch_idx(batch_idx, batch_size)?;
+            }
+        }
+        Ok(())
     }
 }
 

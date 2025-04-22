@@ -102,7 +102,7 @@ class LMModel(StreamingContainer):
         self.dep_q = dep_q
         self.card = card
         self.text_card = text_card
-        assert len(delays) == self.num_codebooks, "unexpected number of delays"
+        assert len(delays) == self.num_codebooks, f"expected {self.num_codebooks} delays, got {len(delays)}."
         self.delays = delays
         self.dim = dim
         self.existing_text_padding_id = existing_text_padding_id
@@ -154,6 +154,7 @@ class LMModel(StreamingContainer):
         )
         kwargs_dep["positional_embedding"] = depformer_pos_emb
         kwargs_dep["context"] = None
+        kwargs_dep["cross_attention"] = False
         if depformer_weights_per_step:
             kwargs_dep["weights_per_step"] = dep_q
         if depformer_multi_linear:
@@ -303,13 +304,15 @@ class LMModel(StreamingContainer):
         delayed_codes = torch.cat([initial, delayed_codes], dim=2)
 
         sum_condition: torch.Tensor | None = None
+        cross_attention_src: torch.Tensor | None = None
         if condition_tensors is None:
             assert self.fuser is None
         else:
             assert self.fuser is not None
             sum_condition = self.fuser.get_sum(condition_tensors)
+            cross_attention_src = self.fuser.get_cross(condition_tensors)
 
-        transformer_out, text_logits = self.forward_text(delayed_codes[:, :, :-1], sum_condition)
+        transformer_out, text_logits = self.forward_text(delayed_codes[:, :, :-1], sum_condition, cross_attention_src)
         assert transformer_out.shape[0] == delayed_codes.shape[0]
         assert transformer_out.shape[1] == delayed_codes.shape[2] - 1
         logits = self.forward_depformer_training(delayed_codes[:, :, 1:], transformer_out)
@@ -327,7 +330,8 @@ class LMModel(StreamingContainer):
 
     def forward_text(
         self,
-        sequence: torch.Tensor, sum_condition: torch.Tensor | None = None
+        sequence: torch.Tensor, sum_condition: torch.Tensor | None = None,
+        cross_attention_src: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         B, K, S = sequence.shape
         assert (
@@ -345,7 +349,9 @@ class LMModel(StreamingContainer):
         input_ = text_emb if input_ is None else input_ + text_emb
         if sum_condition is not None:
             input_ = input_ + sum_condition.to(input_)
-        transformer_out = self.transformer(input_)
+        if cross_attention_src is not None:
+            cross_attention_src = cross_attention_src.to(input_)
+        transformer_out = self.transformer(input_, cross_attention_src=cross_attention_src)
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
         assert isinstance(transformer_out, torch.Tensor)
@@ -463,6 +469,7 @@ class _LMGenState(State):
     graphed_main: CUDAGraphed
     graphed_depth: CUDAGraphed
     condition_sum: torch.Tensor | None = None
+    condition_cross: torch.Tensor | None = None
     offset: int = 0
     exit_stack: ExitStack = field(default_factory=ExitStack)
     reset_callback: tp.Callable[[], None] | None = None
@@ -528,9 +535,11 @@ class LMGen(StreamingModule[_LMGenState]):
         if self.lm_model.fuser is None:
             assert not self.condition_tensors
             condition_sum = None
+            condition_cross = None
         else:
             assert self.condition_tensors is not None
             condition_sum = self.lm_model.fuser.get_sum(self.condition_tensors)
+            condition_cross = self.lm_model.fuser.get_cross(self.condition_tensors)
 
         disable = lm_model.device.type != 'cuda'
         graphed_main = CUDAGraphed(lm_model.forward_text, disable=disable)
@@ -538,12 +547,14 @@ class LMGen(StreamingModule[_LMGenState]):
 
         state = _LMGenState(
             batch_size, lm_model.device, cache, initial, graphed_main, graphed_depth,
-            condition_sum=condition_sum)
+            condition_sum=condition_sum, condition_cross=condition_cross)
 
         if self.cfg_coef != 1.:
             batch_size *= 2
             if state.condition_sum is not None:
-                assert state.condition_sum.shape[0] == batch_size, "CFG requires 2x more conditions."
+                assert state.condition_sum.shape[0] == batch_size, "cfg requires 2x more conditions."
+            if state.condition_cross is not None:
+                assert state.condition_cross.shape[0] == batch_size, "cfg requires 2x more conditions."
         state.exit_stack.enter_context(self.lm_model.streaming(batch_size))
         state.reset_callback = self.lm_model.reset_streaming
         return state
@@ -598,7 +609,7 @@ class LMGen(StreamingModule[_LMGenState]):
 
         if self.cfg_coef != 1.:
             input_ = input_.repeat(2, 1, 1)
-        transformer_out, text_logits = state.graphed_main(input_, state.condition_sum)
+        transformer_out, text_logits = state.graphed_main(input_, state.condition_sum, state.condition_cross)
         if self.cfg_coef != 1.:
             logits, logits_null = text_logits.chunk(2)
             text_logits = logits_null + (logits - logits_null) * self.cfg_coef

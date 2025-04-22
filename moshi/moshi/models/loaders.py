@@ -387,8 +387,10 @@ def get_conditioner(
     conditioner_kwargs.update({"output_dim": output_dim, "device": device})
     if conditioner_type == "lut":
         from ..conditioners.text import LUTConditioner
-
         return LUTConditioner(**conditioner_kwargs)
+    elif conditioner_type == "tensor":
+        from ..conditioners.tensors import TensorConditioner
+        return TensorConditioner(**conditioner_kwargs)
     else:
         raise RuntimeError(f"Unknow conditioner type {conditioner_type}.")
 

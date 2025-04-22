@@ -185,7 +185,7 @@ impl Model {
                 codes.push(Some(t))
             }
             let (_text_logits, ys) =
-                self.lm.forward_ca(None, codes, &CaSrc::Tokens(conditions.clone()))?;
+                self.lm.forward_ca(None, codes, &CaSrc::Tokens(conditions.clone()), None)?;
             let last_audio_tokens = if self.speaker_cond.is_some() {
                 self.lm.depformer_sample_cfg(
                     &ys,

@@ -27,6 +27,12 @@ pub struct DepFormerConfig {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
+pub struct ExtraHeadsConfig {
+    pub num_heads: usize,
+    pub dim: usize,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
     pub transformer: transformer::Config,
     pub depformer: Option<DepFormerConfig>,
@@ -35,6 +41,7 @@ pub struct Config {
     pub audio_vocab_size: usize,
     pub audio_codebooks: usize,
     pub conditioners: Option<crate::conditioner::Config>,
+    pub extra_heads: Option<ExtraHeadsConfig>,
 }
 
 impl Config {
@@ -103,6 +110,7 @@ impl Config {
             text_out_vocab_size: 32000,
             audio_codebooks: 8,
             conditioners: Default::default(),
+            extra_heads: None,
         }
     }
 
@@ -143,6 +151,7 @@ impl Config {
             text_out_vocab_size: 32000,
             audio_codebooks: 8,
             conditioners: Default::default(),
+            extra_heads: None,
         }
     }
 
@@ -214,6 +223,7 @@ impl Config {
             text_out_vocab_size: 32001,
             audio_codebooks: 16,
             conditioners: Default::default(),
+            extra_heads: None,
         }
     }
 
@@ -252,6 +262,7 @@ impl Config {
             text_out_vocab_size: 48000,
             audio_codebooks: 16,
             conditioners: Default::default(),
+            extra_heads: None,
         }
     }
 
@@ -299,6 +310,7 @@ impl Config {
             text_out_vocab_size: 48000,
             audio_codebooks: 8,
             conditioners: Default::default(),
+            extra_heads: None,
         }
     }
 
@@ -335,6 +347,7 @@ impl Config {
             text_out_vocab_size: 48000,
             audio_codebooks: 32,
             conditioners: Default::default(),
+            extra_heads: None,
         }
     }
 
@@ -376,6 +389,7 @@ impl Config {
             text_out_vocab_size: 8000,
             audio_codebooks: 32,
             conditioners: Default::default(),
+            extra_heads: None,
         }
     }
 
@@ -413,6 +427,7 @@ impl Config {
             text_out_vocab_size: 48000,
             audio_codebooks: 32,
             conditioners: Default::default(),
+            extra_heads: None,
         }
     }
 }
@@ -621,6 +636,7 @@ pub struct LmModel {
     audio_vocab_size: usize,
     text_in_vocab_size: usize,
     condition_provider: Option<crate::conditioner::ConditionProvider>,
+    extra_heads: Vec<MaybeQuantizedLinear>,
     dtype: DType,
 }
 
@@ -664,6 +680,13 @@ impl LmModel {
                 Some(conditioners)
             }
         };
+        let mut extra_heads = vec![];
+        if let Some(ExtraHeadsConfig { num_heads, dim }) = cfg.extra_heads {
+            for i in 0..num_heads {
+                let extra_head = linear(d_model, dim, false, vb.pp("extra_heads").pp(i))?;
+                extra_heads.push(extra_head)
+            }
+        }
         Ok(Self {
             transformer,
             text_emb,
@@ -674,6 +697,7 @@ impl LmModel {
             text_in_vocab_size: cfg.text_in_vocab_size,
             audio_vocab_size: cfg.audio_vocab_size,
             condition_provider,
+            extra_heads,
             dtype,
         })
     }
@@ -714,12 +738,25 @@ impl LmModel {
         self.text_emb.embeddings().device()
     }
 
+    pub fn dtype(&self) -> DType {
+        self.text_emb.embeddings().dtype()
+    }
+
     pub fn forward(
         &mut self,
         text_ids: Option<Tensor>,
         audio_ids: Vec<Option<Tensor>>,
     ) -> candle::Result<(Tensor, Tensor)> {
         self.forward_cond(text_ids, audio_ids, None)
+    }
+
+    pub fn extra_heads(&self, vs: &Tensor) -> Result<Vec<Tensor>> {
+        let mut extra_heads = Vec::with_capacity(self.extra_heads.len());
+        for extra_head in self.extra_heads.iter() {
+            let extra_head = vs.apply(extra_head)?;
+            extra_heads.push(extra_head)
+        }
+        Ok(extra_heads)
     }
 
     pub fn forward_cond(
@@ -788,6 +825,7 @@ impl LmModel {
         text_ids: Option<Tensor>,
         audio_ids: Vec<Option<Tensor>>,
         ca_src: &CaSrc,
+        conditions: Option<&crate::conditioner::Condition>,
     ) -> candle::Result<(Tensor, Tensor)> {
         if VERBOSE.with(|v| *v) {
             print!("text_ids ");
@@ -823,6 +861,11 @@ impl LmModel {
             if let Some(audio_ids) = audio_ids {
                 let e = audio_ids.apply(audio_emb)?;
                 emb = emb.broadcast_add(&e)?
+            }
+        }
+        if let Some(conditions) = conditions {
+            match conditions {
+                crate::conditioner::Condition::AddToInput(v) => emb = emb.broadcast_add(v)?,
             }
         }
         let ys = self.transformer.forward_ca(&emb, Some(ca_src))?;
@@ -864,6 +907,10 @@ impl LmModel {
             }
         };
         Ok(sample)
+    }
+
+    pub fn reset_batch_idx(&mut self, batch_idx: usize, batch_size: usize) -> Result<()> {
+        self.transformer.reset_batch_idx(batch_idx, batch_size)
     }
 }
 

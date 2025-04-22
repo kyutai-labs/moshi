@@ -3,7 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use crate::streaming::{StreamTensor, StreamingModule};
-use candle::{Module, Result, Tensor, D};
+use candle::{IndexOp, Module, Result, Tensor, D};
 use candle_nn::{Conv1d, VarBuilder};
 
 #[allow(clippy::enum_variant_names)]
@@ -270,6 +270,15 @@ impl StreamableConv1d {
             span: tracing::span!(tracing::Level::TRACE, "streamable-conv1d"),
         })
     }
+
+    pub fn reset_batch_idx(&mut self, batch_idx: usize, _batch_size: usize) -> Result<()> {
+        if let Some(v) = self.state_prev_xs.as_option() {
+            let v = v.contiguous()?;
+            v.i(batch_idx..(1 + batch_idx))?.zero_set()?;
+            self.state_prev_xs = StreamTensor::from_tensor(v);
+        }
+        Ok(())
+    }
 }
 
 impl Module for StreamableConv1d {
@@ -379,6 +388,15 @@ impl StreamableConvTranspose1d {
             span: tracing::span!(tracing::Level::TRACE, "streamable-conv-tr1d"),
         })
     }
+
+    pub fn reset_batch_idx(&mut self, batch_idx: usize, _batch_size: usize) -> Result<()> {
+        if let Some(v) = self.state_prev_ys.as_option() {
+            let v = v.contiguous()?;
+            v.i(batch_idx..(1 + batch_idx))?.zero_set()?;
+            self.state_prev_ys = v.into();
+        }
+        Ok(())
+    }
 }
 
 impl Module for StreamableConvTranspose1d {
@@ -470,6 +488,10 @@ impl ConvDownsample1d {
         )?;
         Ok(Self { conv })
     }
+
+    pub fn reset_batch_idx(&mut self, batch_idx: usize, batch_size: usize) -> Result<()> {
+        self.conv.reset_batch_idx(batch_idx, batch_size)
+    }
 }
 
 impl Module for ConvDownsample1d {
@@ -516,6 +538,10 @@ impl ConvTrUpsample1d {
             vb.pp("convtr"),
         )?;
         Ok(Self { convtr })
+    }
+
+    pub fn reset_batch_idx(&mut self, batch_idx: usize, batch_size: usize) -> Result<()> {
+        self.convtr.reset_batch_idx(batch_idx, batch_size)
     }
 }
 
