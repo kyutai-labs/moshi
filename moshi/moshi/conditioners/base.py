@@ -39,10 +39,18 @@ class TensorCondition:
     mask: torch.Tensor
 
     @staticmethod
-    def cat(conditions: list['TensorCondition']) -> 'TensorCondition':
+    def from_tensor(tensor: torch.Tensor):
+        B, T, _ = tensor.shape
+        mask = torch.ones(B, T, dtype=torch.bool, device=tensor.device)
+        return TensorCondition(tensor, mask)
+
+    @staticmethod
+    def cat(conditions: tp.Sequence['TensorCondition']) -> 'TensorCondition':
         assert conditions, "Cannot cat empty list."
         ref_tensor = conditions[0].tensor
         B, _, D = ref_tensor.shape
+        assert B == 1
+        B = len(conditions)
         T = max(condition.tensor.shape[1] for condition in conditions)
         mask = torch.zeros(B, T, dtype=torch.bool, device=ref_tensor.device)
         tensor = torch.zeros(B, T, D, dtype=ref_tensor.dtype, device=ref_tensor.device)
@@ -63,9 +71,6 @@ class ConditionAttributes:
     """
     text: tp.Dict[str, tp.Optional[str]] = field(default_factory=dict)
     tensor: tp.Dict[str, TensorCondition] = field(default_factory=dict)
-
-    def __getitem__(self, item):
-        return getattr(self, item)
 
     @property
     def text_attributes(self) -> tp.Iterable[str]:
@@ -169,7 +174,7 @@ class _BaseTensorConditioner(BaseConditioner[Prepared]):
     pass
 
 
-def nullify_tensor(condition: TensorCondition) -> TensorCondition:
+def dropout_tensor(condition: TensorCondition) -> TensorCondition:
     """Utility function for nullifying a WavCondition object.
     """
     return TensorCondition(
@@ -196,109 +201,26 @@ def dropout_condition_(sample: ConditionAttributes, condition_type: str, conditi
 
     if condition_type == 'tensor':
         tensor_condition = sample.tensor[condition]
-        sample.tensor[condition] = nullify_tensor(tensor_condition)
+        sample.tensor[condition] = dropout_tensor(tensor_condition)
     elif condition_type == 'text':
         sample.text[condition] = None
     else:
         assert False
 
 
-class DropoutModule(nn.Module):
-    """Base module for all dropout modules."""
-
-    def __init__(self, seed: int = 1234):
-        super().__init__()
-        # rng is used to synchronize decisions across GPUs, in particular useful for
-        # expansive conditioners, so that all GPUs skip or evaluate it.
-        self.rng = torch.Generator()
-        self.rng.manual_seed(seed)
-
-
-class AttributeDropout(DropoutModule):
-    """Dropout with a given probability per attribute.
-    This is different from the behavior of ClassifierFreeGuidanceDropout as this allows for attributes
-    to be dropped out separately. For example, "artist" can be dropped while "genre" remains.
-    This is in contrast to ClassifierFreeGuidanceDropout where if "artist" is dropped "genre"
-    must also be dropped.
-
-    Args:
-        dropouts (tp.Dict[str, float]): A dict mapping between attributes and dropout probability. For example:
-            ...
-            "genre": 0.1,
-            "artist": 0.5,
-            "wav": 0.25,
-            ...
-        active_on_eval (bool, optional): Whether the dropout is active at eval. Default to False.
-        seed (int, optional): Random seed.
+def dropout_all_conditions(attributes: tp.Sequence[ConditionAttributes]) -> list[ConditionAttributes]:
     """
-
-    def __init__(self, dropouts: tp.Dict[str, float], active_on_eval: bool = False, seed: int = 1234):
-        super().__init__(seed=seed)
-        self.active_on_eval = active_on_eval
-        self.dropouts = dropouts
-
-    def forward(self, condition_attributes_batch: tp.List[ConditionAttributes]) -> tp.List[ConditionAttributes]:
-        """
-        Args:
-            condition_attributes_batch (list[ConditionAttributes]): List of condition attributes.
-        Returns:
-            list[ConditionAttributes]: List of condition attributes after certain attributes were set to None.
-        """
-        if not self.training and not self.active_on_eval:
-            return condition_attributes_batch
-
-        condition_attributes_batch = [ca.copy() for ca in condition_attributes_batch]
-        for condition_attributes in condition_attributes_batch:
-            # We don't know initially what type is the condition in self.dropouts, so we iterate over all types.
-            for condition_type in ConditionAttributes.condition_types():
-                for condition in getattr(condition_attributes, condition_type):
-                    if condition in self.dropouts:
-                        if torch.rand(1, generator=self.rng).item() < self.dropouts[condition]:
-                            dropout_condition_(condition_attributes, condition_type, condition)
-        return condition_attributes_batch
-
-    def __repr__(self):
-        return f"AttributeDropout({dict(self.dropouts)})"
-
-
-class ClassifierFreeGuidanceDropout(DropoutModule):
-    """Classifier Free Guidance dropout.
-    All attributes are dropped with the same probability.
-
     Args:
-        p (float): Probability to apply condition dropout during training.
-        seed (int): Random seed.
+        attributes (list[ConditionAttributes]): All conditions attributes.
+    Returns:
+        list[ConditionAttributes]: Same with all conditions dropped.
     """
-
-    def __init__(self, p: float, seed: int = 1234):
-        super().__init__(seed=seed)
-        self.p = p
-
-    def forward(self, samples: tp.List[ConditionAttributes]) -> tp.List[ConditionAttributes]:
-        """
-        Args:
-            samples (list[ConditionAttributes]): List of conditions.
-        Returns:
-            list[ConditionAttributes]: List of conditions after all attributes were set to None.
-        """
-        if not self.training:
-            return samples
-
-        # decide on which attributes to drop in a batched fashion
-        drop = torch.rand(1, generator=self.rng).item() < self.p
-
-        if not drop:
-            return samples
-        # nullify conditions of all attributes
-        samples = [sample.copy() for sample in samples]
-        for condition_type in ConditionAttributes.condition_types():
-            for sample in samples:
-                for condition in getattr(sample, condition_type):
-                    dropout_condition_(sample, condition_type, condition)
-        return samples
-
-    def __repr__(self):
-        return f"ClassifierFreeGuidanceDropout(p={self.p})"
+    attributes = [attribute.copy() for attribute in attributes]
+    for condition_type in ConditionAttributes.condition_types():
+        for attribute in attributes:
+            for condition in getattr(attribute, condition_type):
+                dropout_condition_(attribute, condition_type, condition)
+    return attributes
 
 
 class ConditionProvider(nn.Module):
@@ -322,7 +244,7 @@ class ConditionProvider(nn.Module):
     def tensor_conditions(self):
         return [k for k, v in self.conditioners.items() if isinstance(v, _BaseTensorConditioner)]
 
-    def _collate_text(self, samples: tp.List[ConditionAttributes]) -> tp.Dict[str, tp.List[tp.Optional[str]]]:
+    def _collate_text(self, samples: tp.Sequence[ConditionAttributes]) -> tp.Dict[str, tp.List[tp.Optional[str]]]:
         """Given a list of ConditionAttributes objects, compile a dictionary where the keys
         are the attributes and the values are the aggregated input per attribute.
         For example:
@@ -349,7 +271,7 @@ class ConditionProvider(nn.Module):
                 out[condition].append(text[condition])
         return out
 
-    def _collate_tensors(self, samples: tp.List[ConditionAttributes]) -> tp.Dict[str, TensorCondition]:
+    def _collate_tensors(self, samples: tp.Sequence[ConditionAttributes]) -> tp.Dict[str, TensorCondition]:
         """For each tensor attribute, collate the tensor from individual batch items.
 
         Args:
@@ -369,7 +291,7 @@ class ConditionProvider(nn.Module):
 
         return out
 
-    def prepare(self, inputs: tp.List[ConditionAttributes]) -> tp.Dict[str, tp.Any]:
+    def prepare(self, inputs: tp.Sequence[ConditionAttributes]) -> tp.Dict[str, tp.Any]:
         """Match attributes/tensors with existing conditioners in self, and call `prepare` for each one.
         This should be called before starting any real GPU work to avoid synchronization points.
         This will return a dict matching conditioner names to their arbitrary prepared representations.
@@ -414,9 +336,9 @@ class ConditionProvider(nn.Module):
             prepared (dict): Dict of prepared representations as returned by `prepare()`.
         """
         output = {}
-        for attribute, inputs in prepared.items():
-            condition, mask = self.conditioners[attribute](inputs)
-            output[attribute] = ConditionType(condition, mask)
+        for name, inputs in prepared.items():
+            condition, mask = self.conditioners[name](inputs)
+            output[name] = ConditionType(condition, mask)
         return output
 
 
@@ -450,8 +372,9 @@ class ConditionFuser(nn.Module):
         for fuse_method, conditions in fuse2cond.items():
             for condition in conditions:
                 self.cond2fuse[condition] = fuse_method
-                if fuse_method in ['cross', 'prepend']:
-                    raise RuntimeError("only `sum` conditionings are supported for now.")
+                if fuse_method not in ['cross', 'sum']:
+                    raise RuntimeError("only `sum` and `cross` conditionings are supported "
+                                       f"for now, got {fuse_method}.")
 
     @property
     def has_conditions(self) -> bool:

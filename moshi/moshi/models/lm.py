@@ -197,9 +197,14 @@ class LMModel(StreamingContainer):
         self.linears = nn.ModuleList(
             [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
         )
+        self.to(device=device, dtype=dtype)
+        # We always keep the condition provider as float32.
         self.condition_provider = condition_provider
         self.fuser = fuser
-        self.to(device=device, dtype=dtype)
+        if self.condition_provider is not None:
+            self.condition_provider.to(device=device)
+        if self.fuser is not None:
+            self.fuser.to(device=device)
         self._init_weights()
         if quantize:
             replace_linear_with_qlinear(self)
@@ -498,6 +503,8 @@ class LMGen(StreamingModule[_LMGenState]):
         cfg_coef: float = 1.,
         check: bool = False,
         condition_tensors: ConditionTensors | None = None,
+        on_text_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
+        on_audio_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
     ):
         assert not lm_model.training, "generation shouldn't be used in training mode."
         super().__init__()
@@ -518,6 +525,8 @@ class LMGen(StreamingModule[_LMGenState]):
             lm_model.delays, device=lm_model.device, dtype=torch.long
         )
         self.condition_tensors = condition_tensors
+        self.on_text_hook = on_text_hook
+        self.on_audio_hook = on_audio_hook
         if self.cfg_coef != 1.:
             assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
             assert self.condition_tensors, "Missing condition tensors for CFG."
@@ -624,7 +633,11 @@ class LMGen(StreamingModule[_LMGenState]):
         assert text_token.shape[2] == 1
         assert text_token.shape[1] == 1, "Only one text stream supported."
         text_token = text_token[:, 0, 0]  # shape is [B]
+        if self.on_text_hook is not None:
+            self.on_text_hook(text_token)
         audio_tokens = state.graphed_depth(text_token, transformer_out)
+        if self.on_audio_hook is not None:
+            self.on_audio_hook(audio_tokens)
 
         # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
         state.offset += 1
