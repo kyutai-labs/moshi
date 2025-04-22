@@ -485,6 +485,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             q = nn.functional.linear(query, qw)
             k = nn.functional.linear(key, kw)
             v = nn.functional.linear(value, vw)
+            q, k, v = [rearrange(x, "b t (h d) -> b h t d", h=self.num_heads) for x in [q, k, v]]
         else:
             projected = apply_weights_per_step(
                 self.in_projs, self.weights_per_step_schedule, query, offset_cpu)
@@ -650,7 +651,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         if cross_attention:
             self.cross_attention = StreamingMultiheadAttention(
                 cross_attention=True, **attn_kwargs, **factory_kwargs)  # type: ignore
-            # Cross attentio norm is always a layer norm, for no specific reason.
+            # Cross attention norm is always a layer norm, for no specific reason.
             self.norm_cross = nn.LayerNorm(d_model, eps=1e-5, **factory_kwargs)  # type: ignore
 
         self.layer_scale_1: nn.Module

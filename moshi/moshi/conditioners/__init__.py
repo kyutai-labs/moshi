@@ -6,4 +6,5 @@
 Modules to help doing generations under some fixed conditions.
 """
 
-from .base import (ConditionType, ConditionAttributes, ConditionFuser, ConditionProvider, BaseConditioner, TensorCondition, ConditionTensors, ClassifierFreeGuidanceDropout)
+from .base import (ConditionType, ConditionAttributes, ConditionFuser, ConditionProvider,
+                   BaseConditioner, TensorCondition, ConditionTensors, dropout_all_conditions)

@@ -148,6 +148,7 @@ class CheckpointInfo:
     model_type: str = "moshi"
     lora_weights: Path | None = None
     lm_gen_config: dict = field(default_factory=dict)
+    tts_config: dict = field(default_factory=dict)
 
     @staticmethod
     def from_hf_repo(
@@ -184,6 +185,7 @@ class CheckpointInfo:
             raw_config = None
             model_type = "moshi"
             lm_gen_config = {}
+            tts_config = {}
             lora_name = None
         else:
             raw_config = json.loads(Path(config_path).read_text())
@@ -194,6 +196,7 @@ class CheckpointInfo:
             lora_name = lm_config.pop("lora_name", None)
             model_type = lm_config.pop("model_type", "moshi")
             lm_gen_config = lm_config.pop("lm_gen_config", {})
+            tts_config = lm_config.pop("tts_config", {})
 
         if moshi_weights is None:
             moshi_weights_final = hf_get(moshi_name, hf_repo)
@@ -226,6 +229,7 @@ class CheckpointInfo:
             model_type,
             lora_weights_final,
             lm_gen_config=lm_gen_config,
+            tts_config=tts_config,
         )
 
     def get_mimi(self, device: torch.device | str = "cpu") -> MimiModel:
@@ -349,8 +353,10 @@ def get_moshi_lm(
         if _is_safetensors(filename):
             state = load_file(filename, device=str(device))
             for key, value in state.items():
-                if value.dtype.is_floating_point:
-                    value = value.to(dtype=dtype)
+                if key.startswith('condition_provider.') or key.startswith('fuser.'):
+                    value = value.float()
+                else:
+                    value = value.to(dtype)
                 state[key] = value
             model.load_state_dict(state, assign=True)
 
