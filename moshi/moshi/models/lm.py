@@ -563,7 +563,6 @@ class LMGen(StreamingModule[_LMGenState]):
             if state.condition_sum is not None:
                 assert state.condition_sum.shape[0] == batch_size, "cfg requires 2x more conditions."
             if state.condition_cross is not None:
-                torch.save(state.condition_cross, '/home/alex/tmp/dbg_cross.th')
                 assert state.condition_cross.shape[0] == batch_size, "cfg requires 2x more conditions."
         state.exit_stack.enter_context(self.lm_model.streaming(batch_size))
         state.reset_callback = self.lm_model.reset_streaming
