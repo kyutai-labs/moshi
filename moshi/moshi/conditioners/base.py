@@ -23,20 +23,6 @@ TextCondition = tp.Optional[str]  # a text condition can be a string or None (if
 ConditionTensors = dict[str, 'ConditionType']
 
 
-def stack_and_pad_audio(wavs: tp.List[torch.Tensor], max_len: tp.Optional[int] = None):
-    """Stack the given audios on the first dimenion (created), padding them with 0 if needed."""
-    actual_max_len = max(wav.shape[-1] for wav in wavs)
-    if max_len is None:
-        max_len = actual_max_len
-    else:
-        assert max_len >= actual_max_len, (max_len, actual_max_len)
-    other_dims = wavs[0].shape[:-1]
-    out = torch.zeros(len(wavs), *other_dims, max_len, dtype=wavs[0].dtype, device=wavs[0].device)
-    for k, wav in enumerate(wavs):
-        out[k, ..., :wav.shape[-1]] = wav
-    return out
-
-
 class ConditionType(tp.NamedTuple):
     """Return type for a conditioner: both a condition tensor, and a mask indicating valid positions.
     """
@@ -45,74 +31,25 @@ class ConditionType(tp.NamedTuple):
 
 
 @dataclass(frozen=True)
-class WavCondition:
-    """Input for waveform based conditionings.
-    Wav should always be 3-dim `[B, C, T]` even before collation.
+class TensorCondition:
+    """Looks quite similar to ConditionType, but represents the input to TensorConditioners.
+    `tensor` should be [B | 1, T, D], and `mask` should be `[B | 1, T]`.
     """
-    wav: torch.Tensor
-    length: torch.Tensor
-    sample_rate: int
-    path: tp.List[tp.Optional[str]] = field(default_factory=list)
-    seek_time: tp.List[tp.Optional[float]] = field(default_factory=list)
-
-    def __len__(self) -> int:
-        return len(self.wav)
+    tensor: torch.Tensor
+    mask: torch.Tensor
 
     @staticmethod
-    def cat(conditions: list['WavCondition']) -> 'WavCondition':
+    def cat(conditions: list['TensorCondition']) -> 'TensorCondition':
         assert conditions, "Cannot cat empty list."
-        wavs: list[torch.Tensor] = []
-        lengths: list[torch.Tensor] = []
-        sample_rate: int | None = None
-        paths: list[str | None] = []
-        seek_times: list[float | None] = []
-        for condition in conditions:
-            wav = condition.wav
-            assert wav.dim() == 3, f"Got wav with dim={wav.dim()}, but expected 3 [1, C, T]"
-            assert wav.size(0) == 1, f"Got wav [B, C, T] with shape={wav.shape}, but expected B == 1"
-            wavs.append(wav[0])
-            lengths.append(condition.length)
-            if sample_rate is None:
-                sample_rate = condition.sample_rate
-            else:
-                assert sample_rate == condition.sample_rate, \
-                    f"Sample rate mismatch expected {sample_rate} got {condition.sample_rate}."
-            if condition.path:
-                paths.append(condition.path[0])
-            else:
-                paths.append(None)
-
-            if condition.seek_time:
-                seek_times.append(condition.seek_time[0])
-            else:
-                seek_times.append(None)
-        assert sample_rate is not None
-        return WavCondition(stack_and_pad_audio(wavs), torch.cat(lengths), sample_rate, paths, seek_times)
-
-    def __getitem__(self, index: int | slice) -> 'WavCondition':
-        if isinstance(index, int):
-            index = slice(index, index + 1)
-
-        assert isinstance(index, slice)
-        return WavCondition(
-            self.wav[index],
-            self.length[index],
-            self.sample_rate,
-            self.path[index],
-            self.seek_time[index])
-
-    @staticmethod
-    def dummy_wav_condition(batch_size: int = 1, duration: float = 30,
-                            sample_rate: int = 24000, channels: int = 1):
-        """Create a dummy wav condition.
-        """
-        length = int(sample_rate * duration)
-        return WavCondition(
-            wav=torch.zeros(batch_size, channels, length),
-            length=torch.full((batch_size, ), length, dtype=torch.long),
-            sample_rate=sample_rate,
-            path=[None] * batch_size,
-            seek_time=[None] * batch_size)
+        ref_tensor = conditions[0].tensor
+        B, _, D = ref_tensor.shape
+        T = max(condition.tensor.shape[1] for condition in conditions)
+        mask = torch.zeros(B, T, dtype=torch.bool, device=ref_tensor.device)
+        tensor = torch.zeros(B, T, D, dtype=ref_tensor.dtype, device=ref_tensor.device)
+        for b, condition in enumerate(conditions):
+            tensor[b, :condition.tensor.shape[1], :] = condition.tensor[0]
+            mask[b, :condition.mask.shape[1]] = condition.mask[0]
+        return TensorCondition(tensor, mask)
 
 
 @dataclass
@@ -120,9 +57,12 @@ class ConditionAttributes:
     """Standard class for representing the set of potential inputs to the conditioners.
     Typically, `audiocraft.data.audio_dataset.SegmentInfo` will convert
     to this class to make conditioning agnostic to the type of dataset.
+
+    There are two kinds of conditionings: text (or None), or raw torch tensors (with a mask).
+
     """
     text: tp.Dict[str, tp.Optional[str]] = field(default_factory=dict)
-    wav: tp.Dict[str, WavCondition] = field(default_factory=dict)
+    tensor: tp.Dict[str, TensorCondition] = field(default_factory=dict)
 
     def __getitem__(self, item):
         return getattr(self, item)
@@ -132,15 +72,15 @@ class ConditionAttributes:
         return self.text.keys()
 
     @property
-    def wav_attributes(self) -> tp.Iterable[str]:
-        return self.wav.keys()
+    def tensor_attributes(self) -> tp.Iterable[str]:
+        return self.text.keys()
 
     @staticmethod
     def condition_types() -> tp.FrozenSet[str]:
-        return frozenset(["text", "wav"])
+        return frozenset(["text", "tensor"])
 
     def copy(self) -> 'ConditionAttributes':
-        return ConditionAttributes(dict(self.text), dict(self.wav))
+        return ConditionAttributes(dict(self.text), dict(self.tensor))
 
 
 Prepared = tp.TypeVar('Prepared')  # represents the prepared condition input type.
@@ -225,19 +165,16 @@ class _BaseTextConditioner(BaseConditioner[Prepared]):
     pass
 
 
-class _BaseWaveformConditioner(BaseConditioner[Prepared]):
+class _BaseTensorConditioner(BaseConditioner[Prepared]):
     pass
 
 
-def nullify_wav(wav: WavCondition) -> WavCondition:
+def nullify_tensor(condition: TensorCondition) -> TensorCondition:
     """Utility function for nullifying a WavCondition object.
     """
-    return WavCondition(
-        wav=torch.zeros_like(wav.wav),
-        length=torch.zeros_like(wav.length),
-        sample_rate=wav.sample_rate,
-        path=[None] * len(wav.path),
-        seek_time=[None] * len(wav.seek_time))
+    return TensorCondition(
+        tensor=torch.zeros_like(condition.tensor),
+        mask=torch.zeros_like(condition.mask))
 
 
 def dropout_condition_(sample: ConditionAttributes, condition_type: str, condition: str) -> None:
@@ -253,15 +190,17 @@ def dropout_condition_(sample: ConditionAttributes, condition_type: str, conditi
     if condition not in getattr(sample, condition_type):
         raise ValueError(
             "dropout_condition received an unexpected condition!"
-            f" expected wav={sample.wav.keys()} and text={sample.text.keys()}"
+            f" expected tensor={sample.tensor.keys()} and text={sample.text.keys()}"
             f" but got '{condition}' of type '{condition_type}'!"
         )
 
-    if condition_type == 'wav':
-        wav_cond = sample.wav[condition]
-        sample.wav[condition] = nullify_wav(wav_cond)
-    else:
+    if condition_type == 'tensor':
+        tensor_condition = sample.tensor[condition]
+        sample.tensor[condition] = nullify_tensor(tensor_condition)
+    elif condition_type == 'text':
         sample.text[condition] = None
+    else:
+        assert False
 
 
 class DropoutModule(nn.Module):
@@ -380,8 +319,8 @@ class ConditionProvider(nn.Module):
         return [k for k, v in self.conditioners.items() if isinstance(v, _BaseTextConditioner)]
 
     @property
-    def wav_conditions(self):
-        return [k for k, v in self.conditioners.items() if isinstance(v, _BaseWaveformConditioner)]
+    def tensor_conditions(self):
+        return [k for k, v in self.conditioners.items() if isinstance(v, _BaseTensorConditioner)]
 
     def _collate_text(self, samples: tp.List[ConditionAttributes]) -> tp.Dict[str, tp.List[tp.Optional[str]]]:
         """Given a list of ConditionAttributes objects, compile a dictionary where the keys
@@ -410,34 +349,34 @@ class ConditionProvider(nn.Module):
                 out[condition].append(text[condition])
         return out
 
-    def _collate_wavs(self, samples: tp.List[ConditionAttributes]) -> tp.Dict[str, WavCondition]:
-        """For each wav attribute, collate the wav from individual batch items.
+    def _collate_tensors(self, samples: tp.List[ConditionAttributes]) -> tp.Dict[str, TensorCondition]:
+        """For each tensor attribute, collate the tensor from individual batch items.
 
         Args:
             samples (list of ConditionAttributes): List of ConditionAttributes samples.
         Returns:
-            dict[str, WavCondition]: A dictionary mapping an attribute name to wavs.
+            dict[str, TensorCondition]: A dictionary mapping an attribute name to tensor.
         """
         per_attribute = defaultdict(list)
-        out: tp.Dict[str, WavCondition] = {}
+        out: tp.Dict[str, TensorCondition] = {}
         for sample in samples:
-            for attribute in self.wav_conditions:
-                per_attribute[attribute].append(sample.wav[attribute])
+            for attribute in self.tensor_conditions:
+                per_attribute[attribute].append(sample.tensor[attribute])
 
-        # stack all wavs to a single tensor
-        for attribute in self.wav_conditions:
-            out[attribute] = WavCondition.cat(per_attribute[attribute])
+        # stack all tensors to a single tensor
+        for attribute in self.tensor_conditions:
+            out[attribute] = TensorCondition.cat(per_attribute[attribute])
 
         return out
 
     def prepare(self, inputs: tp.List[ConditionAttributes]) -> tp.Dict[str, tp.Any]:
-        """Match attributes/wavs with existing conditioners in self, and call `prepare` for each one.
+        """Match attributes/tensors with existing conditioners in self, and call `prepare` for each one.
         This should be called before starting any real GPU work to avoid synchronization points.
         This will return a dict matching conditioner names to their arbitrary prepared representations.
 
         Args:
             inputs (list[ConditionAttributes]): List of ConditionAttributes objects containing
-                text and wav conditions.
+                text and tensors conditions.
         """
         assert all([isinstance(x, ConditionAttributes) for x in inputs]), (
             "Got unexpected types input for conditioner! should be tp.List[ConditionAttributes]",
@@ -446,17 +385,17 @@ class ConditionProvider(nn.Module):
 
         output = {}
         text = self._collate_text(inputs)
-        wavs = self._collate_wavs(inputs)
+        tensors = self._collate_tensors(inputs)
 
-        assert set(text.keys() | wavs.keys()).issubset(set(self.conditioners.keys())), (
+        assert set(text.keys() | tensors.keys()).issubset(set(self.conditioners.keys())), (
             f"Got an unexpected attribute! Expected {self.conditioners.keys()}, ",
-            f"got {text.keys(), wavs.keys()}"
+            f"got {text.keys(), tensors.keys()}"
         )
 
-        missing_inputs = set(self.conditioners.keys()) - (set(text.keys()) | set(wavs.keys()))
+        missing_inputs = set(self.conditioners.keys()) - (set(text.keys()) | set(tensors.keys()))
         if missing_inputs:
             raise RuntimeError(f"Some conditioners did not receive an input: {missing_inputs}")
-        for attribute, batch in chain(text.items(), wavs.items()):
+        for attribute, batch in chain(text.items(), tensors.items()):
             conditioner = self.conditioners[attribute]
             assert isinstance(conditioner, BaseConditioner)
             output[attribute] = conditioner.prepare(batch)
