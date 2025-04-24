@@ -244,9 +244,14 @@ class LMModel(StreamingContainer):
         return -2
 
     @property
-    def device(self):
+    def device(self) -> torch.device:
         first_param = next(iter(self.parameters()))
         return first_param.device
+
+    @property
+    def dtype(self) -> torch.dtype:
+        first_param = next(iter(self.text_emb.parameters()))
+        return first_param.dtype
 
     @property
     def num_codebooks(self) -> int:
@@ -473,16 +478,19 @@ class _LMGenState(State):
     initial: torch.Tensor
     graphed_main: CUDAGraphed
     graphed_depth: CUDAGraphed
+    offsets: torch.Tensor
+    offset_cpu: int = 0
     condition_sum: torch.Tensor | None = None
     condition_cross: torch.Tensor | None = None
-    offset: int = 0
     exit_stack: ExitStack = field(default_factory=ExitStack)
-    reset_callback: tp.Callable[[], None] | None = None
+    reset_callback: tp.Callable[[torch.Tensor], None] | None = None
 
-    def reset(self):
-        self.offset = 0
+    def reset(self, reset_mask: torch.Tensor) -> None:
+        super().reset(reset_mask)
+        self.offsets[:] = torch.where(reset_mask, torch.zeros_like(self.offsets), self.offsets)
+        self.offset_cpu = 0
         if self.reset_callback is not None:
-            self.reset_callback()
+            self.reset_callback(reset_mask)
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -505,6 +513,7 @@ class LMGen(StreamingModule[_LMGenState]):
         condition_tensors: ConditionTensors | None = None,
         on_text_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         on_audio_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
+        support_out_of_sync: bool = False,
     ):
         assert not lm_model.training, "generation shouldn't be used in training mode."
         super().__init__()
@@ -527,6 +536,7 @@ class LMGen(StreamingModule[_LMGenState]):
         self.condition_tensors = condition_tensors
         self.on_text_hook = on_text_hook
         self.on_audio_hook = on_audio_hook
+        self.support_out_of_sync = support_out_of_sync
         if self.cfg_coef != 1.:
             assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
             assert self.condition_tensors, "Missing condition tensors for CFG."
@@ -540,6 +550,7 @@ class LMGen(StreamingModule[_LMGenState]):
             device=lm_model.device,
             dtype=torch.long,
         )
+        offsets = torch.zeros(batch_size, device=lm_model.device, dtype=torch.long)
 
         if self.lm_model.fuser is None:
             assert not self.condition_tensors
@@ -549,6 +560,10 @@ class LMGen(StreamingModule[_LMGenState]):
             assert self.condition_tensors is not None
             condition_sum = self.lm_model.fuser.get_sum(self.condition_tensors)
             condition_cross = self.lm_model.fuser.get_cross(self.condition_tensors)
+            if condition_sum is not None:
+                condition_sum = condition_sum.to(self.lm_model.dtype)
+            if condition_cross is not None:
+                condition_cross = condition_cross.to(self.lm_model.dtype)
 
         disable = lm_model.device.type != 'cuda'
         graphed_main = CUDAGraphed(lm_model.forward_text, disable=disable)
@@ -556,7 +571,7 @@ class LMGen(StreamingModule[_LMGenState]):
 
         state = _LMGenState(
             batch_size, lm_model.device, cache, initial, graphed_main, graphed_depth,
-            condition_sum=condition_sum, condition_cross=condition_cross)
+            offsets, condition_sum=condition_sum, condition_cross=condition_cross)
 
         if self.cfg_coef != 1.:
             batch_size *= 2
@@ -565,11 +580,17 @@ class LMGen(StreamingModule[_LMGenState]):
             if state.condition_cross is not None:
                 assert state.condition_cross.shape[0] == batch_size, "cfg requires 2x more conditions."
         state.exit_stack.enter_context(self.lm_model.streaming(batch_size))
-        state.reset_callback = self.lm_model.reset_streaming
+
+        def _reset_callback(reset_mask: torch.Tensor) -> None:
+            if self.cfg_coef != 1.:
+                reset_mask = reset_mask.repeat(2)
+            self.lm_model.reset_streaming(reset_mask)
+        state.reset_callback = _reset_callback
         return state
 
     @torch.no_grad()
-    def step(self, input_tokens: torch.Tensor) -> torch.Tensor | None:
+    def step(self, input_tokens: torch.Tensor,
+             depformer_replace_tokens: torch.Tensor | None = None) -> torch.Tensor | None:
         state = self._streaming_state
         if state is None:
             raise RuntimeError(
@@ -591,26 +612,20 @@ class LMGen(StreamingModule[_LMGenState]):
 
         CT = state.cache.shape[2]
 
-        for q_other in range(input_tokens.shape[1]):
-            k = lm_model.dep_q + 1 + q_other
-            delay = lm_model.delays[k]
-            write_position = (state.offset + delay) % CT
-            state.cache[:, k, write_position: write_position + 1] = input_tokens[
-                :, q_other
-            ]
+        delays = self.delays_cuda[lm_model.dep_q + 1:]
+        write_positions = (state.offsets[:, None, None] + delays[:, None]) % CT
+        state.cache[:, lm_model.dep_q + 1:].scatter_(-1, write_positions, input_tokens)
 
-        position = state.offset % CT
-        for k, delay in enumerate(lm_model.delays):
-            # Only for the very beginning, we extend the initial token for the acoustic
-            # token that are delayed, and thus have no good value to take.
-            if state.offset <= delay:
-                state.cache[:, k, position] = state.initial[:, k, 0]
-        input_ = state.cache[:, :, position: position + 1]
+        is_init = state.offsets[:, None, None] <= self.delays_cuda[:, None]
+        is_init |= ~state.exec_mask[:, None, None]  # we also give init tokens if not executing to avoid crashing.
+        positions = (state.offsets % CT)[:, None, None].expand_as(is_init)
+        input_ = state.cache.gather(dim=2, index=positions)
+        input_ = torch.where(is_init, state.initial, input_)
 
         if self.check:
             # Check that we are not feeding in any value that is not generated yet.
             assert not (input_ == lm_model.ungenerated_token_id).any(), (
-                state.offset,
+                state.offsets,
                 input_,
             )
             assert (input_[:, lm_model.audio_offset :] <= lm_model.card).all(), input_
@@ -635,26 +650,31 @@ class LMGen(StreamingModule[_LMGenState]):
         text_token = text_token[:, 0, 0]  # shape is [B]
         if self.on_text_hook is not None:
             self.on_text_hook(text_token)
-        audio_tokens = state.graphed_depth(text_token, transformer_out)
-        if self.on_audio_hook is not None:
-            self.on_audio_hook(audio_tokens)
+        if depformer_replace_tokens is None:
+            audio_tokens = state.graphed_depth(text_token, transformer_out)
+            if self.on_audio_hook is not None:
+                self.on_audio_hook(audio_tokens)
+        else:
+            assert depformer_replace_tokens.dim() == 3
+            audio_tokens = depformer_replace_tokens.squeeze(-1)
 
-        # ensure we don't overwrite prompt tokens, we only write over ungenerated tokens
-        state.offset += 1
-        position = state.offset % CT
-        state.cache[:, 0, position] = text_token
-        state.cache[:, 1:lm_model.dep_q + 1, position] = audio_tokens
+        state.offsets = torch.where(state.exec_mask, state.offsets + 1, state.offsets)
+        state.offset_cpu += 1
+        positions = state.offsets % CT
+        state.cache[:, :1].scatter_(-1, positions[:, None, None], text_token[:, None, None])
+        audio_tokens = audio_tokens[:, :, None]
+        state.cache[:, 1: lm_model.dep_q + 1, :].scatter_(
+            -1, positions[:, None, None].expand_as(audio_tokens), audio_tokens)
 
-        if state.offset <= self.max_delay:
+        if not self.support_out_of_sync and state.offset_cpu <= self.max_delay:
+            # When using out of sync exec, should not rely on this being None.
             return None
         B = state.cache.shape[0]
         gen_delays_cuda = self.delays_cuda[: lm_model.dep_q + 1]
-        index = (
-            ((state.offset - self.max_delay + gen_delays_cuda) % CT)
-            .view(1, -1, 1)
-            .expand(B, -1, 1)
-        )
+        index = (state.offsets[:, None, None] - self.max_delay + gen_delays_cuda[:, None]) % CT
         out = state.cache.gather(dim=2, index=index)
+        mask = (state.offsets <= self.max_delay) | ~state.exec_mask
+        out[mask, :, :] = lm_model.ungenerated_token_id
         return out
 
     def depformer_step(

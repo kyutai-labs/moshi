@@ -163,9 +163,10 @@ class _StreamingConv1dState(State):
     previous: torch.Tensor
     first: torch.Tensor
 
-    def reset(self):
-        self.previous.zero_()
-        self.first.fill_(True)
+    def reset(self, reset_mask: torch.Tensor):
+        super().reset(reset_mask)
+        self.previous[:] = torch.where(reset_mask.view(-1, 1, 1), torch.zeros_like(self.previous), self.previous)
+        self.first[:] = torch.where(reset_mask, torch.ones_like(self.first), self.first)
 
 
 class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
@@ -277,8 +278,12 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
 class _StreamingConvTr1dState(State):
     partial: torch.Tensor
 
-    def reset(self):
-        self.partial.zero_()
+    def reset(self, reset_mask: torch.Tensor):
+        super().reset(reset_mask)
+        self.partial[:] = torch.where(
+            reset_mask.view(-1, 1, 1),
+            torch.zeros_like(self.partial),
+            self.partial)
 
 
 class StreamingConvTranspose1d(StreamingModule[_StreamingConvTr1dState]):
