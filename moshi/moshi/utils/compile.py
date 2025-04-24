@@ -275,7 +275,6 @@ class CUDAGraphed:
                     return self.func(*args)
             else:
                 assert self._args is not None
-                assert self._output is not None
                 _match_values_copy_tensors(args, self._args)
                 self._graph.replay()
                 return self._output

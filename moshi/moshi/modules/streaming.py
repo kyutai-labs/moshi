@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import typing as tp
 from torch import nn
 import torch
+from ..utils.compile import CUDAGraphed
 
 
 @dataclass
@@ -31,10 +32,11 @@ class State(abc.ABC):
     device: torch.device
 
     def __post_init__(self):
-        self.exec_mask = torch.ones(self.batch_size, device=self.device, dtype=torch.bool)
+        self.exec_mask = torch.ones(self.batch_size, dtype=torch.bool, device=self.device)
+        self._set_exec_mask_graphed: CUDAGraphed | None = None
 
-    def reset(self) -> None:
-        self.exec_mask.fill_(True)
+    def reset(self, reset_mask: torch.Tensor) -> None:
+        self.exec_mask[:] = torch.where(reset_mask, torch.ones_like(self.exec_mask), self.exec_mask)
 
     def __enter__(self) -> None:
         pass
@@ -64,6 +66,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
         super().__init__()
         self._streaming_state: StateT | None = None
         self._streaming_detached: bool = False
+        self._cached_children: list[tuple[str, StreamingModule]] | None = None
 
     @property
     def is_streaming(self):
@@ -86,7 +89,8 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
                 # otherwise, we are inheriting from a parent and will stop if detached.
                 if module._streaming_detached and prefix != "":
                     return
-                fn(prefix, module)
+                assert self._cached_children is not None
+                self._cached_children.append((prefix, module))
             for name, child in module.named_children():
                 if prefix:
                     new_prefix = prefix + "." + name
@@ -94,7 +98,11 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
                     new_prefix = name
                 _handle_module(new_prefix, child)
 
-        _handle_module("", self)
+        if self._cached_children is None:
+            self._cached_children = []
+            _handle_module("", self)
+        for name, child in self._cached_children:
+            fn(name, child)
 
     def _start_streaming(self, batch_size: int, exit_stack: ExitStack):
         def _start_streaming(name: str, module: StreamingModule):
@@ -125,17 +133,22 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
         exit_stack.callback(self._stop_streaming)
         return exit_stack
 
-    def reset_streaming(self):
+    def reset_streaming(self, reset_mask: torch.Tensor | None = None) -> None:
         """Reset the streaming state."""
 
         def _reset(name: str, module: StreamingModule):
+            nonlocal reset_mask
             state = module._streaming_state
             if state is None:
                 raise ValueError(
                     f"Trying to reset streaming, but {name} wasn't streaming."
                 )
-            state.reset()
+            state.reset(reset_mask)
 
+        state = self._streaming_state
+        assert state is not None
+        if reset_mask is None:
+            reset_mask = torch.ones(state.batch_size, device=state.device, dtype=torch.bool)
         self._apply_named_streaming(_reset)
 
     def get_streaming_state(self) -> dict[str, tp.Any]:
@@ -175,14 +188,23 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
         There is no magic here, each StreamingModule subclass is responsible for respecting
         the exec_mask.
         """
-        def _set_exec_mask(name: str, module: StreamingModule):
-            nonlocal exec_mask
-            state = module._streaming_state
-            assert state is not None
-            exec_mask = exec_mask.to(state.exec_mask)
-            state.exec_mask[:] = exec_mask
 
-        self._apply_named_streaming(_set_exec_mask)
+        state = self._streaming_state
+        assert state is not None
+        exec_mask = exec_mask.to(state.device)
+
+        def _set_exec_mask(exec_mask: torch.Tensor):
+            def _set_exec_mask_fn(name: str, module: StreamingModule):
+                state = module._streaming_state
+                assert state is not None
+                state.exec_mask[:] = exec_mask
+            self._apply_named_streaming(_set_exec_mask_fn)
+
+        if state._set_exec_mask_graphed is None:
+            disable = state.device.type != 'cuda'
+            state._set_exec_mask_graphed = CUDAGraphed(_set_exec_mask, disable=disable)
+
+        state._set_exec_mask_graphed(exec_mask)
 
 
 class StreamingContainer(StreamingModule[State]):

@@ -216,8 +216,12 @@ class RingKVCache:
         else:
             self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
 
-    def reset(self):
-        self.end_offset.zero_()
+    def reset(self, reset_mask: torch.Tensor) -> None:
+        self.end_offset[:] = torch.where(
+            reset_mask,
+            torch.zeros_like(self.end_offset),
+            self.end_offset,
+        )
 
     def complete(self, k: torch.Tensor, v: torch.Tensor, exec_mask: torch.Tensor) -> KVCacheResult:
         assert k.shape[:-1] == v.shape[:-1], (k.shape, v.shape)
@@ -275,7 +279,7 @@ class RingKVCache:
 
 
 def apply_weights_per_step(modules: nn.ModuleList, schedule: list[int] | None,
-                           x: torch.Tensor, offset: int) -> torch.Tensor:
+                           x: torch.Tensor, offset: int | None) -> torch.Tensor:
     """Utility to apply a multi linear layer to the given input. A multi linear layer
     applies a different set of weight for each time step.
 
@@ -289,6 +293,8 @@ def apply_weights_per_step(modules: nn.ModuleList, schedule: list[int] | None,
 
     if len(modules) == 1:
         return modules[0](x)
+
+    assert offset is not None, "Out of sync execution with weights per step."
 
     ys: list[torch.Tensor] = []
     B, T, C = x.shape
@@ -304,13 +310,17 @@ def apply_weights_per_step(modules: nn.ModuleList, schedule: list[int] | None,
 
 @dataclass
 class _MHAState(State):
-    kv_cache: RingKVCache
+    kv_cache: RingKVCache | None
     offset: torch.Tensor
     offset_cpu: int
+    k_cross: torch.Tensor | None = None
+    v_cross: torch.Tensor | None = None
 
-    def reset(self):
-        self.kv_cache.reset()
-        self.offset.zero_()
+    def reset(self, reset_mask: torch.Tensor):
+        super().reset(reset_mask)
+        self.offset[:] = torch.where(reset_mask, torch.zeros_like(self.offset), self.offset)
+        if self.kv_cache is not None:
+            self.kv_cache.reset(reset_mask)
         self.offset_cpu = 0
 
 
@@ -346,6 +356,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         weights_per_step: int = 0,
         weights_per_step_schedule: list[int] | None = None,
         cross_attention: bool = False,
+        cache_cross_attention: bool = True,
         device=None,
         dtype=None,
     ):
@@ -360,12 +371,13 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         self.weights_per_step = weights_per_step
         self.weights_per_step_schedule = weights_per_step_schedule
         self.cross_attention = cross_attention
+        self.cache_cross_attention = cache_cross_attention
         if cross_attention:
             assert not weights_per_step, "weights_per_step not supported for cross attention."
             assert rope is None, "rope and cross_attention makes no sense."
             assert not causal, "causal and cross attention makes no sense."
             # We do not want to activate the streaming KVCache if we are a cross attention.
-            self.set_streaming_detached(True)
+            # self.set_streaming_detached(True)
 
         out_dim = 3 * embed_dim
         mult = 1
@@ -420,16 +432,6 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                     state_dict.pop(this_source)
 
     def _init_streaming_state(self, batch_size: int) -> _MHAState:
-        if self.context is None:
-            if self.weights_per_step:
-                capacity = self.weights_per_step
-            else:
-                raise RuntimeError(
-                    "Cannot create a streaming KVCache without a context to estimate capacity."
-                )
-        else:
-            capacity = self.context
-
         in_proj = self.in_projs[0]
         if isinstance(in_proj, LoRALinear):
             device = in_proj.lora_A.weight.device
@@ -444,10 +446,23 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             raise RuntimeError(f"Unknown type {type(in_proj)} for linear.")
 
         dim_per_head = self.embed_dim // self.num_heads
-        kv_cache = RingKVCache(
-            batch_size, self.num_heads, dim_per_head, capacity,
-            respect_exec_mask=not self.weights_per_step, device=device, dtype=dtype
-        )
+        if self.cross_attention:
+            kv_cache = None
+        else:
+            if self.context is None:
+                if self.weights_per_step:
+                    capacity = self.weights_per_step
+                else:
+                    raise RuntimeError(
+                        "Cannot create a streaming KVCache without a context to estimate capacity."
+                    )
+            else:
+                capacity = self.context
+
+            kv_cache = RingKVCache(
+                batch_size, self.num_heads, dim_per_head, capacity,
+                respect_exec_mask=not self.weights_per_step, device=device, dtype=dtype
+            )
         return _MHAState(
             batch_size,
             device,
@@ -458,10 +473,48 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
     def _complete_kv(self, k, v) -> KVCacheResult:
         state = self._streaming_state
-        if state is None:
+        if state is None or state.kv_cache is None:
             return KVCacheResult.from_kv(k, v)
         else:
             return state.kv_cache.complete(k, v, state.exec_mask)
+
+    def _compute_cross_attention(
+            self, key: torch.Tensor, value: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        assert self.cross_attention
+        assert key is value
+        in_proj = self.in_projs[0]
+        assert in_proj.bias is None
+        assert isinstance(in_proj, nn.Linear)
+        dim = in_proj.weight.shape[0] // 3
+        kv = nn.functional.linear(key, in_proj.weight[dim:])
+        k, v = rearrange(kv, "b t (p h d) -> p b h t d", p=2, h=self.num_heads)
+        return k, v
+
+    def update_streaming_cross_attention_src(
+            self, cross_attention_src: torch.Tensor) -> None:
+        state = self._streaming_state
+        assert state is not None
+        assert self.cross_attention
+        k, v = self._compute_cross_attention(cross_attention_src, cross_attention_src)
+        if state.k_cross is None:
+            state.k_cross = k
+            state.v_cross = v
+        else:
+            assert state.v_cross is not None
+            state.k_cross[:] = k
+            state.v_cross[:] = v
+
+    def _get_cross_attention(
+            self, key: torch.Tensor, value: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        state = self._streaming_state
+        if state is not None and state.k_cross is not None:
+            assert state.v_cross is not None
+            return state.k_cross, state.v_cross
+        k, v = self._compute_cross_attention(key, value)
+        if state is not None and self.cache_cross_attention:
+            state.k_cross = k
+            state.v_cross = v
+        return k, v
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
         state = self._streaming_state
@@ -471,21 +524,20 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             offset = torch.zeros(B, device=query.device, dtype=torch.long)
             offset_cpu = 0
         else:
-            assert self.causal, "Streaming only available for causal"
+            # assert self.causal, "Streaming only available for causal"
             offset = state.offset
             offset_cpu = state.offset_cpu
 
         if self.cross_attention:
-            assert state is None
+            # assert state is None
             assert len(self.in_projs) == 1
             in_proj = self.in_projs[0]
             assert in_proj.bias is None
             assert isinstance(in_proj, nn.Linear)
-            qw, kw, vw = in_proj.weight.chunk(3)
-            q = nn.functional.linear(query, qw)
-            k = nn.functional.linear(key, kw)
-            v = nn.functional.linear(value, vw)
-            q, k, v = [rearrange(x, "b t (h d) -> b h t d", h=self.num_heads) for x in [q, k, v]]
+            dim = in_proj.weight.shape[0] // 3
+            q = nn.functional.linear(query, in_proj.weight[:dim])
+            q = rearrange(q, "b t (h d) -> b h t d", h=self.num_heads)
+            k, v = self._get_cross_attention(key, value)
         else:
             projected = apply_weights_per_step(
                 self.in_projs, self.weights_per_step_schedule, query, offset_cpu)
@@ -514,7 +566,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         x = apply_weights_per_step(
             self.out_projs, self.weights_per_step_schedule, x, offset_cpu)
 
-        if state is not None:
+        if state is not None and not self.cross_attention:
             state.offset[:] = torch.where(
                 state.exec_mask,
                 state.offset + T,
@@ -525,9 +577,10 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
 @dataclass
 class _LayerState(State):
-    offset_cpu: int
+    offset_cpu: int = 0
 
-    def reset(self):
+    def reset(self, reset_mask: torch.Tensor):
+        super().reset(reset_mask)
         self.offset_cpu = 0
 
 
@@ -727,10 +780,11 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
 
 @dataclass
 class _TransformerState(State):
-    offset: torch.Tensor
+    offsets: torch.Tensor
 
-    def reset(self):
-        self.offset.zero_()
+    def reset(self, reset_mask: torch.Tensor):
+        super().reset(reset_mask)
+        self.offsets[:] = torch.where(reset_mask, torch.zeros_like(self.offsets), self.offsets)
 
 
 class StreamingTransformer(StreamingModule[_TransformerState]):
@@ -810,7 +864,7 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
 
     def _init_streaming_state(self, batch_size: int) -> _TransformerState:
         device = next(self.parameters()).device
-        return _TransformerState(batch_size, device, offset=torch.zeros(1, device=device, dtype=torch.long))
+        return _TransformerState(batch_size, device, offsets=torch.zeros(batch_size, device=device, dtype=torch.long))
 
     def forward(self, x: torch.Tensor, *args, **kwargs):
         B, T, C = x.shape
@@ -818,13 +872,13 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         dtype_input = x.dtype
         state = self._streaming_state
         if state is None:
-            offset = torch.zeros(1, dtype=torch.long, device=x.device)
+            offsets = torch.zeros(1, dtype=torch.long, device=x.device)
         else:
-            offset = state.offset
+            offsets = state.offsets
 
         if self.positional_embedding in {"sin", "sin_rope"}:
             positions = torch.arange(T, device=x.device).view(1, -1, 1)
-            positions = positions + offset.view(-1, 1, 1)
+            positions = positions + offsets.view(-1, 1, 1)
             pos_emb = create_sin_embedding(
                 positions, C, max_period=self.max_period, dtype=x.dtype
             )
@@ -843,7 +897,10 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
                 x = layer(x, *args, **kwargs)
 
         if state is not None:
-            state.offset.add_(T)
+            state.offsets[:] = torch.where(
+                state.exec_mask,
+                state.offsets + T,
+                state.offsets)
         return x.to(dtype_input)
 
 
