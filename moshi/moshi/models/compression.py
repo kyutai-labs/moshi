@@ -363,7 +363,7 @@ class MimiModel(CompressionModel[_MimiState]):
                     f"Invalid input x of length {x.shape[-1]}. The length must be "
                     f"a positive multiple of the frame size {frame_size}. "
                     "You are responsible for buffering accordingly before feeding audio to Mimi.")
-            emb = state.graphed_encoder(x)
+            emb = state.graphed_encoder(x).clone()
         if self.encoder_transformer is not None:
             if state is None:
                 (emb,) = self.encoder_transformer(emb)
@@ -424,7 +424,7 @@ class MimiModel(CompressionModel[_MimiState]):
         if state is None:
             out = self.decoder(emb)
         else:
-            out = state.graphed_decoder(emb)
+            out = state.graphed_decoder(emb).clone()
         # out contains extra padding added by the encoder and decoder
         return out
 
