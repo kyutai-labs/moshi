@@ -137,7 +137,6 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
         """Reset the streaming state."""
 
         def _reset(name: str, module: StreamingModule):
-            nonlocal reset_mask
             state = module._streaming_state
             if state is None:
                 raise ValueError(
@@ -149,6 +148,8 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
         assert state is not None
         if reset_mask is None:
             reset_mask = torch.ones(state.batch_size, device=state.device, dtype=torch.bool)
+        else:
+            reset_mask = reset_mask.to(state.device)
         self._apply_named_streaming(_reset)
 
     def get_streaming_state(self) -> dict[str, tp.Any]:
