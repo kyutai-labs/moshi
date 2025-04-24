@@ -524,12 +524,10 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             offset = torch.zeros(B, device=query.device, dtype=torch.long)
             offset_cpu = 0
         else:
-            # assert self.causal, "Streaming only available for causal"
             offset = state.offset
             offset_cpu = state.offset_cpu
 
         if self.cross_attention:
-            # assert state is None
             assert len(self.in_projs) == 1
             in_proj = self.in_projs[0]
             assert in_proj.bias is None
