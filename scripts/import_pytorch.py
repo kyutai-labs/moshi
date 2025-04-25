@@ -70,10 +70,10 @@ def import_model(
         }
 
     config['model_id'] = {}
-    if 'sig' in pkg:
-        config['model_id']['sig'] = pkg['sig']
-    if 'epoch' in pkg:
-        config['model_id']['epoch'] = pkg['epoch']
+    if args.sig is not None:
+        config['model_id']['sig'] = args.sig
+    if args.epoch is not None:
+        config['model_id']['epoch'] = args.epoch
 
     if args.extra_config:
         extra = json.loads(args.extra_config.read_text())
@@ -122,6 +122,8 @@ def main():
     parser.add_argument("--out_n_q", type=int,
                         help="Number of codebooks to keep in the Depth Transformer.")
     parser.add_argument("--extra_config", type=Path, help="Extra config to add to the json.")
+    parser.add_argument("--sig", help="Signature of the original XP for tracability.")
+    parser.add_argument("--epoch", type=int, help="Epoch of the original XP.")
     parser.add_argument("checkpoint", type=Path, help="The checkpoint to be imported.")
     parser.add_argument("out_folder", type=Path, help=".")
     args = parser.parse_args()
