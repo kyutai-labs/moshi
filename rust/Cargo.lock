@@ -536,9 +536,9 @@ dependencies = [
 
 [[package]]
 name = "candle-core"
-version = "0.9.0-alpha.5"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9574d9fbf3764cf6beafc4772f325808670a0776b73d8069cb15f3800d17936"
+checksum = "c76c4e748a73dfea4d801013905c94742803ea12ce6e5f3f300378c0fd918e5c"
 dependencies = [
  "byteorder",
  "candle-kernels",
@@ -564,9 +564,9 @@ dependencies = [
 
 [[package]]
 name = "candle-flash-attn"
-version = "0.9.0-alpha.5"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71b58b68a79f213f0c8f5979211b66d39b7c5a14184ad3eb4842bd3a054fe320"
+checksum = "80a90593b7c8cbdfff3f38afec5a14d3e83ad01f060f8c37abc2a8b42f17873f"
 dependencies = [
  "anyhow",
  "bindgen_cuda",
@@ -576,18 +576,18 @@ dependencies = [
 
 [[package]]
 name = "candle-kernels"
-version = "0.9.0-alpha.5"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43d0e7817e7d5b7f5e308e99186d66b5b95f3be6940f480bfea852acc17d293c"
+checksum = "4c9a4a0f80722a4bf778e8d47c99fbd5d6cd41c8a07bc00e18c82c3b48fe2331"
 dependencies = [
  "bindgen_cuda",
 ]
 
 [[package]]
 name = "candle-metal-kernels"
-version = "0.9.0-alpha.5"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0aef44860332c7acf3fc6a7962bd6a22d193a81400f7b269570aaecaa1ba1062"
+checksum = "a09a9e52954bc367d43cea5fd2074a1b4d28843e8d0cd99c677857861af7d8d5"
 dependencies = [
  "half",
  "metal 0.27.0",
@@ -598,9 +598,9 @@ dependencies = [
 
 [[package]]
 name = "candle-nn"
-version = "0.9.0-alpha.5"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3718ef88e70f6fbc21caa164cb98928c6a2fb0b17a91923fc9836c4e843af4fc"
+checksum = "6a3ff6712fb82f6ac85b962692d76038ae6320875e69118257920bcb3eeba458"
 dependencies = [
  "candle-core",
  "candle-metal-kernels",
@@ -615,9 +615,9 @@ dependencies = [
 
 [[package]]
 name = "candle-transformers"
-version = "0.9.0-alpha.5"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ef12e4795249186bc5b78e98ae9986c05c870085b4d4c2e7f18d3119ec3301b"
+checksum = "5f563a8daddf97697156e79b57ab3c4b22902105ea0f5f192336d4f46f054a2b"
 dependencies = [
  "byteorder",
  "candle-core",
@@ -1009,9 +1009,9 @@ dependencies = [
 
 [[package]]
 name = "cudarc"
-version = "0.16.0"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de8af7773407c3e19b72e7b88be9bfc578fc904e8b837ea0de95ce3696a03ad0"
+checksum = "e4ed411343abcb4dd6fd1fbc32db3533d76c2af0fd40735a9e5e39e778a81254"
 dependencies = [
  "half",
  "libloading",
