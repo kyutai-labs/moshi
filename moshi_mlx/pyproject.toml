@@ -9,7 +9,7 @@ dependencies = [
     "rustymimi == 0.4.1",
     "sentencepiece == 0.2",
     "sounddevice == 0.5",
-    "sphn >= 0.1.4",
+    "sphn >= 0.1.4, < 0.2.0",
     "mlx >= 0.24.0, < 0.25",
     "aiohttp>=3.10.5, <3.12",
 ]
