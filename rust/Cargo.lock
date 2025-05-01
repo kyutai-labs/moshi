@@ -537,8 +537,7 @@ dependencies = [
 [[package]]
 name = "candle-core"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c76c4e748a73dfea4d801013905c94742803ea12ce6e5f3f300378c0fd918e5c"
+source = "git+https://github.com/huggingface/candle.git?rev=e3db30021fb08efbe4ee71d840f5d1230d050cd3#e3db30021fb08efbe4ee71d840f5d1230d050cd3"
 dependencies = [
  "byteorder",
  "candle-kernels",
@@ -565,8 +564,7 @@ dependencies = [
 [[package]]
 name = "candle-flash-attn"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80a90593b7c8cbdfff3f38afec5a14d3e83ad01f060f8c37abc2a8b42f17873f"
+source = "git+https://github.com/huggingface/candle.git?rev=e3db30021fb08efbe4ee71d840f5d1230d050cd3#e3db30021fb08efbe4ee71d840f5d1230d050cd3"
 dependencies = [
  "anyhow",
  "bindgen_cuda",
@@ -577,8 +575,7 @@ dependencies = [
 [[package]]
 name = "candle-kernels"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c9a4a0f80722a4bf778e8d47c99fbd5d6cd41c8a07bc00e18c82c3b48fe2331"
+source = "git+https://github.com/huggingface/candle.git?rev=e3db30021fb08efbe4ee71d840f5d1230d050cd3#e3db30021fb08efbe4ee71d840f5d1230d050cd3"
 dependencies = [
  "bindgen_cuda",
 ]
@@ -586,8 +583,7 @@ dependencies = [
 [[package]]
 name = "candle-metal-kernels"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a09a9e52954bc367d43cea5fd2074a1b4d28843e8d0cd99c677857861af7d8d5"
+source = "git+https://github.com/huggingface/candle.git?rev=e3db30021fb08efbe4ee71d840f5d1230d050cd3#e3db30021fb08efbe4ee71d840f5d1230d050cd3"
 dependencies = [
  "half",
  "metal 0.27.0",
@@ -599,8 +595,7 @@ dependencies = [
 [[package]]
 name = "candle-nn"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a3ff6712fb82f6ac85b962692d76038ae6320875e69118257920bcb3eeba458"
+source = "git+https://github.com/huggingface/candle.git?rev=e3db30021fb08efbe4ee71d840f5d1230d050cd3#e3db30021fb08efbe4ee71d840f5d1230d050cd3"
 dependencies = [
  "candle-core",
  "candle-metal-kernels",
@@ -616,8 +611,7 @@ dependencies = [
 [[package]]
 name = "candle-transformers"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f563a8daddf97697156e79b57ab3c4b22902105ea0f5f192336d4f46f054a2b"
+source = "git+https://github.com/huggingface/candle.git?rev=e3db30021fb08efbe4ee71d840f5d1230d050cd3#e3db30021fb08efbe4ee71d840f5d1230d050cd3"
 dependencies = [
  "byteorder",
  "candle-core",
@@ -2549,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "mimi-pyo3"
-version = "0.5.3"
+version = "0.6.0-alpha.1"
 dependencies = [
  "anyhow",
  "moshi",
@@ -2627,7 +2621,7 @@ dependencies = [
 
 [[package]]
 name = "moshi"
-version = "0.5.3"
+version = "0.6.0-alpha.1"
 dependencies = [
  "candle-core",
  "candle-flash-attn",
@@ -2640,7 +2634,7 @@ dependencies = [
 
 [[package]]
 name = "moshi-backend"
-version = "0.5.3"
+version = "0.6.0-alpha.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2685,7 +2679,7 @@ dependencies = [
 
 [[package]]
 name = "moshi-cli"
-version = "0.5.3"
+version = "0.6.0-alpha.1"
 dependencies = [
  "anyhow",
  "byteorder",

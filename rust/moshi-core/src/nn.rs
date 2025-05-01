@@ -105,6 +105,15 @@ impl Module for MaybeQuantizedLinear {
     }
 }
 
+impl MaybeQuantizedLinear {
+    pub fn dtype(&self) -> DType {
+        match self {
+            Self::Real(l) => l.weight().dtype(),
+            Self::Quantized(_) => DType::F32,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MaybeQuantizedEmbedding {
     Real(candle_nn::Embedding),
@@ -137,6 +146,13 @@ impl MaybeQuantizedEmbedding {
             MaybeQuantizedEmbedding::Quantized(weights) => weights.embeddings().dim(1)?,
         };
         Ok(size)
+    }
+
+    pub fn dtype(&self) -> DType {
+        match self {
+            Self::Real(l) => l.embeddings().dtype(),
+            Self::Quantized(_) => DType::F32,
+        }
     }
 }
 

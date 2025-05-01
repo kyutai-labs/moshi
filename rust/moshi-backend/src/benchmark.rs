@@ -90,8 +90,8 @@ pub async fn run(args: &crate::BenchmarkArgs, config: &Config) -> Result<()> {
         for _step in 0..args.steps {
             let fake_pcm =
                 candle::Tensor::zeros((1, 1, frame_length), candle::DType::F32, mimi_device)?;
-            let codes = mimi_model.encode_step(&fake_pcm.into())?;
-            let ys = mimi_model.decode_step(&codes)?;
+            let codes = mimi_model.encode_step(&fake_pcm.into(), &().into())?;
+            let ys = mimi_model.decode_step(&codes, &().into())?;
             if ys.as_option().is_none() {
                 anyhow::bail!("Expected mimi to output some stuff, but nothing came out.");
             }

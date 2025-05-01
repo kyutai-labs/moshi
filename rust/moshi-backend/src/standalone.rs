@@ -71,7 +71,8 @@ impl stream_both::AppStateInner {
         {
             tracing::info!(?dtype, ?device, "warming up the model");
             let mut lm_model = lm_model.clone();
-            let (_v, ys) = lm_model.forward(None, vec![None; config.mimi_num_codebooks])?;
+            let (_v, ys) =
+                lm_model.forward(None, vec![None; config.mimi_num_codebooks], &().into())?;
             let mut lp = candle_transformers::generation::LogitsProcessor::new(123, None, None);
             let _ = lm_model.depformer_sample(&ys, None, &[], &mut lp)?;
             let mut mimi_model = mimi_model.clone();
@@ -79,8 +80,8 @@ impl stream_both::AppStateInner {
             let frame_length = (config.sample_rate / config.frame_rate).ceil() as usize;
             let fake_pcm =
                 candle::Tensor::zeros((1, 1, frame_length), candle::DType::F32, mimi_device)?;
-            let codes = mimi_model.encode_step(&fake_pcm.into())?;
-            let ys = mimi_model.decode_step(&codes)?;
+            let codes = mimi_model.encode_step(&fake_pcm.into(), &().into())?;
+            let ys = mimi_model.decode_step(&codes, &().into())?;
             if ys.as_option().is_none() {
                 anyhow::bail!("Expected Mimi to output some stuff, but nothing came out.");
             }

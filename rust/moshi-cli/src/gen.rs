@@ -100,7 +100,7 @@ pub fn run(args: &Args, dev: &Device) -> Result<()> {
     for start_index in 0..(in_pcm_len / 1920).min(max_steps) {
         nsteps += 1;
         let in_pcm = in_pcm.i((.., .., start_index * 1920..(start_index + 1) * 1920))?;
-        let codes = mimi.encode_step(&in_pcm.into())?;
+        let codes = mimi.encode_step(&in_pcm.into(), &().into())?;
         if let Some(codes) = codes.as_option() {
             let (_b, _codebooks, steps) = codes.dims3()?;
             for step in 0..steps {
@@ -116,7 +116,7 @@ pub fn run(args: &Args, dev: &Device) -> Result<()> {
                         Tensor::new(&audio_tokens[..generated_audio_codebooks], dev)?
                             .reshape((1, 1, ()))?
                             .t()?;
-                    let out_pcm = mimi.decode_step(&audio_tokens.into())?;
+                    let out_pcm = mimi.decode_step(&audio_tokens.into(), &().into())?;
                     if let Some(out_pcm) = out_pcm.as_option() {
                         out_pcms.push(out_pcm.clone());
                     }

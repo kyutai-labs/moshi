@@ -140,7 +140,8 @@ impl State {
             None => None,
             Some(t) => Some(Tensor::from_vec(vec![t; 1], (1, 1), dev)?),
         };
-        let (text_logits, ys) = self.model.forward_cond(text_token, codes, conditions)?;
+        let (text_logits, ys) =
+            self.model.forward_cond(text_token, codes, conditions, &().into())?;
         let text_token = match self.text_tokens[self.step_idx] {
             Token::Ungenerated => {
                 let t = self.text_lp.sample(&text_logits.i((0, 0))?)?;

@@ -1,3 +1,7 @@
+// Copyright (c) Kyutai, all rights reserved.
+// This source code is licensed under the license found in the
+// LICENSE file in the root directory of this source tree.
+
 // Implements various modules for transformers with support for both quantized and unquantized forwards
 // Main differences between quantized and unquantized execution:
 // 1. For quantized models' attention `matmul_dtype`` converts intermediate activations to BF16 for
@@ -7,12 +11,11 @@
 use crate::nn::{
     linear, linear_from, matmul_dtype, MaybeQuantizedLinear, MaybeQuantizedVarBuilder,
 };
-use crate::streaming::{StreamTensor, StreamingModule};
+use crate::streaming::{StreamMask, StreamTensor, StreamingModule};
 use candle::{DType, Device, IndexOp, Module, Result, Tensor, D};
 
+use crate::kv_cache::KvCache;
 use candle::Context;
-use candle_nn::{self, kv_cache::RotatingKvCache as KvCache};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
@@ -343,35 +346,41 @@ impl StreamingMultiheadCrossAttention {
 }
 
 #[derive(Debug, Clone)]
-pub struct RotaryEmbedding {
+pub struct Rope {
     sin: Tensor,
     cos: Tensor,
-    span: tracing::Span,
+}
+
+impl Rope {
+    pub fn apply_rotary_emb(&self, qk: &Tensor) -> Result<Tensor> {
+        let qk_dtype = qk.dtype();
+        candle_nn::rotary_emb::rope_i(&qk.to_dtype(DType::F32)?, &self.cos, &self.sin)?
+            .to_dtype(qk_dtype)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RotaryEmbedding {
+    inv_freq: Tensor,
 }
 
 impl RotaryEmbedding {
-    pub fn new(dim: usize, max_seq_len: usize, theta: f32, dev: &Device) -> Result<Self> {
+    pub fn new(dim: usize, theta: f32, dev: &Device) -> Result<Self> {
         let inv_freq: Vec<_> =
             (0..dim).step_by(2).map(|i| 1f32 / theta.powf(i as f32 / dim as f32)).collect();
         let inv_freq_len = inv_freq.len();
         let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?;
-        let t = Tensor::arange(0u32, max_seq_len as u32, dev)?
-            .to_dtype(DType::F32)?
-            .reshape((max_seq_len, 1))?;
-        let freqs = t.matmul(&inv_freq)?;
-        Ok(Self {
-            sin: freqs.sin()?,
-            cos: freqs.cos()?,
-            span: tracing::span!(tracing::Level::TRACE, "rot"),
-        })
+        Ok(Self { inv_freq })
     }
 
-    pub fn apply_rotary_emb(&self, qk: &Tensor, pos: &Tensor) -> Result<Tensor> {
-        let _enter = self.span.enter();
-        let qk_dtype = qk.dtype();
-        let c = self.cos.index_select(pos, 0)?;
-        let s = self.sin.index_select(pos, 0)?;
-        candle_nn::rotary_emb::rope_i(&qk.to_dtype(DType::F32)?, &c, &s)?.to_dtype(qk_dtype)
+    pub fn rope(&self, pos: &Tensor) -> Result<Rope> {
+        let t = pos.to_dtype(DType::F32)?;
+        let freqs = match *t.dims() {
+            [d] => t.reshape((d, 1))?.matmul(&self.inv_freq)?,
+            [b, d] => t.reshape((b * d, 1))?.matmul(&self.inv_freq)?.reshape((b, d, ()))?,
+            _ => candle::bail!("Invalid shape for rotary embedding {pos:?}"),
+        };
+        Ok(Rope { sin: freqs.sin()?, cos: freqs.cos()? })
     }
 }
 
@@ -399,18 +408,13 @@ pub struct StreamingMultiheadAttention {
     kv_repeat: usize,
     num_heads: usize,
     context: usize,
-    rope: Option<Arc<RotaryEmbedding>>,
     kv_cache: KvCache,
     use_flash_attn: bool,
     span: tracing::Span,
 }
 
 impl StreamingMultiheadAttention {
-    pub fn new(
-        rope: &Option<Arc<RotaryEmbedding>>,
-        cfg: &Config,
-        vb: MaybeQuantizedVarBuilder,
-    ) -> Result<Self> {
+    pub fn new(cfg: &Config, vb: MaybeQuantizedVarBuilder) -> Result<Self> {
         let embed_dim = cfg.d_model;
         let num_kv = cfg.num_heads / cfg.kv_repeat;
         let out_dim = embed_dim + 2 * num_kv * (embed_dim / cfg.num_heads);
@@ -422,7 +426,6 @@ impl StreamingMultiheadAttention {
         Ok(Self {
             in_proj,
             out_proj,
-            rope: rope.clone(),
             kv_repeat: cfg.kv_repeat,
             num_heads: cfg.num_heads,
             context: cfg.context,
@@ -439,7 +442,12 @@ impl StreamingMultiheadAttention {
         }
     }
 
-    pub fn forward(&mut self, xs: &Tensor, pos: &Tensor, mask: Option<&Tensor>) -> Result<Tensor> {
+    pub fn forward(
+        &mut self,
+        xs: &Tensor,
+        rope: Option<&Rope>,
+        mask: Option<&Tensor>,
+    ) -> Result<Tensor> {
         let _enter = self.span.enter();
         if self.kv_repeat != 1 {
             candle::bail!("only kv-repeat = 1 is supported")
@@ -458,9 +466,9 @@ impl StreamingMultiheadAttention {
         let mut q = q.transpose(1, 2)?.contiguous()?; // b,h,t,d
         let mut k = k.transpose(1, 2)?.contiguous()?; // b,h,k,d
         let v = v.transpose(1, 2)?.contiguous()?; // b,h,k,d
-        if let Some(rope) = &self.rope {
-            q = rope.apply_rotary_emb(&q, pos)?;
-            k = rope.apply_rotary_emb(&k, pos)?;
+        if let Some(rope) = rope.as_ref() {
+            q = rope.apply_rotary_emb(&q)?;
+            k = rope.apply_rotary_emb(&k)?;
         }
 
         let (k, v) = { self.kv_cache.append(&k.contiguous()?, &v.contiguous()?)? };
@@ -664,7 +672,6 @@ pub struct StreamingTransformerLayer {
 
 impl StreamingTransformerLayer {
     pub fn new(
-        rope: &Option<Arc<RotaryEmbedding>>,
         cfg: &Config,
         vb: MaybeQuantizedVarBuilder,
         shared_ca_vb: Option<MaybeQuantizedVarBuilder>,
@@ -690,7 +697,7 @@ impl StreamingTransformerLayer {
                 Some(ls)
             }
         };
-        let self_attn = StreamingMultiheadAttention::new(rope, cfg, vb.pp("self_attn"))?;
+        let self_attn = StreamingMultiheadAttention::new(cfg, vb.pp("self_attn"))?;
         let cross_attn = match cfg.cross_attention.map(|v| v.1) {
             Some(norm_type) => {
                 let norm_cross = Norm::new_shortcut(d_model, norm_type, vb.pp("norm_cross"))?;
@@ -724,7 +731,7 @@ impl StreamingTransformerLayer {
     pub fn forward(
         &mut self,
         xs: &Tensor,
-        pos: &Tensor,
+        rope: Option<&Rope>,
         ca_src: Option<&CaSrc>,
         mask: Option<&Tensor>,
     ) -> Result<Tensor> {
@@ -734,7 +741,7 @@ impl StreamingTransformerLayer {
         }
         let norm1 = xs.apply(&self.norm1)?;
         let xs = (xs
-            + self.self_attn.forward(&norm1, pos, mask)?.apply(&self.layer_scale_1.as_ref())?)?;
+            + self.self_attn.forward(&norm1, rope, mask)?.apply(&self.layer_scale_1.as_ref())?)?;
 
         let xs = match (self.cross_attn.as_mut(), ca_src) {
             (Some((norm_cross, cross_attn)), Some(ca_src)) => {
@@ -769,6 +776,7 @@ pub struct StreamingTransformer {
     num_heads: usize,
     context: usize,
     last_reset_pos: Vec<usize>,
+    rope: Option<RotaryEmbedding>,
 }
 
 impl StreamingTransformer {
@@ -778,11 +786,10 @@ impl StreamingTransformer {
             PositionalEmbedding::Rope => {
                 let rope = RotaryEmbedding::new(
                     cfg.d_model / cfg.num_heads,
-                    cfg.max_seq_len,
                     cfg.max_period as f32,
                     vb.device(),
                 )?;
-                Some(Arc::new(rope))
+                Some(rope)
             }
             PositionalEmbedding::None | PositionalEmbedding::Sin => None,
         };
@@ -791,7 +798,7 @@ impl StreamingTransformer {
             // Also send weights of first layer as only it contains the KQV proj weights
             // for shared cross-attention layers
             let shared_vb = if cfg.shared_cross_attn { Some(vb_l.pp(0)) } else { None };
-            let layer = StreamingTransformerLayer::new(&rope, cfg, vb_l.pp(layer_idx), shared_vb)?;
+            let layer = StreamingTransformerLayer::new(cfg, vb_l.pp(layer_idx), shared_vb)?;
             layers.push(layer)
         }
         Ok(Self {
@@ -802,6 +809,7 @@ impl StreamingTransformer {
             num_heads: cfg.num_heads,
             context: cfg.context,
             last_reset_pos: vec![],
+            rope,
         })
     }
 
@@ -829,7 +837,7 @@ impl StreamingTransformer {
             // mask shape should be b, h, t, k
             // self.layers[0].self_attn.kv_cache.attn_mask(t, xs.device())?;
             // let mask = mask.broadcast_left((b, self.num_heads))?;
-            let ks = self.layers[0].self_attn.kv_cache.k_cache().positions(t);
+            let ks = self.layers[0].self_attn.kv_cache.positions(t);
             let min_ks = ks.iter().min().context("no positions, is t == 0?")?;
             if t == 1 && self.last_reset_pos.iter().all(|v| v <= min_ks) {
                 // No need for a mask here.
@@ -862,6 +870,10 @@ impl StreamingTransformer {
         // to adjust them for the actual position using last_reset_pos.
         let pos =
             Tensor::arange(current_seq_len as u32, (current_seq_len + t) as u32, xs.device())?;
+        let rope = match self.rope {
+            Some(ref rope) => Some(rope.rope(&pos)?),
+            None => None,
+        };
         let mut xs = match self.positional_embedding {
             PositionalEmbedding::Rope | PositionalEmbedding::None => xs.clone(),
             PositionalEmbedding::Sin => {
@@ -880,7 +892,7 @@ impl StreamingTransformer {
             }
         };
         for layer in self.layers.iter_mut() {
-            xs = layer.forward(&xs, &pos, ca_src, mask.as_ref())?
+            xs = layer.forward(&xs, rope.as_ref(), ca_src, mask.as_ref())?
         }
         Ok(xs)
     }
@@ -936,7 +948,8 @@ impl StreamingModule for StreamingTransformer {
         self.layers.iter_mut().for_each(|v| v.reset_kv_cache())
     }
 
-    fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
+    fn step(&mut self, xs: &StreamTensor, _: &StreamMask) -> Result<StreamTensor> {
+        // TODO: Use the StreamMask
         match xs.as_option() {
             None => Ok(StreamTensor::empty()),
             Some(xs) => Ok(StreamTensor::from_tensor(self.forward(xs)?)),
@@ -1012,7 +1025,7 @@ impl StreamingModule for ProjectedTransformer {
         self.transformer.reset_state()
     }
 
-    fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
+    fn step(&mut self, xs: &StreamTensor, m: &StreamMask) -> Result<StreamTensor> {
         let xs = xs.apply(&|x: &Tensor| {
             if self.conv_layout {
                 x.transpose(1, 2)
@@ -1021,7 +1034,7 @@ impl StreamingModule for ProjectedTransformer {
             }
         })?;
         let xs = xs.apply(&self.input_proj.as_ref())?;
-        let xs = self.transformer.step(&xs)?;
+        let xs = self.transformer.step(&xs, m)?;
         let ys = xs.apply(&self.output_projs[0].as_ref())?;
         ys.apply(&|y: &Tensor| {
             if self.conv_layout {
@@ -1030,5 +1043,73 @@ impl StreamingModule for ProjectedTransformer {
                 Ok(y.clone())
             }
         })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Transformer {
+    Standard(ProjectedTransformer),
+    Batched(crate::batched_transformer::ProjectedTransformer),
+}
+
+impl StreamingModule for Transformer {
+    fn reset_state(&mut self) {
+        match self {
+            Transformer::Standard(t) => t.reset_state(),
+            Transformer::Batched(t) => t.reset_state(),
+        }
+    }
+
+    fn step(&mut self, xs: &StreamTensor, m: &StreamMask) -> Result<StreamTensor> {
+        match self {
+            Transformer::Standard(t) => t.step(xs, m),
+            Transformer::Batched(t) => t.step(xs, m),
+        }
+    }
+}
+
+impl Transformer {
+    pub fn new(
+        batch_size: Option<usize>,
+        dim: usize,
+        cfg: &Config,
+        vb: candle_nn::VarBuilder,
+    ) -> Result<Self> {
+        let transformer = match batch_size {
+            Some(batch_size) => {
+                let transformer = crate::batched_transformer::ProjectedTransformer::new(
+                    dim,
+                    &[dim],
+                    batch_size,
+                    cfg,
+                    MaybeQuantizedVarBuilder::Real(vb),
+                )?;
+                Transformer::Batched(transformer)
+            }
+            None => {
+                let transformer = ProjectedTransformer::new(
+                    dim,
+                    &[dim],
+                    cfg,
+                    MaybeQuantizedVarBuilder::Real(vb),
+                )?;
+                Transformer::Standard(transformer)
+            }
+        };
+        Ok(transformer)
+    }
+
+    pub fn forward(&mut self, xs: &Tensor) -> Result<Vec<Tensor>> {
+        match self {
+            Transformer::Standard(t) => t.forward(xs),
+            Transformer::Batched(t) => t.forward(xs, &().into()),
+        }
+    }
+
+    pub fn reset_batch_idx(&mut self, batch_idx: usize, batch_size: usize) -> Result<()> {
+        match self {
+            Transformer::Standard(t) => t.reset_batch_idx(batch_idx, batch_size),
+            Transformer::Batched(t) => t.reset_batch_idx(batch_idx),
+        }
     }
 }

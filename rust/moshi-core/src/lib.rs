@@ -6,8 +6,10 @@ pub use candle;
 pub use candle_nn;
 
 pub mod asr;
+pub mod batched_transformer;
 pub mod conditioner;
 pub mod conv;
+pub mod kv_cache;
 pub mod lm;
 pub mod lm_generate;
 pub mod lm_generate_multistream;
@@ -26,3 +28,5 @@ pub enum NormType {
     RmsNorm,
     LayerNorm,
 }
+
+pub use streaming::{StreamMask, StreamTensor, StreamingModule};
