@@ -224,7 +224,8 @@ impl State {
         };
         let (text_logits, ys) = match ca_src.as_ref() {
             None => {
-                let (logits, ys) = self.model.forward_cond(text_token, codes, conditions)?;
+                let (logits, ys) =
+                    self.model.forward_cond(text_token, codes, conditions, &().into())?;
                 let logits = match self.cfg_alpha {
                     None => logits.i((0, 0))?,
                     Some(a) => match logits.dim(0)? {
@@ -238,7 +239,8 @@ impl State {
                 if self.cfg_alpha.is_some() {
                     candle::bail!("cfg is not supported with cross attention")
                 }
-                let (logits, ys) = self.model.forward_ca(text_token, codes, ca_src, None)?;
+                let (logits, ys) =
+                    self.model.forward_ca(text_token, codes, ca_src, None, &().into())?;
                 (logits.i((0, 0))?, ys)
             }
         };

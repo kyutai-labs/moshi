@@ -2,8 +2,8 @@
 // This source code is licensed under the license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::streaming::{StreamTensor, StreamingModule};
-use crate::{conv, nn, quantization, seanet, transformer};
+use crate::streaming::{StreamMask, StreamTensor, StreamingModule};
+use crate::{conv, quantization, seanet, transformer};
 use candle::{DType, Device, Module, Result, Tensor};
 use candle_nn::VarBuilder;
 
@@ -94,8 +94,8 @@ impl Config {
 pub struct Mimi {
     encoder: seanet::SeaNetEncoder,
     decoder: seanet::SeaNetDecoder,
-    encoder_transformer: transformer::ProjectedTransformer,
-    decoder_transformer: transformer::ProjectedTransformer,
+    encoder_transformer: transformer::Transformer,
+    decoder_transformer: transformer::Transformer,
     downsample: conv::ConvDownsample1d,
     upsample: conv::ConvTrUpsample1d,
     quantizer: quantization::SplitResidualVectorQuantizer,
@@ -104,20 +104,28 @@ pub struct Mimi {
 
 impl Mimi {
     pub fn new(cfg: Config, vb: VarBuilder) -> Result<Self> {
+        Self::new_(None, cfg, vb)
+    }
+
+    pub fn batched(batch_size: usize, cfg: Config, vb: VarBuilder) -> Result<Self> {
+        Self::new_(Some(batch_size), cfg, vb)
+    }
+
+    fn new_(batch_size: Option<usize>, cfg: Config, vb: VarBuilder) -> Result<Self> {
         let dim = cfg.seanet.dimension;
         let encoder = seanet::SeaNetEncoder::new(&cfg.seanet, vb.pp("encoder"))?;
         let decoder = seanet::SeaNetDecoder::new(&cfg.seanet, vb.pp("decoder"))?;
-        let encoder_transformer = transformer::ProjectedTransformer::new(
+        let encoder_transformer = transformer::Transformer::new(
+            batch_size,
             dim,
-            &[dim],
             &cfg.transformer,
-            nn::MaybeQuantizedVarBuilder::Real(vb.pp("encoder_transformer")),
+            vb.pp("encoder_transformer"),
         )?;
-        let decoder_transformer = transformer::ProjectedTransformer::new(
+        let decoder_transformer = transformer::Transformer::new(
+            batch_size,
             dim,
-            &[dim],
             &cfg.transformer,
-            nn::MaybeQuantizedVarBuilder::Real(vb.pp("decoder_transformer")),
+            vb.pp("decoder_transformer"),
         )?;
         let quantizer = quantization::SplitResidualVectorQuantizer::new(
             /* dim */ cfg.quantizer_dim,
@@ -181,10 +189,10 @@ impl Mimi {
         Ok(codes)
     }
 
-    pub fn encode_step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
-        let xs = self.encoder.step(xs)?;
-        let xs = self.encoder_transformer.step(&xs)?;
-        let xs = self.downsample.step(&xs)?;
+    pub fn encode_step(&mut self, xs: &StreamTensor, m: &StreamMask) -> Result<StreamTensor> {
+        let xs = self.encoder.step(xs, m)?;
+        let xs = self.encoder_transformer.step(&xs, m)?;
+        let xs = self.downsample.step(&xs, m)?;
         match xs.as_option() {
             None => Ok(().into()),
             Some(xs) => {
@@ -203,14 +211,14 @@ impl Mimi {
         self.decoder.forward(out)
     }
 
-    pub fn decode_step(&mut self, codes: &StreamTensor) -> Result<StreamTensor> {
+    pub fn decode_step(&mut self, codes: &StreamTensor, m: &StreamMask) -> Result<StreamTensor> {
         let emb = match codes.as_option() {
             Some(codes) => StreamTensor::from_tensor(self.quantizer.decode(codes)?),
             None => StreamTensor::empty(),
         };
-        let emb = self.upsample.step(&emb)?;
-        let out = self.decoder_transformer.step(&emb)?;
-        self.decoder.step(&out)
+        let emb = self.upsample.step(&emb, m)?;
+        let out = self.decoder_transformer.step(&emb, m)?;
+        self.decoder.step(&out, m)
     }
 
     pub fn reset_state(&mut self) {
@@ -238,5 +246,18 @@ pub fn load(model_file: &str, num_codebooks: Option<usize>, dev: &Device) -> Res
         unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[model_file], DType::F32, dev)? };
     let cfg = Config::v0_1(num_codebooks);
     let mimi = Mimi::new(cfg, vb)?;
+    Ok(mimi)
+}
+
+pub fn load_b(
+    batch_size: Option<usize>,
+    model_file: &str,
+    num_codebooks: Option<usize>,
+    dev: &Device,
+) -> Result<Mimi> {
+    let vb =
+        unsafe { candle_nn::VarBuilder::from_mmaped_safetensors(&[model_file], DType::F32, dev)? };
+    let cfg = Config::v0_1(num_codebooks);
+    let mimi = Mimi::new_(batch_size, cfg, vb)?;
     Ok(mimi)
 }

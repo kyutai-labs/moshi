@@ -163,7 +163,7 @@ impl Tokenizer {
             .allow_threads(|| {
                 let pcm_data = candle::Tensor::from_slice(pcm_data, pcm_shape, &self.device)?
                     .to_dtype(self.dtype)?;
-                let codes = self.mimi.encode_step(&pcm_data.into())?;
+                let codes = self.mimi.encode_step(&pcm_data.into(), &().into())?;
                 match codes.as_option() {
                     Some(codes) => Ok::<_, candle::Error>(Some(codes.to_vec3::<u32>()?)),
                     None => Ok(None),
@@ -211,7 +211,7 @@ impl Tokenizer {
         let pcm = py
             .allow_threads(|| {
                 let codes = candle::Tensor::from_slice(codes, codes_shape, &self.device)?;
-                let pcm = self.mimi.decode_step(&codes.into())?;
+                let pcm = self.mimi.decode_step(&codes.into(), &().into())?;
                 match pcm.as_option() {
                     Some(pcm) => {
                         let pcm = pcm.to_dtype(candle::DType::F32)?;
@@ -279,7 +279,7 @@ impl StreamTokenizer {
                     let pcm_data =
                         candle::Tensor::from_vec(pcm_data, (1, 1, l), &candle::Device::Cpu)?
                             .to_dtype(dtype)?;
-                    let codes = e_mimi.encode_step(&pcm_data.into())?;
+                    let codes = e_mimi.encode_step(&pcm_data.into(), &().into())?;
                     if let Some(codes) = codes.as_option() {
                         let mut codes = codes.to_vec3::<u32>()?;
                         e_tx.send(codes.remove(0))?;
@@ -294,7 +294,7 @@ impl StreamTokenizer {
             while let Ok(codes) = d_rx.recv() {
                 if let Err(err) = (|| {
                     let codes = candle::Tensor::new(codes, &candle::Device::Cpu)?.unsqueeze(2)?;
-                    let pcm_data = d_mimi.decode_step(&codes.into())?;
+                    let pcm_data = d_mimi.decode_step(&codes.into(), &().into())?;
                     if let Some(pcm_data) = pcm_data.as_option() {
                         let mut pcm_data = pcm_data.to_vec3::<f32>()?;
                         d_tx.send(pcm_data.remove(0).remove(0))?;

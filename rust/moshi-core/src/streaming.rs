@@ -2,13 +2,69 @@
 // This source code is licensed under the license found in the
 // LICENSE file in the root directory of this source tree.
 
-use candle::{IndexOp, Result, Tensor};
+use candle::{Device, IndexOp, Result, Tensor};
 
 pub trait Dim: candle::shape::Dim + Copy {}
 impl<T: candle::shape::Dim + Copy> Dim for T {}
 
 #[derive(Clone)]
 pub struct StreamTensor(Option<Tensor>);
+
+#[derive(Debug, Clone)]
+struct MaskInner {
+    cpu: Vec<bool>,
+    mask: Tensor,
+}
+
+#[derive(Clone)]
+pub struct StreamMask(Option<MaskInner>);
+
+impl std::fmt::Debug for StreamMask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            Some(t) => write!(f, "{:?}", t.mask.shape()),
+            None => write!(f, "Empty"),
+        }
+    }
+}
+
+impl std::convert::From<()> for StreamMask {
+    fn from(_value: ()) -> Self {
+        Self(None)
+    }
+}
+
+impl StreamMask {
+    pub fn empty() -> Self {
+        Self(None)
+    }
+
+    pub fn new(cpu: Vec<bool>, device: &Device) -> Result<Self> {
+        let mask = cpu.iter().map(|&v| u8::from(v)).collect::<Vec<u8>>();
+        let mask = Tensor::new(mask, device)?;
+        Ok(Self(Some(MaskInner { cpu, mask })))
+    }
+
+    pub fn is_active(&self, batch_idx: usize) -> bool {
+        self.cpu().is_none_or(|v| v[batch_idx])
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_none()
+    }
+
+    pub fn shape(&self) -> Option<&candle::Shape> {
+        self.0.as_ref().map(|t| t.mask.shape())
+    }
+
+    pub fn as_option(&self) -> Option<&Tensor> {
+        self.0.as_ref().map(|v| &v.mask)
+    }
+
+    pub fn cpu(&self) -> Option<&[bool]> {
+        self.0.as_ref().map(|v| v.cpu.as_slice())
+    }
+}
 
 impl std::fmt::Debug for StreamTensor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -40,6 +96,10 @@ impl std::convert::From<()> for StreamTensor {
 impl StreamTensor {
     pub fn empty() -> Self {
         Self(None)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_none()
     }
 
     pub fn from_tensor(tensor: Tensor) -> Self {
@@ -127,7 +187,7 @@ impl StreamTensor {
 
 pub trait StreamingModule {
     // TODO: Should we also have a flush method?
-    fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor>;
+    fn step(&mut self, xs: &StreamTensor, mask: &StreamMask) -> Result<StreamTensor>;
     fn reset_state(&mut self);
 }
 
@@ -166,7 +226,12 @@ impl StreamingBinOp {
         }
     }
 
-    pub fn step(&mut self, lhs: &StreamTensor, rhs: &StreamTensor) -> Result<StreamTensor> {
+    pub fn step(
+        &mut self,
+        lhs: &StreamTensor,
+        rhs: &StreamTensor,
+        mask: &StreamMask,
+    ) -> Result<StreamTensor> {
         let lhs = StreamTensor::cat2(&self.prev_lhs, lhs, self.dim)?;
         let rhs = StreamTensor::cat2(&self.prev_rhs, rhs, self.dim)?;
         let lhs_len = lhs.seq_len(self.dim)?;
@@ -174,14 +239,19 @@ impl StreamingBinOp {
         let common_len = usize::min(lhs_len, rhs_len);
         let (lhs, prev_lhs) = lhs.split(self.dim, common_len)?;
         let (rhs, prev_rhs) = rhs.split(self.dim, common_len)?;
-        let ys = match (lhs.0, rhs.0) {
+        let ys = match (&lhs.0, &rhs.0) {
             (Some(lhs), Some(rhs)) => {
-                let ys = self.forward(&lhs, &rhs)?;
+                let ys = self.forward(lhs, rhs)?;
                 StreamTensor::from_tensor(ys)
             }
             (None, None) => StreamTensor::empty(),
             (lhs, rhs) => candle::bail!("INTERNAL ERROR inconsistent lhs and rhs {lhs:?} {rhs:?}"),
         };
+        if !mask.is_empty() && (!prev_lhs.is_empty() || !prev_rhs.is_empty()) {
+            candle::bail!(
+                "cannot use a stream mask with a streaming bin op {prev_lhs:?} {prev_rhs:?} {lhs:?} {rhs:?}"
+            );
+        }
         self.prev_lhs = prev_lhs;
         self.prev_rhs = prev_rhs;
         Ok(ys)
@@ -208,7 +278,7 @@ pub struct Map<T: candle::Module>(T);
 impl<T: candle::Module> StreamingModule for Map<T> {
     fn reset_state(&mut self) {}
 
-    fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
+    fn step(&mut self, xs: &StreamTensor, _: &StreamMask) -> Result<StreamTensor> {
         xs.apply(&self.0)
     }
 }

@@ -2,7 +2,7 @@
 // This source code is licensed under the license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::streaming::{StreamTensor, StreamingModule};
+use crate::streaming::{StreamMask, StreamTensor, StreamingModule};
 use candle::{IndexOp, Module, Result, Tensor, D};
 use candle_nn::{Conv1d, VarBuilder};
 
@@ -309,7 +309,7 @@ impl StreamingModule for StreamableConv1d {
         self.left_pad_applied = false;
     }
 
-    fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
+    fn step(&mut self, xs: &StreamTensor, mask: &StreamMask) -> Result<StreamTensor> {
         let _enter = self.span.enter();
         let xs = match xs.as_option() {
             None => return Ok(().into()),
@@ -332,18 +332,41 @@ impl StreamingModule for StreamableConv1d {
         let xs = StreamTensor::cat2(&self.state_prev_xs, &xs.into(), D::Minus1)?;
         let seq_len = xs.seq_len(D::Minus1)?;
         let num_frames = (seq_len + stride).saturating_sub(kernel) / stride;
-        if num_frames > 0 {
+        let (state_prev_xs, ys) = if num_frames > 0 {
             let offset = num_frames * stride;
-            self.state_prev_xs = xs.narrow(D::Minus1, offset, seq_len - offset)?;
+            let state_prev_xs = xs.narrow(D::Minus1, offset, seq_len - offset)?;
             let in_l = (num_frames - 1) * stride + kernel;
             let xs = xs.narrow(D::Minus1, 0, in_l)?;
             // We apply the underlying convtr directly rather than through forward so as
             // not to apply any padding here.
-            xs.apply(&self.conv.conv)
+            let ys = xs.apply(&self.conv.conv)?;
+            (state_prev_xs, ys)
         } else {
-            self.state_prev_xs = xs;
-            Ok(StreamTensor::empty())
-        }
+            (xs, StreamTensor::empty())
+        };
+        let state_prev_xs = match mask.as_option() {
+            None => state_prev_xs,
+            Some(mask) => match (state_prev_xs.as_option(), self.state_prev_xs.as_option()) {
+                (None, None) => state_prev_xs,
+                (Some(state_prev_xs), None) => {
+                    let z = state_prev_xs.zeros_like()?;
+                    let mask = mask.reshape(((), 1, 1))?.broadcast_as(state_prev_xs.shape())?;
+                    mask.where_cond(state_prev_xs, &z)?.into()
+                }
+                (None, Some(_)) => {
+                    candle::bail!("streaming conv1d should only be used with constant steps")
+                }
+                (Some(prev_xs), Some(prev_prev_xs)) => {
+                    if prev_xs.shape() != prev_prev_xs.shape() {
+                        candle::bail!("streaming conv1d should only be used with constant steps {prev_xs:?} {prev_prev_xs:?}")
+                    }
+                    let mask = mask.reshape(((), 1, 1))?.broadcast_as(prev_xs.shape())?;
+                    mask.where_cond(prev_xs, prev_prev_xs)?.into()
+                }
+            },
+        };
+        self.state_prev_xs = state_prev_xs;
+        Ok(ys)
     }
 }
 
@@ -422,7 +445,7 @@ impl StreamingModule for StreamableConvTranspose1d {
         self.state_prev_ys.reset()
     }
 
-    fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
+    fn step(&mut self, xs: &StreamTensor, mask: &StreamMask) -> Result<StreamTensor> {
         let _enter = self.span.enter();
         let xs = match xs.as_option() {
             Some(xs) => xs,
@@ -452,6 +475,27 @@ impl StreamingModule for StreamableConvTranspose1d {
         };
         let invalid_steps = self.kernel_size - stride;
         let (ys, prev_ys) = StreamTensor::from(ys).split(D::Minus1, ot - invalid_steps)?;
+        let prev_ys = match mask.as_option() {
+            None => prev_ys,
+            Some(mask) => match (prev_ys.as_option(), self.state_prev_ys.as_option()) {
+                (None, None) => prev_ys,
+                (Some(prev_ys), None) => {
+                    let z = prev_ys.zeros_like()?;
+                    let mask = mask.reshape(((), 1, 1))?.broadcast_as(prev_ys.shape())?;
+                    mask.where_cond(prev_ys, &z)?.into()
+                }
+                (None, Some(_)) => {
+                    candle::bail!("streaming conv-tr1d should only be used with constant steps")
+                }
+                (Some(prev_ys), Some(prev_prev_ys)) => {
+                    if prev_ys.shape() != prev_prev_ys.shape() {
+                        candle::bail!("streaming conv-tr1d should only be used with constant steps {prev_ys:?} {prev_prev_ys:?}")
+                    }
+                    let mask = mask.reshape(((), 1, 1))?.broadcast_as(prev_ys.shape())?;
+                    mask.where_cond(prev_ys, prev_prev_ys)?.into()
+                }
+            },
+        };
         self.state_prev_ys = prev_ys;
         Ok(ys)
     }
@@ -505,8 +549,8 @@ impl StreamingModule for ConvDownsample1d {
         self.conv.reset_state()
     }
 
-    fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
-        self.conv.step(xs)
+    fn step(&mut self, xs: &StreamTensor, m: &StreamMask) -> Result<StreamTensor> {
+        self.conv.step(xs, m)
     }
 }
 
@@ -556,8 +600,8 @@ impl StreamingModule for ConvTrUpsample1d {
         self.convtr.reset_state()
     }
 
-    fn step(&mut self, xs: &StreamTensor) -> Result<StreamTensor> {
-        self.convtr.step(xs)
+    fn step(&mut self, xs: &StreamTensor, m: &StreamMask) -> Result<StreamTensor> {
+        self.convtr.step(xs, m)
     }
 }
 
@@ -597,7 +641,7 @@ mod tests {
         let mut ys_steps = vec![];
         for idx in 0..len {
             let xs = xs.i((.., .., step_size * idx..step_size * (idx + 1)))?;
-            let ys = conv1d.step(&xs.into())?;
+            let ys = conv1d.step(&xs.into(), &().into())?;
             if let Some(ys) = ys.as_option() {
                 ys_steps.push(ys.clone())
             }
@@ -635,7 +679,7 @@ mod tests {
         let mut ys_steps = vec![];
         for idx in 0..len {
             let xs = xs.i((.., .., step_size * idx..step_size * (idx + 1)))?;
-            let ys = conv1d.step(&xs.into())?;
+            let ys = conv1d.step(&xs.into(), &().into())?;
             if let Some(ys) = ys.as_option() {
                 ys_steps.push(ys.clone())
             }

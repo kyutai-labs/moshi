@@ -184,8 +184,13 @@ impl Model {
                 let t = Tensor::new(&[t], conditions.device())?.unsqueeze(0)?;
                 codes.push(Some(t))
             }
-            let (_text_logits, ys) =
-                self.lm.forward_ca(None, codes, &CaSrc::Tokens(conditions.clone()), None)?;
+            let (_text_logits, ys) = self.lm.forward_ca(
+                None,
+                codes,
+                &CaSrc::Tokens(conditions.clone()),
+                None,
+                &().into(),
+            )?;
             let last_audio_tokens = if self.speaker_cond.is_some() {
                 self.lm.depformer_sample_cfg(
                     &ys,

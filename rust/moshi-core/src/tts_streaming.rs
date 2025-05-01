@@ -159,8 +159,10 @@ impl State {
         let prev_text_token =
             Some(Tensor::from_vec(vec![prev_text_token; batch_size], (batch_size, 1), dev)?);
         let (text_logits, ys) = match self.ca_src.as_ref() {
-            None => self.model.forward_cond(prev_text_token, codes, conditions)?,
-            Some(ca_src) => self.model.forward_ca(prev_text_token, codes, ca_src, conditions)?,
+            None => self.model.forward_cond(prev_text_token, codes, conditions, &().into())?,
+            Some(ca_src) => {
+                self.model.forward_ca(prev_text_token, codes, ca_src, conditions, &().into())?
+            }
         };
         let text_logits = match self.cfg_alpha {
             None => text_logits.i((0, 0))?,
