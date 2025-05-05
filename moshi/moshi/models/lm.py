@@ -30,6 +30,14 @@ from .lm_utils import (_delay_sequence,
 logger = logging.getLogger(__name__)
 
 
+def scatter_with_mask_(tensor: torch.Tensor, dim: int,
+                       index: torch.Tensor, value: torch.Tensor, mask: torch.Tensor) -> None:
+    """Scatter but skipping the updates that are masked."""
+    old_value = tensor.gather(dim, index)
+    value = torch.where(mask, value, old_value)
+    tensor.scatter_(dim, index, value)
+
+
 @dataclass
 class LMOutput:
     # The logits are already re-aligned with the input codes
@@ -484,6 +492,7 @@ class _LMGenState(State):
     condition_cross: torch.Tensor | None = None
     exit_stack: ExitStack = field(default_factory=ExitStack)
     reset_callback: tp.Callable[[torch.Tensor], None] | None = None
+    set_exec_mask_callback: tp.Callable[[torch.Tensor], None] | None = None
 
     def reset(self, reset_mask: torch.Tensor) -> None:
         super().reset(reset_mask)
@@ -491,6 +500,11 @@ class _LMGenState(State):
         self.offset_cpu = 0
         if self.reset_callback is not None:
             self.reset_callback(reset_mask)
+
+    def set_exec_mask(self, exec_mask: torch.Tensor):
+        super().set_exec_mask(exec_mask)
+        if self.set_exec_mask_callback is not None:
+            self.set_exec_mask_callback(exec_mask)
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -545,7 +559,7 @@ class LMGen(StreamingModule[_LMGenState]):
         lm_model = self.lm_model
         initial = lm_model._get_initial_token()
         cache = torch.full(
-            (batch_size, self.lm_model.num_codebooks, self.max_delay + 2),
+            (batch_size, self.lm_model.num_codebooks, self.max_delay + 1000),
             lm_model.ungenerated_token_id,
             device=lm_model.device,
             dtype=torch.long,
@@ -585,7 +599,14 @@ class LMGen(StreamingModule[_LMGenState]):
             if self.cfg_coef != 1.:
                 reset_mask = reset_mask.repeat(2)
             self.lm_model.reset_streaming(reset_mask)
+
+        def _set_exec_mask_callback(exec_mask: torch.Tensor) -> None:
+            if self.cfg_coef != 1.:
+                exec_mask = exec_mask.repeat(2)
+            self.lm_model.set_exec_mask(exec_mask)
+
         state.reset_callback = _reset_callback
+        state.set_exec_mask_callback = _set_exec_mask_callback
         return state
 
     @torch.no_grad()
@@ -614,7 +635,8 @@ class LMGen(StreamingModule[_LMGenState]):
 
         delays = self.delays_cuda[lm_model.dep_q + 1:]
         write_positions = (state.offsets[:, None, None] + delays[:, None]) % CT
-        state.cache[:, lm_model.dep_q + 1:].scatter_(-1, write_positions, input_tokens)
+        scatter_with_mask_(state.cache[:, lm_model.dep_q + 1:], -1, write_positions, input_tokens,
+                           state.exec_mask[:, None, None])
 
         is_init = state.offsets[:, None, None] <= self.delays_cuda[:, None]
         is_init |= ~state.exec_mask[:, None, None]  # we also give init tokens if not executing to avoid crashing.
@@ -660,11 +682,14 @@ class LMGen(StreamingModule[_LMGenState]):
 
         state.offsets = torch.where(state.exec_mask, state.offsets + 1, state.offsets)
         state.offset_cpu += 1
-        positions = state.offsets % CT
-        state.cache[:, :1].scatter_(-1, positions[:, None, None], text_token[:, None, None])
+        positions = (state.offsets % CT)[:, None, None]
+        scatter_with_mask_(state.cache[:, :1], -1, positions,
+                           text_token[:, None, None], state.exec_mask[:, None, None])
         audio_tokens = audio_tokens[:, :, None]
-        state.cache[:, 1: lm_model.dep_q + 1, :].scatter_(
-            -1, positions[:, None, None].expand_as(audio_tokens), audio_tokens)
+        scatter_with_mask_(state.cache[:, 1: lm_model.dep_q + 1, :], -1,
+                           positions.expand_as(audio_tokens),
+                           audio_tokens,
+                           state.exec_mask[:, None, None])
 
         if not self.support_out_of_sync and state.offset_cpu <= self.max_delay:
             # When using out of sync exec, should not rely on this being None.
