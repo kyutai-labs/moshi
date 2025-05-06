@@ -559,7 +559,7 @@ class LMGen(StreamingModule[_LMGenState]):
         lm_model = self.lm_model
         initial = lm_model._get_initial_token()
         cache = torch.full(
-            (batch_size, self.lm_model.num_codebooks, self.max_delay + 2),
+            (batch_size, self.lm_model.num_codebooks, self.max_delay + 1000),
             lm_model.ungenerated_token_id,
             device=lm_model.device,
             dtype=torch.long,
