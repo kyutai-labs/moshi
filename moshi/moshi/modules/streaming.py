@@ -35,6 +35,9 @@ class State(abc.ABC):
         self.exec_mask = torch.ones(self.batch_size, dtype=torch.bool, device=self.device)
         self._set_exec_mask_graphed: CUDAGraphed | None = None
 
+    def set_exec_mask(self, exec_mask: torch.Tensor):
+        self.exec_mask[:] = exec_mask
+
     def reset(self, reset_mask: torch.Tensor) -> None:
         self.exec_mask[:] = torch.where(reset_mask, torch.ones_like(self.exec_mask), self.exec_mask)
 
@@ -198,7 +201,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
             def _set_exec_mask_fn(name: str, module: StreamingModule):
                 state = module._streaming_state
                 assert state is not None
-                state.exec_mask[:] = exec_mask
+                state.set_exec_mask(exec_mask)
             self._apply_named_streaming(_set_exec_mask_fn)
 
         if state._set_exec_mask_graphed is None:
