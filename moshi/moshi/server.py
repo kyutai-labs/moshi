@@ -20,6 +20,19 @@ import numpy as np
 import sentencepiece
 import sphn
 import torch
+import os
+
+# Disable PyTorch's dynamic compilation (dynamo)
+# This is needed because the quantized model uses custom operations
+# that aren't compatible with dynamo
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
+
+# Disable CUDA graph capture
+# This is needed because quantized models may use operations
+# that aren't compatible with CUDA graph capture
+os.environ["NO_CUDA_GRAPH"] = "1"
+
 from .client_utils import log
 from .models import loaders, MimiModel, LMModel, LMGen
 from .run_inference import get_condition_tensors
