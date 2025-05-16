@@ -80,6 +80,7 @@ class LMModel(StreamingContainer):
         dep_q: int = 8,
         card: int = 1024,
         text_card: int = 32000,
+        text_card_out: int | None = None,
         dim: int = 128,
         num_heads: int = 8,
         hidden_scale: int = 4,
@@ -97,6 +98,7 @@ class LMModel(StreamingContainer):
         existing_text_end_padding_id: int = 0,
         context: tp.Optional[int] = None,
         causal: bool = True,
+        demux_second_stream: bool = False,
         condition_provider: tp.Optional[ConditionProvider] = None,
         fuser: tp.Optional[ConditionFuser] = None,
         quantize: bool = False,
@@ -110,6 +112,7 @@ class LMModel(StreamingContainer):
         self.dep_q = dep_q
         self.card = card
         self.text_card = text_card
+        text_card_out = text_card if text_card_out is None else text_card_out
         assert len(delays) == self.num_codebooks, f"expected {self.num_codebooks} delays, got {len(delays)}."
         self.delays = delays
         self.dim = dim
@@ -130,9 +133,9 @@ class LMModel(StreamingContainer):
             [EmbeddingFactory(self.card + 1, dim) for _ in range(n_q)]
         )
         # Unlike for audio, here we authorize the model to output the special token.
-        self.text_emb = EmbeddingFactory(text_card + 1, dim)
+        self.text_emb = EmbeddingFactory(text_card + 1, dim, demux_second_stream=demux_second_stream)
 
-        self.text_linear = nn.Linear(dim, text_card, bias=bias_proj)
+        self.text_linear = nn.Linear(dim, text_card_out, bias=bias_proj)
         depformer_prefix = "depformer_"
         main_kwargs = {
             k: v for k, v in kwargs.items() if not k.startswith(depformer_prefix)
@@ -182,7 +185,9 @@ class LMModel(StreamingContainer):
         self.depformer_emb = nn.ModuleList(
             [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
         )
-        self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim)
+        self.depformer_text_emb = EmbeddingFactory(
+            text_card + 1, depformer_dim,
+            demux_second_stream=demux_second_stream)
         if depformer_dim_feedforward is None:
             depformer_dim_feedforward = int(hidden_scale * depformer_dim)
         self.depformer = StreamingTransformer(
@@ -490,6 +495,7 @@ class _LMGenState(State):
     offset_cpu: int = 0
     condition_sum: torch.Tensor | None = None
     condition_cross: torch.Tensor | None = None
+    cfg_is_masked_until: torch.Tensor | None = None
     exit_stack: ExitStack = field(default_factory=ExitStack)
     reset_callback: tp.Callable[[torch.Tensor], None] | None = None
     set_exec_mask_callback: tp.Callable[[torch.Tensor], None] | None = None
@@ -528,6 +534,8 @@ class LMGen(StreamingModule[_LMGenState]):
         on_text_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         on_audio_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         support_out_of_sync: bool = False,
+        cfg_is_masked_until: list[int] | None = None,
+        cfg_is_no_text: bool = False
     ):
         assert not lm_model.training, "generation shouldn't be used in training mode."
         super().__init__()
@@ -551,9 +559,12 @@ class LMGen(StreamingModule[_LMGenState]):
         self.on_text_hook = on_text_hook
         self.on_audio_hook = on_audio_hook
         self.support_out_of_sync = support_out_of_sync
+        self.cfg_is_masked_until = cfg_is_masked_until
+        self.cfg_is_no_text = cfg_is_no_text
         if self.cfg_coef != 1.:
-            assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
-            assert self.condition_tensors, "Missing condition tensors for CFG."
+            if self.cfg_is_masked_until is None:
+                assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
+                assert self.condition_tensors, "Missing condition tensors for CFG."
 
     def _init_streaming_state(self, batch_size: int) -> _LMGenState:
         lm_model = self.lm_model
@@ -583,9 +594,15 @@ class LMGen(StreamingModule[_LMGenState]):
         graphed_main = CUDAGraphed(lm_model.forward_text, disable=disable)
         graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
 
+        if self.cfg_is_masked_until is None:
+            cfg_is_masked_until = None
+        else:
+            cfg_is_masked_until = torch.tensor(self.cfg_is_masked_until, dtype=torch.long, device=lm_model.device)
+
         state = _LMGenState(
             batch_size, lm_model.device, cache, initial, graphed_main, graphed_depth,
-            offsets, condition_sum=condition_sum, condition_cross=condition_cross)
+            offsets, condition_sum=condition_sum, condition_cross=condition_cross,
+            cfg_is_masked_until=cfg_is_masked_until)
 
         if self.cfg_coef != 1.:
             batch_size *= 2
@@ -653,12 +670,25 @@ class LMGen(StreamingModule[_LMGenState]):
             assert (input_[:, lm_model.audio_offset :] <= lm_model.card).all(), input_
             assert (input_[:, :1] <= lm_model.text_card).all()
 
+        zero = torch.full((1,), self.lm_model.zero_token_id, dtype=torch.long, device=input_.device)
         if self.cfg_coef != 1.:
-            input_ = input_.repeat(2, 1, 1)
+            if state.cfg_is_masked_until is not None:
+                is_zeroed = state.offsets[:, None, None] <= self.delays_cuda[:, None] + state.cfg_is_masked_until.view(-1, 1, 1)
+                masked = torch.where(is_zeroed & ~is_init, zero, input_)
+                input_ = torch.cat([input_, masked], dim=0)
+            else:
+                input_ = input_.repeat(2, 1, 1)
+            if self.cfg_is_no_text:
+                input_[B:, :1] = torch.where(~is_init[:, :1], zero, input_[B:, :1])
+
         transformer_out, text_logits = state.graphed_main(input_, state.condition_sum, state.condition_cross)
         if self.cfg_coef != 1.:
             logits, logits_null = text_logits.chunk(2)
-            text_logits = logits_null + (logits - logits_null) * self.cfg_coef
+            if self.cfg_is_no_text:
+                text_logits = logits
+            else:
+                text_logits = logits_null + (logits - logits_null) * self.cfg_coef
+
         # Shape of text_logits should be [B, K_text=1, T=1, Card_text]
         text_token = sample_token(
             text_logits.float(),

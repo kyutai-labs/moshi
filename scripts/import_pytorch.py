@@ -43,7 +43,8 @@ def import_model(
         'depformer_dim', 'depformer_num_heads', 'depformer_num_layers', 'depformer_dim_feedforward',
         'depformer_layer_scale', 'depformer_multi_linear',
         'depformer_max_period', 'depformer_gating', 'depformer_pos_emb', 'depformer_weights_per_step',
-        'depformer_weights_per_step_schedule', 'depformer_low_rank_embeddings']
+        'depformer_weights_per_step_schedule', 'depformer_low_rank_embeddings', 'demux_second_stream',
+        'text_card_out']
     config: dict[str, tp.Any] = {}
     config['card'] = 2048
     config['n_q'] = in_n_q
@@ -65,8 +66,11 @@ def import_model(
     config['cross_attention'] = config['fuser'].get('cross')
 
     if cfg.interleaver.variant == 'tts_delay':
+        kw_interleaver = dict(cfg.interleaver)
+        kw_interleaver.update(cfg.interleaver.tts_delay)
         config['tts_config'] = {
-            'audio_delay': cfg.interleaver.audio_delay
+            'audio_delay': cfg.interleaver.audio_delay,
+            'second_stream_ahead': kw_interleaver.get('second_stream_ahead', 0),
         }
 
     config['model_id'] = {}
