@@ -345,6 +345,10 @@ def get_moshi_lm(
     # deprecated params.
     lm_kwargs.pop("depformer_causal", None)
 
+    # moved params
+    if 'demux_second_stream' in lm_kwargs:
+        lm_kwargs['demux_second_text_stream'] = lm_kwargs.pop('demucs_second_stream')
+
     # lora params.
     lora = lm_kwargs.pop("lora", False)
     lora_rank = lm_kwargs.pop("lora_rank", 128)

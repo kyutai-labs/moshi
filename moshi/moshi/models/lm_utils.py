@@ -67,41 +67,55 @@ class ScaledEmbedding(nn.Embedding):
     """Boost learning rate for embeddings (with `scale`).
 
     Args:
+        lr (float or None): Learning rate for the embedding layer if provided.
         norm (bool): if True, uses a layer norm after the embedding.
         zero_idx (int): special value indicating that the output should be exactly 0.
-        low_rank (int | None): if provided, uses low rank embedding with a linear layer to reach
-            the desired dimension. Quite efficient for reducing the number of weights for very large vocabs.
-        lr (float or None): learning rate to use, only valid if the `make_optim_group()` method is used.
+        low_rank (int | None): if provided, uses low rank embedding with a linear layer
+            to reach the desired dimension. Quite efficient for reducing the number of weights
+            for very large vocabs.
+        demux_second_stream (bool): input tokens can be the cartesian product of the vocab size,
+            and they will be demuxed, e.g. `(tok2 * card + tok1)`. In that case the same embedding
+            is used with different linear matrices.
     """
+    def __init__(self, num_embeddings: int, embedding_dim: int, *args, lr=None, norm: bool = False,
+                 zero_idx: int = -1, low_rank: int | None = None,
+                 demux_second_stream: bool = False, **kwargs):
 
-    def __init__(self, num_embeddings: int, embedding_dim: int,
-                 *args, norm: bool = False, zero_idx: int = -1,
-                 low_rank: int | None = None, lr: float | None = None, **kwargs):
         super().__init__(num_embeddings, low_rank or embedding_dim, *args, **kwargs)
+        self.lr = lr
         self.norm = None
         if norm:
-            self.norm = create_norm_fn("layer_norm", self.embedding_dim)
-        assert zero_idx < 0, "Please use negative values for the zero_idx."
+            self.norm = create_norm_fn('layer_norm', self.embedding_dim)
+        assert zero_idx < 0, 'Please use negative values for the zero_idx.'
         self.zero_idx = zero_idx
-        self.lr = lr
         self.low_rank = None
         if low_rank is not None:
             self.low_rank = nn.Linear(low_rank, embedding_dim, bias=False)
+        self.demux_second_stream = demux_second_stream
+        if self.demux_second_stream:
+            assert not norm
+            self.out1 = nn.Linear(low_rank or embedding_dim, embedding_dim, bias=False)
+            self.out2 = nn.Linear(low_rank or embedding_dim, embedding_dim, bias=False)
 
     def forward(self, input, *args, **kwargs):
         is_zero = input == self.zero_idx
         zero = torch.zeros(1, dtype=input.dtype, device=input.device)
         input = input.clamp(min=0)
-        y = super().forward(input, *args, **kwargs)
-        if self.norm is not None:
-            y = self.norm(y)
-        y = torch.where(is_zero[..., None], zero, y)
-        if self.low_rank is not None:
-            y = self.low_rank(y)
+        if self.demux_second_stream:
+            left = input % self.num_embeddings
+            right = input // self.num_embeddings
+            right = right - 1  # allow -1 for first slice.
+            left = super().forward(left, *args, **kwargs)
+            right_zero = (right < 0)[..., None]
+            right.clamp_(min=0)
+            right = super().forward(right, *args, **kwargs)
+            y = self.out1(left) + torch.where(right_zero, zero, self.out2(right))
+            y = torch.where(is_zero[..., None], zero, y)
+        else:
+            y = super().forward(input, *args, **kwargs)
+            if self.norm is not None:
+                y = self.norm(y)
+            y = torch.where(is_zero[..., None], zero, y)
+            if self.low_rank is not None:
+                y = self.low_rank(y)
         return y
-
-    def make_optim_group(self) -> dict:
-        group: dict[str, tp.Any] = {"params": list(self.parameters())}
-        if self.lr is not None:
-            group["lr"] = self.lr
-        return group
