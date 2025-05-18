@@ -347,7 +347,7 @@ def get_moshi_lm(
 
     # moved params
     if 'demux_second_stream' in lm_kwargs:
-        lm_kwargs['demux_second_text_stream'] = lm_kwargs.pop('demucs_second_stream')
+        lm_kwargs['demux_second_text_stream'] = lm_kwargs.pop('demux_second_stream')
 
     # lora params.
     lora = lm_kwargs.pop("lora", False)

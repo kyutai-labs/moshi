@@ -135,9 +135,9 @@ class LMModel(StreamingContainer):
             [EmbeddingFactory(self.card + 1, dim) for _ in range(n_q)]
         )
         # Unlike for audio, here we authorize the model to output the special token.
-        self.text_emb = EmbeddingFactory(text_card_out + 1, dim, demux_second_stream=demux_second_text_stream)
+        self.text_emb = EmbeddingFactory(text_card + 1, dim, demux_second_stream=demux_second_text_stream)
 
-        self.text_linear = nn.Linear(dim, text_card, bias=bias_proj)
+        self.text_linear = nn.Linear(dim, text_card_out, bias=bias_proj)
         depformer_prefix = "depformer_"
         main_kwargs = {
             k: v for k, v in kwargs.items() if not k.startswith(depformer_prefix)
@@ -187,7 +187,7 @@ class LMModel(StreamingContainer):
         self.depformer_emb = nn.ModuleList(
             [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
         )
-        self.depformer_text_emb = EmbeddingFactory(text_card_out + 1, depformer_dim,
+        self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim,
                                                    demux_second_stream=demux_second_text_stream)
         if depformer_dim_feedforward is None:
             depformer_dim_feedforward = int(hidden_scale * depformer_dim)
