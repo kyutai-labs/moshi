@@ -56,6 +56,8 @@ class LMModel(StreamingContainer):
         dep_q (int): Number of parallel streams to model in the depformer.
         card (int): Cardinality, vocabulary size.
         text_card (int): Cardinality of the text vocabulary.
+        text_card_out (int or None): Cardinality of output text, if different from the input.
+        demux_second_text_stream: (bool): Whether two text streams are muxed together with a cartesian product.
         dim (int): Dimension of the transformer encoder.
         num_heads (int): Number of heads for the transformer encoder.
         hidden_scale (int): Scale for hidden feed forward dimension of the transformer encoder.
@@ -81,6 +83,7 @@ class LMModel(StreamingContainer):
         card: int = 1024,
         text_card: int = 32000,
         text_card_out: int | None = None,
+        demux_second_text_stream: bool = False,
         dim: int = 128,
         num_heads: int = 8,
         hidden_scale: int = 4,
@@ -133,7 +136,7 @@ class LMModel(StreamingContainer):
             [EmbeddingFactory(self.card + 1, dim) for _ in range(n_q)]
         )
         # Unlike for audio, here we authorize the model to output the special token.
-        self.text_emb = EmbeddingFactory(text_card + 1, dim, demux_second_stream=demux_second_stream)
+        self.text_emb = EmbeddingFactory(text_card + 1, dim, demux_second_stream=demux_second_text_stream)
 
         self.text_linear = nn.Linear(dim, text_card_out, bias=bias_proj)
         depformer_prefix = "depformer_"
@@ -185,9 +188,8 @@ class LMModel(StreamingContainer):
         self.depformer_emb = nn.ModuleList(
             [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
         )
-        self.depformer_text_emb = EmbeddingFactory(
-            text_card + 1, depformer_dim,
-            demux_second_stream=demux_second_stream)
+        self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim,
+                                                   demux_second_stream=demux_second_text_stream)
         if depformer_dim_feedforward is None:
             depformer_dim_feedforward = int(hidden_scale * depformer_dim)
         self.depformer = StreamingTransformer(
@@ -673,7 +675,9 @@ class LMGen(StreamingModule[_LMGenState]):
         zero = torch.full((1,), self.lm_model.zero_token_id, dtype=torch.long, device=input_.device)
         if self.cfg_coef != 1.:
             if state.cfg_is_masked_until is not None:
-                is_zeroed = state.offsets[:, None, None] <= self.delays_cuda[:, None] + state.cfg_is_masked_until.view(-1, 1, 1)
+                limit = self.delays_cuda[:, None] + state.cfg_is_masked_until.view(-1, 1, 1)
+                is_zeroed = state.offsets[:, None, None] <= limit
+
                 masked = torch.where(is_zeroed & ~is_init, zero, input_)
                 input_ = torch.cat([input_, masked], dim=0)
             else:

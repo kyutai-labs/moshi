@@ -73,6 +73,9 @@ class ScaledEmbedding(nn.Embedding):
         low_rank (int | None): if provided, uses low rank embedding with a linear layer
             to reach the desired dimension. Quite efficient for reducing the number of weights
             for very large vocabs.
+        demux_second_stream (bool): input tokens can be the cartesian product of the vocab size,
+            and they will be demuxed, e.g. `(tok2 * card + tok1)`. In that case the same embedding
+            is used with different linear matrices.
     """
     def __init__(self, num_embeddings: int, embedding_dim: int, *args, lr=None, norm: bool = False,
                  zero_idx: int = -1, low_rank: int | None = None,
@@ -93,12 +96,6 @@ class ScaledEmbedding(nn.Embedding):
             assert not norm
             self.out1 = nn.Linear(low_rank or embedding_dim, embedding_dim, bias=False)
             self.out2 = nn.Linear(low_rank or embedding_dim, embedding_dim, bias=False)
-
-    def make_optim_group(self):
-        group = {"params": list(self.parameters())}
-        if self.lr is not None:
-            group["lr"] = self.lr
-        return group
 
     def forward(self, input, *args, **kwargs):
         is_zero = input == self.zero_idx
