@@ -67,31 +67,33 @@ class ScaledEmbedding(nn.Embedding):
     """Boost learning rate for embeddings (with `scale`).
 
     Args:
-        lr (float or None): Learning rate for the embedding layer if provided.
         norm (bool): if True, uses a layer norm after the embedding.
         zero_idx (int): special value indicating that the output should be exactly 0.
-        low_rank (int | None): if provided, uses low rank embedding with a linear layer
-            to reach the desired dimension. Quite efficient for reducing the number of weights
-            for very large vocabs.
+        low_rank (int | None): if provided, uses low rank embedding with a linear layer to reach
+            the desired dimension. Quite efficient for reducing the number of weights for very large vocabs.
+        lr (float or None): learning rate to use, only valid if the `make_optim_group()` method is used.
         demux_second_stream (bool): input tokens can be the cartesian product of the vocab size,
             and they will be demuxed, e.g. `(tok2 * card + tok1)`. In that case the same embedding
             is used with different linear matrices.
     """
-    def __init__(self, num_embeddings: int, embedding_dim: int, *args, lr=None, norm: bool = False,
-                 zero_idx: int = -1, low_rank: int | None = None,
-                 demux_second_stream: bool = False, **kwargs):
 
+    def __init__(self, num_embeddings: int, embedding_dim: int,
+                 *args, norm: bool = False, zero_idx: int = -1,
+                 low_rank: int | None = None, lr: float | None = None,
+                 demux_second_stream: bool = False, **kwargs):
         super().__init__(num_embeddings, low_rank or embedding_dim, *args, **kwargs)
-        self.lr = lr
         self.norm = None
         if norm:
-            self.norm = create_norm_fn('layer_norm', self.embedding_dim)
-        assert zero_idx < 0, 'Please use negative values for the zero_idx.'
+            self.norm = create_norm_fn("layer_norm", self.embedding_dim)
+        assert zero_idx < 0, "Please use negative values for the zero_idx."
         self.zero_idx = zero_idx
+        self.lr = lr
         self.low_rank = None
         if low_rank is not None:
             self.low_rank = nn.Linear(low_rank, embedding_dim, bias=False)
+
         self.demux_second_stream = demux_second_stream
+        assert self.zero_idx == -1, "When demuxing a second stream, zero_idx must be -1."
         if self.demux_second_stream:
             assert not norm
             self.out1 = nn.Linear(low_rank or embedding_dim, embedding_dim, bias=False)
@@ -104,7 +106,8 @@ class ScaledEmbedding(nn.Embedding):
         if self.demux_second_stream:
             left = input % self.num_embeddings
             right = input // self.num_embeddings
-            right = right - 1  # allow -1 for first slice.
+            # Right is itself between [-1, ..., card - 1], with -1 being the zero value.
+            right = right - 1
             left = super().forward(left, *args, **kwargs)
             right_zero = (right < 0)[..., None]
             right.clamp_(min=0)
