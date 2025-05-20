@@ -101,7 +101,6 @@ class LMModel(StreamingContainer):
         existing_text_end_padding_id: int = 0,
         context: tp.Optional[int] = None,
         causal: bool = True,
-        demux_second_stream: bool = False,
         condition_provider: tp.Optional[ConditionProvider] = None,
         fuser: tp.Optional[ConditionFuser] = None,
         quantize: bool = False,
