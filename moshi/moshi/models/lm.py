@@ -534,6 +534,7 @@ class LMGen(StreamingModule[_LMGenState]):
         on_text_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         on_audio_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         support_out_of_sync: bool = False,
+        cfg_is_no_text: bool = False,
     ):
         assert not lm_model.training, "generation shouldn't be used in training mode."
         super().__init__()
@@ -557,9 +558,11 @@ class LMGen(StreamingModule[_LMGenState]):
         self.on_text_hook = on_text_hook
         self.on_audio_hook = on_audio_hook
         self.support_out_of_sync = support_out_of_sync
+        self.cfg_is_no_text = cfg_is_no_text
         if self.cfg_coef != 1.:
-            assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
-            assert self.condition_tensors, "Missing condition tensors for CFG."
+            if not self.cfg_is_no_text:
+                assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
+                assert self.condition_tensors, "Missing condition tensors for CFG."
 
     def _init_streaming_state(self, batch_size: int) -> _LMGenState:
         lm_model = self.lm_model
@@ -660,11 +663,19 @@ class LMGen(StreamingModule[_LMGenState]):
             assert (input_[:, :1] <= lm_model.text_card).all()
 
         if self.cfg_coef != 1.:
+            zero = torch.full((1,), self.lm_model.zero_token_id, dtype=torch.long, device=input_.device)
             input_ = input_.repeat(2, 1, 1)
+            if self.cfg_is_no_text:
+                # Zero out text stream if we want to have the CFG over it.
+                input_[B:, :1] = torch.where(is_init[:, :1], input_[B:, :1], zero)
+
         transformer_out, text_logits = state.graphed_main(input_, state.condition_sum, state.condition_cross)
         if self.cfg_coef != 1.:
             logits, logits_null = text_logits.chunk(2)
-            text_logits = logits_null + (logits - logits_null) * self.cfg_coef
+            if self.cfg_is_no_text:
+                text_logits = logits
+            else:
+                text_logits = logits_null + (logits - logits_null) * self.cfg_coef
         # Shape of text_logits should be [B, K_text=1, T=1, Card_text]
         text_token = sample_token(
             text_logits.float(),
