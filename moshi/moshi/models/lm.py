@@ -536,7 +536,7 @@ class LMGen(StreamingModule[_LMGenState]):
         on_audio_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         support_out_of_sync: bool = False,
         cfg_is_masked_until: list[int] | None = None,
-        cfg_is_no_text: bool = False
+        cfg_is_no_text: bool = False,
     ):
         assert not lm_model.training, "generation shouldn't be used in training mode."
         super().__init__()
@@ -563,7 +563,7 @@ class LMGen(StreamingModule[_LMGenState]):
         self.cfg_is_masked_until = cfg_is_masked_until
         self.cfg_is_no_text = cfg_is_no_text
         if self.cfg_coef != 1.:
-            if self.cfg_is_masked_until is None:
+            if not self.cfg_is_no_text and not self.cfg_is_masked_until:
                 assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
                 assert self.condition_tensors, "Missing condition tensors for CFG."
 
@@ -691,7 +691,6 @@ class LMGen(StreamingModule[_LMGenState]):
                 text_logits = logits
             else:
                 text_logits = logits_null + (logits - logits_null) * self.cfg_coef
-
         # Shape of text_logits should be [B, K_text=1, T=1, Card_text]
         text_token = sample_token(
             text_logits.float(),
