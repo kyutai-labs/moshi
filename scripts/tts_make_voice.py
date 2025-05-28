@@ -50,7 +50,7 @@ def main():
         help="The config as a json file.",
     )
     parser.add_argument("--duration", type=float, default=10.0)
-    parser.add_argument("--model_root", type=Path,
+    parser.add_argument("--model-root", type=Path,
                         help="Shorthand for giving only once the root of the folder with the config and checkpoints.")
 
     parser.add_argument("-o", "--out", type=Path, help="Out path if not same as original file.")
