@@ -2,7 +2,7 @@
 # Example:
 #  uv run --script scripts/tts_make_voice.py \
 #    --mimi-weight ~/models/moshi/moshi_e9d43d50@500/e9d43d50_500_mimi_voice.safetensors \
-#    ~/models/tts-voices/250221_Philippine.mp3+5.0
+#    ~/models/tts-voices/myvoice.mp3+5.0
 #
 # It's also possible to pass in a directory containing audio files.
 import argparse
