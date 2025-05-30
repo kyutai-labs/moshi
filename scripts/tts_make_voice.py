@@ -49,10 +49,10 @@ def main():
         type=Path,
         help="The config as a json file.",
     )
-    parser.add_argument("--duration", type=float, default=10.0)
     parser.add_argument("--model-root", type=Path,
                         help="Shorthand for giving only once the root of the folder with the config and checkpoints.")
 
+    parser.add_argument("--duration", type=float, default=10.0, help="Duration of the audio conditioning.")
     parser.add_argument("-o", "--out", type=Path, help="Out path if not same as original file.")
     parser.add_argument(
         "files",
@@ -74,7 +74,7 @@ def main():
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
         args.hf_repo, mimi_weights=args.mimi_weight,
     )
-    # need a bit manual param override at the moment.
+    # need a bit of manual param override at the moment.
     loaders._quantizer_kwargs["n_q"] = 16
     checkpoint_info.lm_config = None
     print("loading mimi")
