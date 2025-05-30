@@ -43,14 +43,14 @@ def import_model(
         'depformer_dim', 'depformer_num_heads', 'depformer_num_layers', 'depformer_dim_feedforward',
         'depformer_layer_scale', 'depformer_multi_linear',
         'depformer_max_period', 'depformer_gating', 'depformer_pos_emb', 'depformer_weights_per_step',
-        'depformer_weights_per_step_schedule', 'depformer_low_rank_embeddings', 'demux_second_stream',
+        'depformer_low_rank_embeddings', 'demux_second_stream',
         'text_card_out']
     config: dict[str, tp.Any] = {}
     config['card'] = 2048
     config['n_q'] = in_n_q
     config['dep_q'] = out_n_q
     tr_args = omegaconf.OmegaConf.to_object(cfg.transformer_lm)
-    config['delays'] = tr_args['delays'][:out_n_q + 1]
+    config['delays'] = tr_args['delays']
     if len(config['delays']) < out_n_q + 1:
         config['delays'] = config['delays'] + [config['delays'][-1]] * (out_n_q + 1 - len(config['delays']))
     for key in keys:
@@ -63,9 +63,9 @@ def import_model(
     config['conditioners'] = omegaconf.OmegaConf.to_object(cfg.conditioners)
     config['fuser'] = omegaconf.OmegaConf.to_object(cfg.fuser)
     config['fuser'].pop('streaming_sum', None)
-    config['cross_attention'] = config['fuser'].get('cross')
+    config['cross_attention'] = bool(config['fuser'].get('cross'))
 
-    if cfg.interleaver.variant == 'tts_delay':
+    if hasattr(cfg, 'interleaver') and cfg.interleaver.variant == 'tts_delay':
         kw_interleaver = dict(cfg.interleaver)
         kw_interleaver.update(cfg.interleaver.tts_delay)
         config['tts_config'] = {
@@ -79,17 +79,21 @@ def import_model(
     if args.epoch is not None:
         config['model_id']['epoch'] = args.epoch
 
+    schedule = cfg.transformer_lm.get('depformer_weights_per_step_schedule', None)
+    has_schedule = True
+    if schedule is None:
+        has_schedule = False
+        schedule = list(range(in_n_q))
+    num_weights = max(schedule) + 1
+    schedule = schedule[:out_n_q]
+    if has_schedule:
+        config['depformer_weights_per_step_schedule'] = schedule
+
     if args.extra_config:
         extra = json.loads(args.extra_config.read_text())
         config.update(extra)
     out_config.write_text(json.dumps(config, indent=2))
 
-    schedule = cfg.transformer_lm.get('depformer_weights_per_step_schedule', None)
-    if schedule is None:
-        schedule = list(range(in_n_q))
-
-    num_weights = max(schedule) + 1
-    schedule = schedule[:out_n_q]
     kept_weights = max(schedule) + 1
     print(f"Number of dep weights: {num_weights}, keeping {kept_weights}")
 
