@@ -1,13 +1,13 @@
 # Copyright (c) Kyutai, all rights reserved.
 # Example:
 #  uv run --script scripts/tts_make_voice.py \
-#    --mimi-weight ~/models/moshi/moshi_e9d43d50@500/e9d43d50_500_mimi_voice.safetensors \
-#    ~/models/tts-voices/myvoice.mp3+5.0
+#    --model-root ~/models/moshi/moshi_e9d43d50@500/ ~/models/tts-voices/myvoice.mp3+5.0
 #
 # It's also possible to pass in a directory containing audio files.
 import argparse
 import json
 from pathlib import Path
+import sys
 
 import sphn
 import torch
@@ -82,9 +82,15 @@ def main():
     print("mimi loaded")
 
     ext = ".safetensors"
-    assert args.config is not None
+    if args.config is None:
+        print("A config must be provided to determine the model id.")
+        sys.exit(1)
     raw_config = json.loads(args.config.read_text())
-    model_id = raw_config['model_id']
+    try:
+        model_id = raw_config['model_id']
+    except KeyError:
+        print("The provided config doesn't contain model_id, this is required.")
+        sys.exit(1)
     ext = f".{model_id['sig']}@{model_id['epoch']}{ext}"
 
     files = []
