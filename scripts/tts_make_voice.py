@@ -1,13 +1,13 @@
 # Copyright (c) Kyutai, all rights reserved.
 # Example:
 #  uv run --script scripts/tts_make_voice.py \
-#    --mimi-weight ~/models/moshi/moshi_e9d43d50@500/e9d43d50_500_mimi_voice.safetensors \
-#    ~/models/tts-voices/250221_Philippine.mp3+5.0
+#    --model-root ~/models/moshi/moshi_e9d43d50@500/ ~/models/tts-voices/myvoice.mp3+5.0
 #
 # It's also possible to pass in a directory containing audio files.
 import argparse
 import json
 from pathlib import Path
+import sys
 
 import sphn
 import torch
@@ -49,10 +49,10 @@ def main():
         type=Path,
         help="The config as a json file.",
     )
-    parser.add_argument("--duration", type=float, default=10.0)
     parser.add_argument("--model-root", type=Path,
                         help="Shorthand for giving only once the root of the folder with the config and checkpoints.")
 
+    parser.add_argument("--duration", type=float, default=10.0, help="Duration of the audio conditioning.")
     parser.add_argument("-o", "--out", type=Path, help="Out path if not same as original file.")
     parser.add_argument(
         "files",
@@ -74,7 +74,7 @@ def main():
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
         args.hf_repo, mimi_weights=args.mimi_weight,
     )
-    # need a bit manual param override at the moment.
+    # need a bit of manual param override at the moment.
     loaders._quantizer_kwargs["n_q"] = 16
     checkpoint_info.lm_config = None
     print("loading mimi")
@@ -82,9 +82,15 @@ def main():
     print("mimi loaded")
 
     ext = ".safetensors"
-    assert args.config is not None
+    if args.config is None:
+        print("A config must be provided to determine the model id.")
+        sys.exit(1)
     raw_config = json.loads(args.config.read_text())
-    model_id = raw_config['model_id']
+    try:
+        model_id = raw_config['model_id']
+    except KeyError:
+        print("The provided config doesn't contain model_id, this is required.")
+        sys.exit(1)
     ext = f".{model_id['sig']}@{model_id['epoch']}{ext}"
 
     files = []
