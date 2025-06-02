@@ -68,7 +68,7 @@ def main():
         candidates = list(args.model_root.glob('*_mimi_voice.safetensors'))
         assert len(candidates) == 1, candidates
         args.mimi_weight = candidates[0]
-        args.config = args.magic / 'config.json'
+        args.config = args.model_root / 'config.json'
 
     print("retrieving checkpoint")
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
