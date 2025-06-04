@@ -1,7 +1,6 @@
 # Copyright (c) Kyutai, all rights reserved.
 # Example:
-#  uv run --script scripts/tts_make_voice.py \
-#    --model-root ~/models/moshi/moshi_e9d43d50@500/ ~/models/tts-voices/myvoice.mp3+5.0
+#  uv run --with=./moshi scripts/tts_make_voice.py
 #
 # It's also possible to pass in a directory containing audio files.
 import argparse
