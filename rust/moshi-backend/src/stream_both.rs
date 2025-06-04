@@ -253,7 +253,7 @@ impl MsgSender {
 
     async fn send_text(&mut self, text: String) -> Result<()> {
         let msg: Vec<u8> = [&[MsgType::Text.to_u8()], text.as_bytes()].concat();
-        let msg = ws::Message::Binary(msg);
+        let msg = ws::Message::Binary(msg.into());
         self.sender.send(msg).await?;
         Ok(())
     }
@@ -263,7 +263,7 @@ impl MsgSender {
         // 1. Protocol version (`u32`) - always 0 for now.
         // 2. Model version (`u32`).
         let msg: Vec<u8> = [&[MsgType::Handshake.to_u8()], [0u8; 8].as_slice()].concat();
-        let msg = ws::Message::Binary(msg);
+        let msg = ws::Message::Binary(msg.into());
         self.sender.send(msg).await?;
         Ok(())
     }
@@ -271,7 +271,7 @@ impl MsgSender {
     async fn send_metadata(&mut self, md: Box<MetaData>) -> Result<()> {
         let bytes = serde_json::to_vec(&md)?;
         let msg: Vec<u8> = [&[MsgType::Metadata.to_u8()], bytes.as_slice()].concat();
-        let msg = ws::Message::Binary(msg);
+        let msg = ws::Message::Binary(msg.into());
         self.sender.send(msg).await?;
         Ok(())
     }
@@ -304,7 +304,7 @@ impl MsgSender {
             let data = self.pw.inner_mut();
             if !data.is_empty() {
                 let msg: Vec<u8> = [&[MsgType::Audio.to_u8()], data.as_slice()].concat();
-                let msg = ws::Message::Binary(msg);
+                let msg = ws::Message::Binary(msg.into());
                 self.sender.send(msg).await?;
                 self.sender.flush().await?;
                 data.clear();
