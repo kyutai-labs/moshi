@@ -1,0 +1,57 @@
+[package]
+name = "moshi-server"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+base64 = { workspace = true }
+bincode = { workspace = true }
+byteorder = { workspace = true }
+candle = { workspace = true }
+candle-nn = { workspace = true }
+candle-transformers = { workspace = true }
+clap = { workspace = true }
+futures-util = { workspace = true }
+hf-hub = { workspace = true }
+kaudio = { workspace = true }
+lazy_static = { workspace = true }
+log = { workspace = true }
+moshi = { workspace = true }
+numpy = { workspace = true }
+ogg = { workspace = true }
+opus = { workspace = true }
+prometheus = { workspace = true }
+pyo3 = { workspace = true }
+pyo3-ffi = { workspace = true }
+rayon = { workspace = true }
+regex = { workspace = true }
+rmp-serde = { workspace = true }
+rubato = { workspace = true }
+sentencepiece = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+symphonia = { workspace = true }
+tokenizers = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[build-dependencies]
+anyhow = { workspace = true }
+vergen = { workspace = true }
+
+[features]
+default = []
+cuda = ["moshi/cuda", "candle/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["moshi/metal", "candle/metal", "candle-nn/metal", "candle-transformers/metal"]
