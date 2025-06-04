@@ -145,7 +145,7 @@ def main():
         if cleaner is not None:
             wav = cleaner(wav.to(device=args.device)).clamp(-0.99, 0.99)
             if args.save_clean:
-                clean_file = out_folder / (file.stem + "_clean.wav")
+                clean_file = out_folder / (file.name + "_clean.wav")
                 sphn.write_wav(clean_file, wav.cpu().numpy()[0], cleaner.sample_rate)
                 print(f"Saved {clean_file}.")
 
