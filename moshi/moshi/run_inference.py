@@ -34,13 +34,14 @@ def seed_all(seed):
 
 def get_condition_tensors(model_type: str, lm: LMModel, batch_size: int, cfg_coef: float) -> ConditionTensors:
     condition_tensors = {}
-    if lm.condition_provider is not None:
+    if lm.condition_provider is not None and lm.condition_provider.conditioners:
         conditions: list[ConditionAttributes] | None = None
         if model_type == 'hibiki':
-            conditions = [ConditionAttributes(text={"description": "very_good"}, tensor={})] * batch_size
+            conditions = [ConditionAttributes(text={"description": "very_good"}, tensor={}) for _ in range(batch_size)]
             if cfg_coef != 1.:
                 # Extending the conditions with the negatives for the CFG.
-                conditions += [ConditionAttributes(text={"description": "very_bad"}, tensor={})] * batch_size
+                conditions += [ConditionAttributes(text={"description": "very_bad"}, tensor={})
+                               for _ in range(batch_size)]
         else:
             raise RuntimeError(f"Model expects conditioning but model type {model_type} is not supported.")
         assert conditions is not None

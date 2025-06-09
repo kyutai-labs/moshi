@@ -47,6 +47,7 @@ struct WorkerArgs {
 #[derive(Debug, clap::Subcommand)]
 enum Command {
     Validate { configs: Vec<String> },
+    Configs { which: String },
     Worker(WorkerArgs),
 }
 
@@ -457,6 +458,21 @@ async fn main() {
 async fn main_() -> Result<()> {
     let args = <Args as clap::Parser>::parse();
     match args.command {
+        Command::Configs { which } => match which.as_str() {
+            "tts.py" => {
+                println!("{}", String::from_utf8_lossy(include_bytes!("../tts.py")));
+            }
+            "voice.py" => {
+                println!("{}", String::from_utf8_lossy(include_bytes!("../voice.py")));
+            }
+            "uv.lock" => {
+                println!("{}", String::from_utf8_lossy(include_bytes!("../uv.lock")));
+            }
+            _ => {
+                eprintln!("Unknown config: {which}");
+                std::process::exit(1);
+            }
+        },
         Command::Validate { configs } => {
             tracing_subscriber::fmt().init();
             for config in configs.iter() {
