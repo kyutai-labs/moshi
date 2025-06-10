@@ -839,7 +839,26 @@ fn py_router(s: Arc<py_module::M>, path: &str, ss: &SharedState) -> axum::Router
         }
     }
 
+    // TODO: add a batch mode.
     async fn t(
+        state: axum::extract::State<(Arc<py_module::M>, SharedState)>,
+        headers: axum::http::HeaderMap,
+        req: axum::Json<py_module::TtsQuery>,
+    ) -> utils::AxumResult<Response> {
+        tracing::info!("handling py streaming post query {req:?}");
+        let valid_id = headers
+            .get(ID_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|id| state.0 .1.config.authorized_ids.contains(id));
+        if !valid_id {
+            return Ok(StatusCode::UNAUTHORIZED.into_response());
+        }
+        let wav = state.0 .0.handle_query(&req).await?;
+        tracing::info!("ok {}", wav.len());
+        Ok((StatusCode::OK, [(axum::http::header::CONTENT_TYPE, "audio/wav")], wav).into_response())
+    }
+
+    async fn streaming_t(
         ws: axum::extract::ws::WebSocketUpgrade,
         headers: axum::http::HeaderMap,
         state: axum::extract::State<(Arc<py_module::M>, SharedState)>,
@@ -862,7 +881,10 @@ fn py_router(s: Arc<py_module::M>, path: &str, ss: &SharedState) -> axum::Router
         let upg = ws.write_buffer_size(0).on_upgrade(move |v| py_websocket(v, py, py_query, addr));
         Ok(upg)
     }
-    axum::Router::new().route(path, axum::routing::get(t)).with_state((s, ss.clone()))
+    axum::Router::new()
+        .route(path, axum::routing::post(t))
+        .route(path, axum::routing::get(streaming_t))
+        .with_state((s, ss.clone()))
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]

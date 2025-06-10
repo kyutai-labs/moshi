@@ -9,7 +9,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.6.1"
+version = "0.6.2-alpha.1"
 edition = "2021"
 license = "MIT/Apache-2.0"
 description = "moshi, a real-time voice AI"
@@ -41,7 +41,7 @@ http = "1.1.0"
 kaudio = "0.2.1"
 lazy_static = "1.5.0"
 log = "0.4.20"
-moshi = { path = "./moshi-core", version = "0.6.1" }
+moshi = { path = "./moshi-core", version = "0.6.2-alpha.1" }
 native-tls = "0.2.11"
 numpy = "0.23.0"
 ogg = { version = "0.9.1", features = ["async"] }
