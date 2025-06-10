@@ -4,6 +4,7 @@
 
 use crate::metrics::py as metrics;
 use crate::PyStreamingQuery as Query;
+use crate::StreamingOutput;
 use anyhow::{Context, Result};
 use axum::extract::ws;
 use numpy::PyArrayMethods;
@@ -21,6 +22,14 @@ const MASK_AR_STEP: u8 = 1 << 3;
 const MASK_MISSING_WORDS: u8 = 1 << 4;
 
 const SEND_PING_EVERY: Duration = Duration::from_secs(10);
+const POST_RETRY_DELAY: Duration = Duration::from_millis(100);
+const POST_MAX_RETRIES: usize = 1000;
+
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
+pub struct TtsQuery {
+    text: String,
+    voice: String,
+}
 
 pub struct VerbosePyErr {
     err: PyErr,
@@ -382,6 +391,10 @@ pub(crate) fn toml_to_py<'a>(py: Python<'a>, value: &toml::Value) -> Result<Boun
     Ok(value)
 }
 
+fn text_pre_process(text: &str) -> String {
+    text.replace('’', "'").replace('–', "").replace(':', " ").replace(['(', ')'], "")
+}
+
 impl M {
     pub fn new(config: crate::PyConfig) -> Result<Self> {
         init()?;
@@ -416,7 +429,12 @@ impl M {
         Ok(Self { config, channels, text_tokenizer })
     }
 
-    fn channels(&self, query: &Query) -> Result<(usize, InSend, OutRecv)> {
+    // Returns None if no channel is available at the moment.
+    fn channels(
+        &self,
+        format: StreamingOutput,
+        voice: Option<String>,
+    ) -> Result<Option<(usize, InSend, OutRecv)>> {
         let mut channels = self.channels.lock().unwrap();
         // Linear scan to find an available channel. This is fairly inefficient, instead we should
         // probably have a queue of available slots.
@@ -424,19 +442,80 @@ impl M {
             if channel.is_none() {
                 let (in_tx, in_rx) = std::sync::mpsc::channel::<Msg>();
                 let (out_tx, out_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
-                let mut encoder = crate::tts::Encoder::new(query.format)?;
+                let mut encoder = crate::tts::Encoder::new(format)?;
                 if let Some(msg) = encoder.encode_msg(crate::tts::OutMsg::Ready)? {
                     out_tx.send(msg)?
                 }
                 if let Some(header) = encoder.header()? {
                     out_tx.send(header)?
                 }
-                let c = Channel::new(in_rx, out_tx, encoder, query.voice.clone());
+                let c = Channel::new(in_rx, out_tx, encoder, voice.clone());
                 *channel = Some(c);
-                return Ok((batch_idx, in_tx, out_rx));
+                return Ok(Some((batch_idx, in_tx, out_rx)));
             }
         }
-        anyhow::bail!("no free channels");
+        Ok(None)
+    }
+
+    // TODO: Add a proper batch variant that would enqueue the task so that it can be processed
+    // when there is a free channel.
+    pub async fn handle_query(&self, query: &TtsQuery) -> Result<Vec<u8>> {
+        tracing::info!("py handle-query");
+        let text_tokenizer = self.text_tokenizer.clone();
+        let text_bos_token = self.config().text_bos_token;
+        let (batch_idx, in_tx, mut out_rx) = {
+            let mut num_tries = 0;
+            loop {
+                match self.channels(StreamingOutput::Pcm, Some(query.voice.clone())) {
+                    Ok(Some(x)) => break x,
+                    Ok(None) => {
+                        num_tries += 1;
+                        if num_tries > POST_MAX_RETRIES {
+                            tracing::error!("no free channels after 1000 tries");
+                            anyhow::bail!("no free channels");
+                        }
+                        tokio::time::sleep(POST_RETRY_DELAY).await;
+                    }
+                    Err(err) => {
+                        tracing::error!(?err, "no free channels");
+                        Err(err)?
+                    }
+                }
+            }
+        };
+        tracing::info!(batch_idx, "batched-py channel");
+        let mut inserted_bos = false;
+        let text = text_pre_process(&query.text);
+        for word in text.split_whitespace() {
+            if word.is_empty() {
+                continue;
+            }
+            let mut word_tokens: Vec<_> =
+                text_tokenizer.encode(word)?.into_iter().map(|v| v.id).collect();
+            if !inserted_bos {
+                inserted_bos = true;
+                word_tokens.insert(0, text_bos_token)
+            }
+            in_tx.send(Msg::Text(word.to_string(), word_tokens))?;
+        }
+        in_tx.send(Msg::Eos)?;
+        let mut pcm = vec![];
+        tracing::info!(batch_idx, "starting the receive loop");
+        while let Some(data) = out_rx.recv().await {
+            pcm.push(data)
+        }
+        let pcm = pcm.into_iter().flatten().collect::<Vec<_>>();
+
+        let pcm = {
+            use byteorder::ByteOrder;
+            let mut buf = vec![0f32; pcm.len() / std::mem::size_of::<f32>()];
+            byteorder::LittleEndian::read_f32_into(&pcm, &mut buf);
+            buf
+        };
+
+        let mut wav = vec![];
+        moshi::wav::write_pcm_as_wav(&mut wav, &pcm, 24_000)?;
+        Ok(wav)
     }
 
     pub async fn handle_socket(&self, socket: ws::WebSocket, query: Query) -> Result<()> {
@@ -446,20 +525,20 @@ impl M {
         metrics::CONNECT.inc();
 
         let (mut sender, receiver) = socket.split();
-        let (batch_idx, in_tx, mut out_rx) = match self.channels(&query) {
-            Ok(x) => x,
-            Err(err) => {
-                tracing::error!(?err, "no free channels");
+        let (bidx, in_tx, mut out_rx) = match self.channels(query.format, query.voice.clone())? {
+            Some(x) => x,
+            None => {
+                tracing::error!("no free channels");
                 let mut encoder = crate::tts::Encoder::new(query.format)?;
                 let msg = crate::tts::OutMsg::Error { message: "no free channels".into() };
                 if let Some(msg) = encoder.encode_msg(msg)? {
                     sender.send(ws::Message::binary(msg)).await?;
                     sender.close().await?;
                 }
-                return Err(err);
+                anyhow::bail!("no free channels")
             }
         };
-        tracing::info!(batch_idx, "batched-py channel");
+        tracing::info!(?bidx, "batched-py channel");
         let text_tokenizer = self.text_tokenizer.clone();
         let text_bos_token = self.config().text_bos_token;
 
@@ -468,7 +547,8 @@ impl M {
             let mut receiver = receiver;
             let mut inserted_bos = false;
             let mut send_text = |msg: &str| -> Result<()> {
-                for word in msg.split(' ') {
+                let msg = text_pre_process(msg);
+                for word in msg.split_whitespace() {
                     if word.is_empty() {
                         continue;
                     }
@@ -488,7 +568,7 @@ impl M {
                     Ok(Some(msg)) => msg,
                     Ok(None) => break,
                     Err(_) => {
-                        tracing::info!(?batch_idx, "recv loop short timeout");
+                        tracing::info!(?bidx, "recv loop short timeout");
                         break;
                     }
                 };
@@ -496,7 +576,7 @@ impl M {
                     Message::Text(text) => send_text(&text)?,
                     Message::Binary(msg) => {
                         if msg.as_ref() == b"\0" {
-                            tracing::info!(?batch_idx, "received end of stream");
+                            tracing::info!(?bidx, "received end of stream");
                             in_tx.send(Msg::Eos)?
                         } else {
                             let msg: InMsg = rmp_serde::from_slice(&msg)?;
