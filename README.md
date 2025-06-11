@@ -122,7 +122,7 @@ If your GPU is on a distant machine this will not work as websites using http
 are not allowed to use the audio worklet api. There are two ways to get around
 this:
 - Forward the remote 8998 port to your localhost using ssh `-L` flag. Then
-  connects to [localhost:8998](http://localhost:8998) as mentionned previously.
+  connects to [localhost:8998](http://localhost:8998) as mentioned previously.
 - Use the `--gradio-tunnel` argument, this sets up a tunnel with a URL accessible from anywhere.
   Keep in mind that this tunnel goes through the US and can add significant
   latency (up to 500ms from Europe). You can use `--gradio-tunnel-token` to set a
@@ -266,7 +266,7 @@ Checkout the [Frequently Asked Questions](FAQ.md) section before opening an issu
 
 The present code is provided under the MIT license for the Python parts, and Apache license for the Rust backend.
 The web client code is provided under the MIT license.
-Note that parts of this code is based on [AudioCraft](https://github.com/facebookresearch/audiocraft), released under
+Note that parts of this code are based on [AudioCraft](https://github.com/facebookresearch/audiocraft), released under
 the MIT license.
 
 The weights for the models are released under the CC-BY 4.0 license.
