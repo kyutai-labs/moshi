@@ -117,7 +117,8 @@ class InferenceState:
                 # Ensure that the first slice of codes is properly seen by the transformer
                 # as otherwise the first slice is replaced by the initial tokens.
                 tokens = self.lm_gen.step(codes)
-                # assert tokens is None
+                if max(self.lm_gen.lm_model.delays) > 0:
+                    assert tokens is None
                 first_frame = False
             tokens = self.lm_gen.step(codes)
             if tokens is None:
