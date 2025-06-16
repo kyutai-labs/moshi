@@ -42,6 +42,7 @@ def main():
     parser.add_argument("--lm-config", type=str, help="The LM config as a json file.")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--cfg-coef", type=float, default=1.)
+    parser.add_argument("--temp", type=float, default=0.8)
     parser.add_argument("infile", type=str, help="Input audio file.")
     parser.add_argument("outfile", type=str, help="Output audio file in wav format.", nargs="?", default="")
     args = parser.parse_args()
@@ -109,8 +110,8 @@ def main():
     gen = models.LmGen(
         model=model,
         max_steps=steps,
-        text_sampler=utils.Sampler(top_k=25),
-        audio_sampler=utils.Sampler(top_k=250),
+        text_sampler=utils.Sampler(top_k=25, temp=args.temp),
+        audio_sampler=utils.Sampler(top_k=250, temp=args.temp),
         cfg_coef=args.cfg_coef,
         check=False,
     )
