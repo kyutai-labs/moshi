@@ -7,7 +7,11 @@ from dataclasses import dataclass
 import mlx.core as mx
 import mlx.nn as nn
 
-from ..modules.conditioner import LutConditionerConfig, ConditionProvider, ConditionTensor
+from ..modules.conditioner import (
+    LutConditionerConfig,
+    ConditionProvider,
+    ConditionTensor,
+)
 from ..modules.kv_cache import KVCache, RotatingKVCache
 from ..modules.transformer import Transformer, TransformerConfig
 from ..utils import sampling
@@ -73,13 +77,13 @@ class LmConfig:
                 num_heads=data["depformer_num_heads"],
                 num_layers=data["depformer_num_layers"],
                 dim_feedforward=data["depformer_dim_feedforward"],
-                causal=data["depformer_causal"],
+                causal=data.get("depformer_causal", True),
                 norm_first=True,
                 bias_ff=False,
-                bias_attn=data["depformer_layer_scale"],
+                bias_attn=data.get("depformer_layer_scale", False),
                 layer_scale=None,
-                context=data["depformer_context"],
-                max_period=data["depformer_max_period"],
+                context=data.get("depformer_context", 8),
+                max_period=data.get("depformer_max_period", 8),
                 use_conv_block=False,
                 use_conv_bias=True,
                 cross_attention=False,
@@ -92,8 +96,10 @@ class LmConfig:
                 max_seq_len=4096,
             ),
             num_slices=data["dep_q"],
-            weights_per_step_schedule=data.get("depformer_weights_per_step_schedule", None),
-            low_rank_embeddings=data.get("depformer_low_rank_embeddings", None)
+            weights_per_step_schedule=data.get(
+                "depformer_weights_per_step_schedule", None
+            ),
+            low_rank_embeddings=data.get("depformer_low_rank_embeddings", None),
         )
         conditioners = {}
         if "conditioners" in data:
@@ -191,7 +197,7 @@ class DepFormer(nn.Module):
         sampler: sampling.Sampler,
         text_token: mx.array,
         cache: list[KVCache] | list[RotatingKVCache],
-        cfg_coef: float = 1.,
+        cfg_coef: float = 1.0,
     ) -> mx.array:
         tokens = []
         last_token = text_token
@@ -252,7 +258,9 @@ class Lm(nn.Module):
             self.depformer_cache = []
 
         if len(cfg.conditioners) > 0:
-            self.condition_provider = ConditionProvider(cfg.transformer.d_model, cfg.conditioners)
+            self.condition_provider = ConditionProvider(
+                cfg.transformer.d_model, cfg.conditioners
+            )
         else:
             self.condition_provider = None
 
@@ -274,8 +282,8 @@ class Lm(nn.Module):
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
         ct: ConditionTensor | None = None,
-        cfg_coef: float = 1.,
-    ) -> tuple[mx.array, mx.array]:
+        cfg_coef: float = 1.0,
+    ) -> tuple[mx.array, mx.array | None]:
         xs = self.text_emb(text_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             xs = xs + emb(token_ids)
@@ -292,13 +300,16 @@ class Lm(nn.Module):
             text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
 
         text_token, _ = text_sampler(text_logits[:, 0])
-        audio_tokens = self.depformer.sample(
-            transformer_out,
-            audio_sampler,
-            text_token,
-            self.depformer_cache,
-            cfg_coef=cfg_coef,
-        )
+        if len(self.depformer.slices) > 0:
+            audio_tokens = self.depformer.sample(
+                transformer_out,
+                audio_sampler,
+                text_token,
+                self.depformer_cache,
+                cfg_coef=cfg_coef,
+            )
+        else:
+            audio_tokens = None
         return text_token, audio_tokens
 
     def warmup(self, ct: ConditionTensor | None = None):
@@ -311,7 +322,7 @@ class Lm(nn.Module):
         )
         if text.sum().item() == 42:
             raise ValueError(42)
-        if audio.sum().item() == 42:
+        if audio is not None and audio.sum().item() == 42:
             raise ValueError(42)
         for c in self.transformer_cache:
             c.reset()
