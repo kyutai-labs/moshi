@@ -401,11 +401,21 @@ impl M {
         let text_tokenizer =
             sentencepiece::SentencePieceProcessor::open(&config.text_tokenizer_file)
                 .with_context(|| config.text_tokenizer_file.clone())?;
-        let script = config.script.as_str();
         let batch_size = config.batch_size;
-        let script = std::fs::read_to_string(script).with_context(|| format!("{script:?}"))?;
-        let script = std::ffi::CString::new(script)?;
-        let script_name = std::ffi::CString::new(config.script.as_bytes())?;
+        let (script, script_name) = match &config.script {
+            None => {
+                let script_name = std::ffi::CString::new("tts.py")?;
+                let script = std::ffi::CString::new(crate::TTS_PY)?;
+                (script, script_name)
+            }
+            Some(script) => {
+                let script_name = std::ffi::CString::new(script.as_bytes())?;
+                let script =
+                    std::fs::read_to_string(script).with_context(|| format!("{script:?}"))?;
+                let script = std::ffi::CString::new(script)?;
+                (script, script_name)
+            }
+        };
         let app = Python::with_gil(|py| -> Result<_> {
             let py_config = pyo3::types::PyDict::new(py);
             if let Some(cfg) = config.py.as_ref() {
@@ -461,6 +471,7 @@ impl M {
     // when there is a free channel.
     pub async fn handle_query(&self, query: &TtsQuery) -> Result<Vec<u8>> {
         tracing::info!("py handle-query");
+        metrics::CONNECT.inc();
         let text_tokenizer = self.text_tokenizer.clone();
         let text_bos_token = self.config().text_bos_token;
         let (batch_idx, in_tx, mut out_rx) = {
