@@ -405,7 +405,7 @@ class LMModel(StreamingContainer):
         Ka = self.dep_q
         assert (
             K == self.num_codebooks
-        ), f"Codebooks for Depformer training should be passed all at once, got {K,}."
+        ), f"Codebooks for Depformer training should be passed all at once, got {K}."
         depformer_inputs = []
         for cb_index in range(Ka):
             if self.depformer_multi_linear:
