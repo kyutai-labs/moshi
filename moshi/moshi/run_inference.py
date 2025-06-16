@@ -117,38 +117,48 @@ class InferenceState:
                 # Ensure that the first slice of codes is properly seen by the transformer
                 # as otherwise the first slice is replaced by the initial tokens.
                 tokens = self.lm_gen.step(codes)
-                assert tokens is None
+                # assert tokens is None
                 first_frame = False
             tokens = self.lm_gen.step(codes)
             if tokens is None:
                 continue
             assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
-            out_pcm = self.mimi.decode(tokens[:, 1:]).cpu()
-            for b, (one_text, one_pcm) in enumerate(zip(tokens[:, 0].cpu(), out_pcm)):
-                if eos_reached[b]:
-                    continue
-                elif one_text.item() == self.text_tokenizer.eos_id():
-                    if need_eos_input:
-                        # We sampled the EOS before the end of the file! Not possible.
-                        self.printer.log("warning", "EOS sampled too early.")
-                    else:
-                        eos_reached[b] = True
+            if self.lm_gen.lm_model.dep_q > 0:
+                out_pcm = self.mimi.decode(tokens[:, 1:]).cpu()
+                for b, (one_text, one_pcm) in enumerate(zip(tokens[:, 0].cpu(), out_pcm)):
+                    if eos_reached[b]:
+                        continue
+                    elif one_text.item() == self.text_tokenizer.eos_id():
+                        if need_eos_input:
+                            # We sampled the EOS before the end of the file! Not possible.
+                            self.printer.log("warning", "EOS sampled too early.")
+                        else:
+                            eos_reached[b] = True
 
-                out_text_tokens_per_item[b].append(one_text)
-                out_pcms_per_item[b].append(one_pcm)
-                if b == 0:
-                    if one_text.item() not in [0, 3]:
-                        text = self.text_tokenizer.id_to_piece(one_text.item())  # pyright: ignore
-                        text = text.replace("▁", " ")
-                        self.printer.print_token(text)
+                    out_text_tokens_per_item[b].append(one_text)
+                    out_pcms_per_item[b].append(one_pcm)
+                    if b == 0:
+                        if one_text.item() not in [0, 3]:
+                            text = self.text_tokenizer.id_to_piece(one_text.item())  # pyright: ignore
+                            text = text.replace("▁", " ")
+                            self.printer.print_token(text)
+            else:
+                one_text = tokens[0, 0].cpu()
+                if one_text.item() not in [0, 3]:
+                    text = self.text_tokenizer.id_to_piece(one_text.item())  # pyright: ignore
+                    text = text.replace("▁", " ")
+                    self.printer.print_token(text)
             ntokens += 1
         dt = time.time() - start_time
         self.printer.log("info", f"processed {ntokens} steps in {dt:.0f}s, {1000 * dt / ntokens:.2f}ms/step")
-        out = [
-            (torch.cat(one_texts, dim=0), torch.cat(one_pcms, dim=1))
-            for one_texts, one_pcms in zip(out_text_tokens_per_item, out_pcms_per_item)
-        ]
-        return out
+        if self.lm_gen.lm_model.dep_q > 0:
+            out = [
+                (torch.cat(one_texts, dim=0), torch.cat(one_pcms, dim=1))
+                for one_texts, one_pcms in zip(out_text_tokens_per_item, out_pcms_per_item)
+            ]
+            return out
+        else:
+            return []
 
 
 def main():
@@ -181,6 +191,8 @@ def main():
     log("info", "loading moshi")
     lm = checkpoint_info.get_moshi(device=args.device, dtype=args.dtype)
     log("info", "moshi loaded")
+    if lm.dep_q == 0:
+        args.batch_size = 1
 
     log("info", f"loading input file {args.infile}")
     in_pcms, _ = sphn.read(args.infile, sample_rate=mimi.sample_rate)
