@@ -16,6 +16,8 @@ use tokio::time::{timeout, Duration};
 
 const FRAME_SIZE: usize = 1920;
 const SEND_PING_EVERY: Duration = Duration::from_secs(10);
+const POST_RETRY_DELAY: Duration = Duration::from_millis(100);
+const POST_MAX_RETRIES: usize = 1000;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct Marker {
@@ -506,7 +508,7 @@ impl BatchedAsr {
         Ok(Self { channels, config: asr.clone(), batch_size })
     }
 
-    fn channels(&self) -> Result<(usize, InSend, OutRecv)> {
+    fn channels(&self) -> Result<Option<(usize, InSend, OutRecv)>> {
         let mut channels = self.channels.lock().unwrap();
         // Linear scan to find an available channel. This is fairly inefficient, instead we should
         // probably have a queue of available slots.
@@ -516,24 +518,66 @@ impl BatchedAsr {
                 let (out_tx, out_rx) = tokio::sync::mpsc::unbounded_channel::<OutMsg>();
                 let c = Channel::new(in_rx, out_tx)?;
                 *channel = Some(c);
-                return Ok((batch_idx, in_tx, out_rx));
+                return Ok(Some((batch_idx, in_tx, out_rx)));
             }
         }
-        anyhow::bail!("no free channels");
+        Ok(None)
+    }
+
+    pub async fn handle_query(&self, query: &[u8]) -> Result<Vec<OutMsg>> {
+        tracing::info!("batched-asr post query");
+        let (batch_idx, in_tx, mut out_rx) = {
+            let mut num_tries = 0;
+            loop {
+                match self.channels() {
+                    Ok(Some(x)) => break x,
+                    Ok(None) => {
+                        num_tries += 1;
+                        if num_tries > POST_MAX_RETRIES {
+                            tracing::error!("no free channels after 1000 tries");
+                            anyhow::bail!("no free channels");
+                        }
+                        tokio::time::sleep(POST_RETRY_DELAY).await;
+                    }
+                    Err(err) => {
+                        tracing::error!(?err, "no free channels");
+                        Err(err)?
+                    }
+                }
+            }
+        };
+        tracing::info!(batch_idx, "batched-asr channel");
+        in_tx.send(InMsg::Init)?;
+        // TODO: handle compressed audio data.
+        let msg: InMsg = rmp_serde::from_slice(query)?;
+        in_tx.send(msg)?;
+        in_tx.send(InMsg::Marker { id: 0 })?;
+        in_tx.send(InMsg::Audio { pcm: vec![0f32; 240000] })?;
+        let mut msgs = vec![];
+        while let Some(msg) = out_rx.recv().await {
+            match msg {
+                OutMsg::Marker { .. } => break,
+                OutMsg::Error { .. } | OutMsg::Word { .. } | OutMsg::EndWord { .. } => {
+                    msgs.push(msg)
+                }
+                OutMsg::Ready | OutMsg::Step { .. } => {}
+            }
+        }
+        Ok(msgs)
     }
 
     pub async fn handle_socket(&self, socket: ws::WebSocket, query: Query) -> Result<()> {
         use futures_util::{SinkExt, StreamExt};
         use serde::Serialize;
 
-        tracing::info!(?query, "batched-asr query");
+        tracing::info!(?query, "batched-asr ws query");
         metrics::CONNECT.inc();
 
         let (mut sender, receiver) = socket.split();
-        let (batch_idx, in_tx, mut out_rx) = match self.channels() {
-            Ok(v) => v,
-            Err(err) => {
-                tracing::error!(?err, "no free channels");
+        let (batch_idx, in_tx, mut out_rx) = match self.channels()? {
+            Some(v) => v,
+            None => {
+                tracing::error!("no free channels");
                 let mut msg = vec![];
                 OutMsg::Error { message: "no free channels".into() }.serialize(
                     &mut rmp_serde::Serializer::new(&mut msg)
@@ -542,7 +586,7 @@ impl BatchedAsr {
                 )?;
                 sender.send(ws::Message::binary(msg)).await?;
                 sender.close().await?;
-                return Err(err);
+                anyhow::bail!("no free channels")
             }
         };
         tracing::info!(batch_idx, "batched-asr channel");

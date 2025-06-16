@@ -23,6 +23,10 @@ mod utils;
 const ID_HEADER: &str = "kyutai-api-key";
 const ROOM_ID_HEADER: &str = "room_id";
 
+pub const TTS_PY: &[u8] = include_bytes!("../tts.py");
+pub const VOICE_PY: &[u8] = include_bytes!("../voice.py");
+pub const UV_LOCK: &[u8] = include_bytes!("../uv.lock");
+
 #[derive(clap::Parser, Debug)]
 struct WorkerArgs {
     #[clap(short = 'l', long = "log", default_value = "info")]
@@ -107,7 +111,8 @@ pub struct LmConfig {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct PyConfig {
-    pub script: String,
+    #[serde(default)]
+    pub script: Option<String>,
     pub batch_size: usize,
     pub text_tokenizer_file: String,
     pub text_bos_token: u32,
@@ -117,7 +122,8 @@ pub struct PyConfig {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct PyPostConfig {
-    pub script: String,
+    #[serde(default)]
+    pub script: Option<String>,
     #[serde(default)]
     pub py: Option<toml::Table>,
 }
@@ -210,14 +216,18 @@ impl Config {
                     c.lm_model_file = rod(&c.lm_model_file)?;
                 }
                 ModuleConfig::Py { path: _, config: c } => {
-                    c.script = rod(&c.script)?;
+                    if let Some(script) = &mut c.script {
+                        *script = rod(script)?;
+                    }
                     c.text_tokenizer_file = rod(&c.text_tokenizer_file)?;
                     if let Some(t) = c.py.as_mut() {
                         crate::utils::resolve_or_download_toml(t)?;
                     }
                 }
                 ModuleConfig::PyPost { path: _, config: c } => {
-                    c.script = rod(&c.script)?;
+                    if let Some(script) = &mut c.script {
+                        *script = rod(script)?;
+                    }
                     if let Some(t) = c.py.as_mut() {
                         crate::utils::resolve_or_download_toml(t)?;
                     }
@@ -460,13 +470,13 @@ async fn main_() -> Result<()> {
     match args.command {
         Command::Configs { which } => match which.as_str() {
             "tts.py" => {
-                println!("{}", String::from_utf8_lossy(include_bytes!("../tts.py")));
+                println!("{}", String::from_utf8_lossy(TTS_PY))
             }
             "voice.py" => {
-                println!("{}", String::from_utf8_lossy(include_bytes!("../voice.py")));
+                println!("{}", String::from_utf8_lossy(VOICE_PY))
             }
             "uv.lock" => {
-                println!("{}", String::from_utf8_lossy(include_bytes!("../uv.lock")));
+                println!("{}", String::from_utf8_lossy(UV_LOCK))
             }
             _ => {
                 eprintln!("Unknown config: {which}");
@@ -697,7 +707,7 @@ async fn modules_info(
                 let mut info = std::collections::HashMap::new();
                 info.insert("type", "py".to_string());
                 info.insert("path", path.to_string());
-                info.insert("script", config.script.to_string());
+                info.insert("script", config.script.as_ref().map_or("tts.py", |v| v).to_string());
                 info.insert("used_slots", m.used_slots().to_string());
                 info.insert("total_slots", m.total_slots().to_string());
                 Some(info)
@@ -777,7 +787,30 @@ fn batched_asr_router(
         }
     }
 
+    // TODO: add a batch mode.
     async fn t(
+        state: axum::extract::State<(Arc<batched_asr::BatchedAsr>, SharedState)>,
+        headers: axum::http::HeaderMap,
+        req: axum::body::Bytes,
+    ) -> utils::AxumResult<Response> {
+        tracing::info!(len = req.len(), "handling asr post query");
+        let valid_id = headers
+            .get(ID_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|id| state.0 .1.config.authorized_ids.contains(id));
+        if !valid_id {
+            return Ok(StatusCode::UNAUTHORIZED.into_response());
+        }
+        let transcript = state.0 .0.handle_query(&req).await?;
+        Ok((
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            axum::Json(transcript),
+        )
+            .into_response())
+    }
+
+    async fn streaming_t(
         ws: axum::extract::ws::WebSocketUpgrade,
         headers: axum::http::HeaderMap,
         state: axum::extract::State<(Arc<batched_asr::BatchedAsr>, SharedState)>,
@@ -801,7 +834,10 @@ fn batched_asr_router(
             ws.write_buffer_size(0).on_upgrade(move |v| asr_websocket(v, asr, asr_query, addr));
         Ok(upg)
     }
-    axum::Router::new().route(path, axum::routing::get(t)).with_state((s, ss.clone()))
+    axum::Router::new()
+        .route(path, axum::routing::post(t))
+        .route(path, axum::routing::get(streaming_t))
+        .with_state((s, ss.clone()))
 }
 
 fn py_router_post(s: Arc<py_module_post::M>, path: &str, ss: &SharedState) -> axum::Router<()> {
