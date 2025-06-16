@@ -110,7 +110,9 @@ class AsrMetrics:
         self.num_sequences += 1
 
     def compute(self) -> dict:
-        assert self.num_sequences > 0, "Unable to compute with total number of comparisons <= 0"  # type: ignore
+        assert self.num_sequences > 0, (
+            "Unable to compute with total number of comparisons <= 0"
+        )  # type: ignore
         return {
             "cer": (self.cer_sum / self.num_sequences),
             "wer": (self.wer_sum / self.num_sequences),
@@ -153,16 +155,26 @@ _DATASETS = [
     _DatasetInfo("tedlium", "distil-whisper/tedlium-long-form", None),
     _DatasetInfo("meanwhile", "distil-whisper/meanwhile", None),
     # Short-form datasets from OpenASR leaderboard
-    # fmt: off
     _DatasetInfo("ami", "hf-audio/esb-datasets-test-only-sorted", "ami"),
-    _DatasetInfo("librispeech.clean", "hf-audio/esb-datasets-test-only-sorted", "librispeech", split="test.clean"),
-    _DatasetInfo("librispeech.other", "hf-audio/esb-datasets-test-only-sorted", "librispeech", split="test.other"),
+    _DatasetInfo(
+        "librispeech.clean",
+        "hf-audio/esb-datasets-test-only-sorted",
+        "librispeech",
+        split="test.clean",
+    ),
+    _DatasetInfo(
+        "librispeech.other",
+        "hf-audio/esb-datasets-test-only-sorted",
+        "librispeech",
+        split="test.other",
+    ),
     _DatasetInfo("voxpopuli", "hf-audio/esb-datasets-test-only-sorted", "voxpopuli"),
     _DatasetInfo("spgispeech", "hf-audio/esb-datasets-test-only-sorted", "spgispeech"),
     _DatasetInfo("gigaspeech", "hf-audio/esb-datasets-test-only-sorted", "gigaspeech"),
     _DatasetInfo("tedlium-short", "hf-audio/esb-datasets-test-only-sorted", "tedlium"),
-    _DatasetInfo("earnings22-short", "hf-audio/esb-datasets-test-only-sorted", "earnings22"),
-    # fmt: on
+    _DatasetInfo(
+        "earnings22-short", "hf-audio/esb-datasets-test-only-sorted", "earnings22"
+    ),
 ]
 DATASET_MAP = {dataset.alias: dataset for dataset in _DATASETS}
 
@@ -228,7 +240,6 @@ def streaming_transcribe(
     mimi,
     lm_gen,
 ):
-
     bsz = padded_batch.shape[0]
 
     text_tokens_acc = []

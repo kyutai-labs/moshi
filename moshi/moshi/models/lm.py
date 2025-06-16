@@ -188,8 +188,11 @@ class LMModel(StreamingContainer):
             self.depformer_emb = nn.ModuleList(
                 [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
             )
-            self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim,
-                                                    demux_second_stream=demux_second_text_stream)
+            self.depformer_text_emb = EmbeddingFactory(
+                text_card + 1,
+                depformer_dim,
+                demux_second_stream=demux_second_text_stream,
+            )
             if depformer_dim_feedforward is None:
                 depformer_dim_feedforward = int(hidden_scale * depformer_dim)
             self.depformer = StreamingTransformer(
@@ -207,7 +210,7 @@ class LMModel(StreamingContainer):
             # Depformer follow its own cycle of streaming entirely contained in one time step
             # and should not follow the streaming of the steps dimensions.
             self.depformer.set_streaming_detached(True)
-        else: # No-Depformer --- e.g., an ASR model
+        else:  # No-Depformer --- e.g., an ASR model
             self.depformer_emb = None
             self.depformer_text_emb = None
             self.depformer = None
@@ -394,6 +397,10 @@ class LMModel(StreamingContainer):
         sequence: torch.Tensor,
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
+        assert self.depformer_text_emb
+        assert self.depformer_emb
+        assert self.depformer
+
         B, K, T = sequence.shape
         Ka = self.dep_q
         assert (
@@ -431,6 +438,9 @@ class LMModel(StreamingContainer):
         sequence: torch.Tensor,
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
+        assert self.depformer_text_emb is not None
+        assert self.depformer_emb is not None
+        assert self.depformer is not None
         B, K, S = sequence.shape
         assert (
             K == 1
@@ -717,10 +727,13 @@ class LMGen(StreamingModule[_LMGenState]):
                            text_token[:, None, None], state.exec_mask[:, None, None])
         if audio_tokens is not None:
             audio_tokens = audio_tokens[:, :, None]
-            scatter_with_mask_(state.cache[:, 1: lm_model.dep_q + 1, :], -1,
-                            positions.expand_as(audio_tokens),
-                            audio_tokens,
-                            state.exec_mask[:, None, None])
+            scatter_with_mask_(
+                state.cache[:, 1 : lm_model.dep_q + 1, :],
+                -1,
+                positions.expand_as(audio_tokens),
+                audio_tokens,
+                state.exec_mask[:, None, None],
+            )
 
         if not self.support_out_of_sync and state.offset_cpu <= self.max_delay:
             # When using out of sync exec, should not rely on this being None.
@@ -745,6 +758,7 @@ class LMGen(StreamingModule[_LMGenState]):
         prev_token = text_token
         lm_model = self.lm_model
         depformer_tokens: list[torch.Tensor] = []
+        assert lm_model.depformer
         assert not lm_model.depformer.is_streaming
         with lm_model.depformer.streaming(B_cfg):
             assert lm_model.depformer.is_streaming
