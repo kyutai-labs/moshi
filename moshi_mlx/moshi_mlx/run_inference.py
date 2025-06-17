@@ -42,8 +42,9 @@ def main():
     parser.add_argument("--lm-config", type=str, help="The LM config as a json file.")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--cfg-coef", type=float, default=1.)
+    parser.add_argument("--temp", type=float, default=0.8)
     parser.add_argument("infile", type=str, help="Input audio file.")
-    parser.add_argument("outfile", type=str, help="Output audio file in wav format.")
+    parser.add_argument("outfile", type=str, help="Output audio file in wav format.", nargs="?", default="")
     args = parser.parse_args()
 
     mx.random.seed(299792458)
@@ -56,6 +57,7 @@ def main():
     with open(hf_get(lm_config), "r") as fobj:
         lm_config = json.load(fobj)
     print(lm_config)
+    model_type = lm_config.get("model_type", "moshi")
 
     mimi_weights = args.mimi_weights
     if mimi_weights is None:
@@ -64,7 +66,8 @@ def main():
 
     moshi_weights = args.moshi_weights
     if moshi_weights is None:
-        moshi_weights = hf_hub_download(args.hf_repo, lm_config["moshi_name"])
+        moshi_name = lm_config.get("moshi_name", "model.safetensors")
+        moshi_weights = hf_hub_download(args.hf_repo, moshi_name)
     moshi_weights = hf_get(moshi_weights)
 
     tokenizer = args.tokenizer
@@ -88,10 +91,14 @@ def main():
 
     log("info", f"loading input file {args.infile}")
     in_pcms, _ = sphn.read(args.infile, sample_rate=24000)
+    if model_type == "stt":
+        in_pcms = np.pad(in_pcms, pad_width=[(0, 0), (0, 1920 * 30)], mode="constant")
 
     log("info", f"loading the audio tokenizer {mimi_weights}")
     generated_codebooks = lm_config.generated_codebooks
-    audio_tokenizer = rustymimi.Tokenizer(mimi_weights, num_codebooks=generated_codebooks)  # type: ignore
+    other_codebooks = lm_config.other_codebooks
+    mimi_codebooks = max(generated_codebooks, other_codebooks)
+    audio_tokenizer = rustymimi.Tokenizer(mimi_weights, num_codebooks=mimi_codebooks)  # type: ignore
 
     if model.condition_provider is not None:
         ct = model.condition_provider.condition_tensor("description", "very_good")
@@ -106,8 +113,8 @@ def main():
     gen = models.LmGen(
         model=model,
         max_steps=steps,
-        text_sampler=utils.Sampler(top_k=25),
-        audio_sampler=utils.Sampler(top_k=250),
+        text_sampler=utils.Sampler(top_k=25, temp=args.temp),
+        audio_sampler=utils.Sampler(top_k=250, temp=args.temp),
         cfg_coef=args.cfg_coef,
         check=False,
     )
@@ -118,7 +125,7 @@ def main():
     for idx in range(0, steps):
         pcm_data = in_pcms[:, idx * 1920:(idx + 1) * 1920]
         other_audio_tokens = audio_tokenizer.encode_step(pcm_data[None, 0:1])
-        other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[:, :, :generated_codebooks]
+        other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[:, :, :other_codebooks]
         text_token = gen.step(other_audio_tokens[0], ct)
         text_token = text_token[0].item()
         audio_tokens = gen.last_audio_tokens()
@@ -127,7 +134,7 @@ def main():
             _text = text_tokenizer.id_to_piece(text_token)  # type: ignore
             _text = _text.replace("▁", " ")
             print(_text, end="", flush=True)
-        if audio_tokens is not None:
+        if audio_tokens is not None and generated_codebooks > 0:
             audio_tokens = np.array(audio_tokens[:, :, None]).astype(np.uint32)
             out_pcm = audio_tokenizer.decode_step(audio_tokens)
             all_out_pcm.append(out_pcm)
@@ -135,9 +142,10 @@ def main():
     print()
     token_per_second = steps / (time.time() - start_time)
     log("info", f"steps: {steps}, token per sec: {token_per_second}")
-    all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
-    log("info", f"writing output file {args.outfile}")
-    rustymimi.write_wav(args.outfile, all_out_pcm[0, 0], sample_rate=24000)
+    if args.outfile:
+        all_out_pcm = np.concatenate(all_out_pcm, axis=-1)
+        log("info", f"writing output file {args.outfile}")
+        rustymimi.write_wav(args.outfile, all_out_pcm[0, 0], sample_rate=24000)
 
 
 if __name__ == "__main__":

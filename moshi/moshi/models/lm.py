@@ -183,29 +183,38 @@ class LMModel(StreamingContainer):
                 [nn.Linear(dim, depformer_dim, bias=False)]
             )
         EmbeddingFactory = partial(EmbeddingFactory, low_rank=depformer_low_rank_embeddings)
-        # Only using up to dep_q - 1 because the last codebook is never an input to Depformer.
-        self.depformer_emb = nn.ModuleList(
-            [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
-        )
-        self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim,
-                                                   demux_second_stream=demux_second_text_stream)
-        if depformer_dim_feedforward is None:
-            depformer_dim_feedforward = int(hidden_scale * depformer_dim)
-        self.depformer = StreamingTransformer(
-            d_model=depformer_dim,
-            dim_feedforward=depformer_dim_feedforward,
-            norm=norm,
-            weights_per_step_schedule=depformer_weights_per_step_schedule,
-            causal=causal,
-            quantize=quantize,
-            checkpointing=gradient_checkpointing,
-            device=device,
-            dtype=dtype,
-            **kwargs_dep,
-        )
-        # Depformer follow its own cycle of streaming entirely contained in one time step
-        # and should not follow the streaming of the steps dimensions.
-        self.depformer.set_streaming_detached(True)
+        if dep_q > 0:
+            # Only using up to dep_q - 1 because the last codebook is never an input to Depformer.
+            self.depformer_emb = nn.ModuleList(
+                [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
+            )
+            self.depformer_text_emb = EmbeddingFactory(
+                text_card + 1,
+                depformer_dim,
+                demux_second_stream=demux_second_text_stream,
+            )
+            if depformer_dim_feedforward is None:
+                depformer_dim_feedforward = int(hidden_scale * depformer_dim)
+            self.depformer = StreamingTransformer(
+                d_model=depformer_dim,
+                dim_feedforward=depformer_dim_feedforward,
+                norm=norm,
+                weights_per_step_schedule=depformer_weights_per_step_schedule,
+                causal=causal,
+                quantize=quantize,
+                checkpointing=gradient_checkpointing,
+                device=device,
+                dtype=dtype,
+                **kwargs_dep,
+            )
+            # Depformer follow its own cycle of streaming entirely contained in one time step
+            # and should not follow the streaming of the steps dimensions.
+            self.depformer.set_streaming_detached(True)
+        else:  # No-Depformer --- e.g., an ASR model
+            self.depformer_emb = None
+            self.depformer_text_emb = None
+            self.depformer = None
+
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
         self.linears = nn.ModuleList(
@@ -388,11 +397,15 @@ class LMModel(StreamingContainer):
         sequence: torch.Tensor,
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
+        assert self.depformer_text_emb
+        assert self.depformer_emb
+        assert self.depformer
+
         B, K, T = sequence.shape
         Ka = self.dep_q
         assert (
             K == self.num_codebooks
-        ), f"Codebooks for Depformer training should be passed all at once, got {K,}."
+        ), f"Codebooks for Depformer training should be passed all at once, got {K}."
         depformer_inputs = []
         for cb_index in range(Ka):
             if self.depformer_multi_linear:
@@ -425,6 +438,9 @@ class LMModel(StreamingContainer):
         sequence: torch.Tensor,
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
+        assert self.depformer_text_emb is not None
+        assert self.depformer_emb is not None
+        assert self.depformer is not None
         B, K, S = sequence.shape
         assert (
             K == 1
@@ -473,10 +489,12 @@ class LMModel(StreamingContainer):
 
         for emb_layer in self.emb:
             _init_layer(emb_layer)
-        for emb_layer in self.depformer_emb:
-            _init_layer(emb_layer)
+        if self.depformer_emb is not None:
+            for emb_layer in self.depformer_emb:
+                _init_layer(emb_layer)
         _init_layer(self.text_emb)
-        _init_layer(self.depformer_text_emb)
+        if self.depformer_text_emb is not None:
+            _init_layer(self.depformer_text_emb)
         _init_layer(self.text_linear)
 
         for tr_layer in self.transformer.layers:
@@ -491,7 +509,7 @@ class _LMGenState(State):
     cache: torch.Tensor
     initial: torch.Tensor
     graphed_main: CUDAGraphed
-    graphed_depth: CUDAGraphed
+    graphed_depth: CUDAGraphed | None
     offsets: torch.Tensor
     offset_cpu: int = 0
     condition_sum: torch.Tensor | None = None
@@ -593,7 +611,10 @@ class LMGen(StreamingModule[_LMGenState]):
 
         disable = lm_model.device.type != 'cuda'
         graphed_main = CUDAGraphed(lm_model.forward_text, disable=disable)
-        graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
+        if lm_model.depformer is not None:
+            graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
+        else:
+            graphed_depth = None
 
         if self.cfg_is_masked_until is None:
             cfg_is_masked_until = None
@@ -704,7 +725,9 @@ class LMGen(StreamingModule[_LMGenState]):
         text_token = text_token[:, 0, 0]  # shape is [B]
         if self.on_text_hook is not None:
             self.on_text_hook(text_token)
-        if depformer_replace_tokens is None:
+        if state.graphed_depth is None:
+            audio_tokens = None
+        elif depformer_replace_tokens is None:
             audio_tokens = state.graphed_depth(text_token, transformer_out)
             if self.on_audio_hook is not None:
                 self.on_audio_hook(audio_tokens)
@@ -717,11 +740,15 @@ class LMGen(StreamingModule[_LMGenState]):
         positions = (state.offsets % CT)[:, None, None]
         scatter_with_mask_(state.cache[:, :1], -1, positions,
                            text_token[:, None, None], state.exec_mask[:, None, None])
-        audio_tokens = audio_tokens[:, :, None]
-        scatter_with_mask_(state.cache[:, 1: lm_model.dep_q + 1, :], -1,
-                           positions.expand_as(audio_tokens),
-                           audio_tokens,
-                           state.exec_mask[:, None, None])
+        if audio_tokens is not None:
+            audio_tokens = audio_tokens[:, :, None]
+            scatter_with_mask_(
+                state.cache[:, 1 : lm_model.dep_q + 1, :],
+                -1,
+                positions.expand_as(audio_tokens),
+                audio_tokens,
+                state.exec_mask[:, None, None],
+            )
 
         if not self.support_out_of_sync and state.offset_cpu <= self.max_delay:
             # When using out of sync exec, should not rely on this being None.
@@ -746,6 +773,7 @@ class LMGen(StreamingModule[_LMGenState]):
         prev_token = text_token
         lm_model = self.lm_model
         depformer_tokens: list[torch.Tensor] = []
+        assert lm_model.depformer
         assert not lm_model.depformer.is_streaming
         with lm_model.depformer.streaming(B_cfg):
             assert lm_model.depformer.is_streaming

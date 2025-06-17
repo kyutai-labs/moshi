@@ -18,7 +18,7 @@ class LmGen:
         max_steps: int,
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
-        cfg_coef: float = 1.,
+        cfg_coef: float = 1.0,
         check: bool = False,
     ):
         self.model: Lm = model
@@ -54,7 +54,9 @@ class LmGen:
         return -2
 
     # Runs one step of inference and return the generated text token.
-    def step(self, other_audio_tokens: mx.array, ct: ConditionTensor | None = None) -> mx.array:
+    def step(
+        self, other_audio_tokens: mx.array, ct: ConditionTensor | None = None
+    ) -> mx.array:
         if self.step_idx >= self.max_steps:
             raise ValueError(f"reached max-steps {self.max_steps}")
 
@@ -90,7 +92,9 @@ class LmGen:
             cfg_coef=self.cfg_coef,
         )
         assert text_tokens.shape == (1,), "invalid output text-token shape"
-        assert audio_tokens.shape == (self.model.cfg.generated_codebooks,), "invalid output audio-token shape"
+        assert audio_tokens is None or audio_tokens.shape == (
+            self.model.cfg.generated_codebooks,
+        ), "invalid output audio-token shape"
 
         self.gen_sequence[:, 0, self.step_idx] = text_tokens
         for cb_idx, delay in enumerate(self.audio_delays[: self.main_codebooks]):
