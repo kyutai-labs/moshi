@@ -2760,7 +2760,6 @@ dependencies = [
  "serde",
  "serde_json",
  "symphonia",
- "tokenizers",
  "tokio",
  "toml",
  "tower 0.4.13",
