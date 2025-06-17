@@ -98,6 +98,11 @@ class InferenceState:
         chunks = deque([
             chunk for chunk in in_pcms.split(self.frame_size, dim=2)
             if chunk.shape[-1] == self.frame_size])
+
+        if self.model_type == 'stt':
+            silence = torch.zeros((self.batch_size, self.mimi.channels, self.frame_size), device=device)
+            for _ in range(25):
+                chunks.append(silence)
         self.printer.print_header()
         while not all(eos_reached):
             if chunks:
