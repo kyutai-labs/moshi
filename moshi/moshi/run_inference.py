@@ -83,7 +83,13 @@ class InferenceState:
         # for the EOS on the output text stream to be emitted, as indication that the model is done.
         eos_reached: list[bool] = [False] * self.batch_size
         need_eos_input: bool = True
-        self.printer.log("info", "starting the inference loop")
+        self.printer.log(
+            "info",
+            "starting inference, "
+            f"sampling: {self.lm_gen.use_sampling}, "
+            f"audio temp: {self.lm_gen.temp}, "
+            f"text temp: {self.lm_gen.temp_text}",
+        )
         device = self.lm_gen.lm_model.device
         start_time = time.time()
         ntokens = 0
@@ -92,6 +98,11 @@ class InferenceState:
         chunks = deque([
             chunk for chunk in in_pcms.split(self.frame_size, dim=2)
             if chunk.shape[-1] == self.frame_size])
+
+        if self.model_type == 'stt':
+            silence = torch.zeros((self.batch_size, self.mimi.channels, self.frame_size), device=device)
+            for _ in range(25):
+                chunks.append(silence)
         self.printer.print_header()
         while not all(eos_reached):
             if chunks:
