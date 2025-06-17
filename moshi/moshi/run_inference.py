@@ -83,7 +83,13 @@ class InferenceState:
         # for the EOS on the output text stream to be emitted, as indication that the model is done.
         eos_reached: list[bool] = [False] * self.batch_size
         need_eos_input: bool = True
-        self.printer.log("info", "starting the inference loop")
+        self.printer.log(
+            "info",
+            "starting inference, "
+            f"sampling: {self.lm_gen.use_sampling}, "
+            f"audio temp: {self.lm_gen.temp}, "
+            f"text temp: {self.lm_gen.temp_text}",
+        )
         device = self.lm_gen.lm_model.device
         start_time = time.time()
         ntokens = 0
