@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 mod asr;
 mod batched_asr;
-mod legacy_tts;
 mod lm;
 mod metrics;
 mod mimi;
@@ -801,7 +800,7 @@ fn batched_asr_router(
         if !valid_id {
             return Ok(StatusCode::UNAUTHORIZED.into_response());
         }
-        let transcript = state.0 .0.handle_query(&req).await?;
+        let transcript = state.0 .0.handle_query(req).await?;
         Ok((
             StatusCode::OK,
             [(axum::http::header::CONTENT_TYPE, "application/json")],

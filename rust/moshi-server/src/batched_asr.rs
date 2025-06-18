@@ -524,7 +524,7 @@ impl BatchedAsr {
         Ok(None)
     }
 
-    pub async fn handle_query(&self, query: &[u8]) -> Result<Vec<OutMsg>> {
+    pub async fn handle_query(&self, query: axum::body::Bytes) -> Result<Vec<OutMsg>> {
         tracing::info!("batched-asr post query");
         let (batch_idx, in_tx, mut out_rx) = {
             let mut num_tries = 0;
@@ -548,9 +548,13 @@ impl BatchedAsr {
         };
         tracing::info!(batch_idx, "batched-asr channel");
         in_tx.send(InMsg::Init)?;
-        // TODO: handle compressed audio data.
-        let msg: InMsg = rmp_serde::from_slice(query)?;
-        in_tx.send(msg)?;
+        let (pcm, sample_rate) = crate::utils::pcm_decode(query)?;
+        let pcm = if sample_rate == 24000 {
+            pcm
+        } else {
+            kaudio::resample(&pcm, sample_rate as usize, 24000)?
+        };
+        in_tx.send(InMsg::Audio { pcm })?;
         in_tx.send(InMsg::Marker { id: 0 })?;
         in_tx.send(InMsg::Audio { pcm: vec![0f32; 240000] })?;
         let mut msgs = vec![];
