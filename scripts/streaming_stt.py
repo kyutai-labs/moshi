@@ -1,11 +1,11 @@
 """
-Example implementation of the streaming ASR example. Here we group
+Example implementation of the streaming STT example. Here we group
 test utterances in batches (pre- and post-padded with silence) and
-and then feed these batches into the streaming ASR model frame-by-frame.
+and then feed these batches into the streaming STT model frame-by-frame.
 
 Example command:
 ```
-uv run scripts/streaming_asr.py \
+uv run scripts/streaming_stt.py \
     --dataset meanwhile \
     --hf-repo kyutai/<REPO> \
     --hf-cache-dir /home/user/huggingface_cache
@@ -13,7 +13,8 @@ uv run scripts/streaming_asr.py \
 
 """
 
-# The outputs I get on my H100 using this code @ bsz 32
+# The outputs I get on my H100 using this code with the 2.6B model,
+# bsz 32:
 
 # LibriVox === cer: 4.09% wer: 7.33% corpus_wer: 6.78% RTF = 52.72
 # Ami === cer: 15.99% wer: 18.78% corpus_wer: 12.20% RTF = 28.37
@@ -345,7 +346,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Example streaming ASR inference.")
+    parser = argparse.ArgumentParser(description="Example streaming STT inference.")
     parser.add_argument(
         "--dataset",
         required=True,
@@ -354,7 +355,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--hf-repo", type=str, help="HF repo to load the ASR model from. "
+        "--hf-repo", type=str, help="HF repo to load the STT model from. "
     )
     parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
     parser.add_argument(
