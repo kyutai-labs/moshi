@@ -192,17 +192,13 @@ class InferenceState:
                     out_pcms_per_item[b].append(one_pcm)
                     if b == 0:
                         if one_text.item() not in [0, 3]:
-                            text = self.text_tokenizer.id_to_piece(
-                                one_text.item()
-                            )  # pyright: ignore
+                            text = self.text_tokenizer.id_to_piece(one_text.item())  # pyright: ignore
                             text = text.replace("▁", " ")
                             self.printer.print_token(text)
             else:
                 one_text = tokens[0, 0].cpu()
                 if one_text.item() not in [0, 3]:
-                    text = self.text_tokenizer.id_to_piece(
-                        one_text.item()
-                    )  # pyright: ignore
+                    text = self.text_tokenizer.id_to_piece(one_text.item())  # pyright: ignore
                     text = text.replace("▁", " ")
                     self.printer.print_token(text)
             ntokens += 1
