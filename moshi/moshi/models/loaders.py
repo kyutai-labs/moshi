@@ -141,6 +141,7 @@ class CheckpointInfo:
         lora_weights: path to an optional checkpoint with lora weights.
         lm_gen_config: optional default params to use for generation with this model.
         tts_config: optional TTS specific configuration.
+        stt_config: optional STT specific configuration.
         model_id: optional dict containing tracability information on the model origin, in particular
             its signature and epoch.
     """
@@ -154,6 +155,7 @@ class CheckpointInfo:
     lora_weights: Path | None = None
     lm_gen_config: dict = field(default_factory=dict)
     tts_config: dict = field(default_factory=dict)
+    stt_config: dict = field(default_factory=dict)
     model_id: dict = field(default_factory=dict)
 
     @staticmethod
@@ -192,6 +194,7 @@ class CheckpointInfo:
             model_type = "moshi"
             lm_gen_config = {}
             tts_config = {}
+            stt_config = {}
             model_id = {}
             lora_name = None
         else:
@@ -204,6 +207,7 @@ class CheckpointInfo:
             model_type = lm_config.pop("model_type", "moshi")
             lm_gen_config = lm_config.pop("lm_gen_config", {})
             tts_config = lm_config.pop("tts_config", {})
+            stt_config = lm_config.pop("stt_config", {})
             model_id = lm_config.pop("model_id", {})
 
         if moshi_weights is None:
@@ -238,6 +242,7 @@ class CheckpointInfo:
             lora_weights_final,
             lm_gen_config=lm_gen_config,
             tts_config=tts_config,
+            stt_config=stt_config,
             model_id=model_id,
         )
 

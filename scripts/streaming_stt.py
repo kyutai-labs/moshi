@@ -41,8 +41,6 @@ import moshi.models
 import tqdm
 import time
 
-BEFORE_PADDING_SEC = 1.0
-AFTER_PADDING_SEC = 5.0
 
 _NORMALIZER = EnglishTextNormalizer()
 
@@ -110,9 +108,9 @@ class AsrMetrics:
         self.num_sequences += 1
 
     def compute(self) -> dict:
-        assert self.num_sequences > 0, (
-            "Unable to compute with total number of comparisons <= 0"
-        )  # type: ignore
+        assert (
+            self.num_sequences > 0
+        ), "Unable to compute with total number of comparisons <= 0"  # type: ignore
         return {
             "cer": (self.cer_sum / self.num_sequences),
             "wer": (self.wer_sum / self.num_sequences),
@@ -257,7 +255,15 @@ def streaming_transcribe(
     return torch.concat(text_tokens_acc, axis=-1)
 
 
-def run_inference(dataset, mimi, lm_gen, tokenizer, padding_token_id):
+def run_inference(
+    dataset,
+    mimi,
+    lm_gen,
+    tokenizer,
+    padding_token_id,
+    before_padding_sec,
+    after_padding_sec,
+):
     metrics = AsrMetrics()
     audio_time = 0.0
     inference_timer = Timer()
@@ -276,8 +282,8 @@ def run_inference(dataset, mimi, lm_gen, tokenizer, padding_token_id):
 
         padded_batch = get_padded_batch(
             audio_data,
-            before_padding=BEFORE_PADDING_SEC,
-            after_padding=AFTER_PADDING_SEC,
+            before_padding=before_padding_sec,
+            after_padding=after_padding_sec,
             audio_encoder=mimi,
         )
         padded_batch = padded_batch.cuda()
@@ -319,9 +325,20 @@ def main(args):
     dataset = get_dataset(args)
 
     padding_token_id = info.raw_config.get("text_padding_token_id", 3)
+    # Putting in some conservative defaults
+    audio_silence_prefix_seconds = info.stt_config.get(
+        "audio_silence_prefix_seconds", 1.0
+    )
+    audio_delay_seconds = info.stt_config.get("audio_delay_seconds", 5.0)
 
     wer_metric, inference_time, audio_time = run_inference(
-        dataset, mimi, lm_gen, tokenizer, padding_token_id
+        dataset,
+        mimi,
+        lm_gen,
+        tokenizer,
+        padding_token_id,
+        audio_silence_prefix_seconds,
+        audio_delay_seconds + 0.5,
     )
 
     print(wer_metric, f"RTF = {audio_time / inference_time:.2f}")
