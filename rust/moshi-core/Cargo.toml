@@ -19,6 +19,10 @@ rayon = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
 
+# Additional dependencies for compatibility
+rand = { workspace = true }
+half = "2.5.0"
+
 [features]
 default = []
 cuda = ["candle/cuda", "candle-nn/cuda"]
