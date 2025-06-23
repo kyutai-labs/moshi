@@ -36,7 +36,7 @@ crossterm = { version = "0.27.0", features = ["event-stream"] }
 env_logger = "0.10.1"
 futures = "0.3.28"
 futures-util = "0.3.30"
-hf-hub = { version = "0.3.2", features = ["tokio"] }
+hf-hub = { version = "0.4.3", features = ["tokio"] }
 http = "1.1.0"
 kaudio = "0.2.1"
 lazy_static = "1.5.0"
