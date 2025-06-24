@@ -232,6 +232,7 @@ class RingKVCache:
             torch.zeros_like(self.sink_fill_level),
             self.sink_fill_level,
         )
+
     def complete(self, k: torch.Tensor, v: torch.Tensor, exec_mask: torch.Tensor):
         assert k.shape[:-1] == v.shape[:-1], (k.shape, v.shape)
         B, H, T, D = k.shape
@@ -241,9 +242,8 @@ class RingKVCache:
         indexes = torch.where(
             (self.sink_fill_level < self.attention_sink_size).bool() | (self.end_offset < self.capacity).bool(),
             indexes % self.capacity,
-            (indexes -self.attention_sink_size)% (self.capacity - self.attention_sink_size) + self.attention_sink_size
+            (indexes -self.attention_sink_size) % (self.capacity - self.attention_sink_size) + self.attention_sink_size
             )
-        
         if self.respect_exec_mask:
             # indexes is [B, T]
             # k is [B, H, T, D]
@@ -292,7 +292,7 @@ class RingKVCache:
             torch.maximum(indexes.expand(B,-1) - self.capacity  + self.end_offset, indexes.expand(B,-1)),
             base_positions 
         )
-        self.sink_fill_level = torch.minimum(self.end_offset, self.size_vector)
+        self.sink_fill_level[:] = torch.minimum(self.end_offset, self.size_vector)
         invalid = indexes >= self.end_offset.view(-1, 1)
 
         positions = torch.where(invalid, torch.full_like(positions, -1), positions)
@@ -426,7 +426,6 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 for _ in range(mult)
             ]
         )
-
         self._register_load_state_dict_pre_hook(StreamingMultiheadAttention._load_hook, with_module=True)
 
     @staticmethod
@@ -574,7 +573,10 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
             k, v, pos_k = self._complete_kv(k, v)
             pos_k = pos_k[:, None]
+            #q,_ = self.rope(q, q, offset, time_before_heads=False)
+            #k, v, pos_k = self._complete_kv(k,v)
             
+            #k,_ = self.rope(k,k,offset,time_before_heads=False,positions=pos_k[:,None])
             if self.causal:
                 
                 pos_q = offset.view(-1, 1, 1) + torch.arange(T, device=q.device, dtype=torch.long).view(
@@ -589,15 +591,13 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             else:
                 attn_bias = None
         else:
+            
+            
             q,_ = self.rope(q, q, offset, time_before_heads=False)
             k, v, pos_k = self._complete_kv(k,v)
-            
-            
-            
-            k,_ = self.rope(k,k,offset,time_before_heads=False,positions=pos_k[:,None])
-            #pos_k = pos_k[:, None]
-            #attn_bias = pos_k != -1
-            #attn_bias = attn_bias[:, None]
+            #if offset <=751 and offset >= 749:
+            #    print(pos_k)
+            k, _ = self.rope(k, k ,offset,time_before_heads=False,positions=pos_k[:,None])
             attn_bias = (pos_k != -1)[:, None, None, :]  # shape [B, 1, 1, seq_len]
 
             
