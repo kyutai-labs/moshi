@@ -514,6 +514,7 @@ class _LMGenState(State):
     offset_cpu: int = 0
     condition_sum: torch.Tensor | None = None
     condition_cross: torch.Tensor | None = None
+    cfg_is_masked_until: torch.Tensor | None = None
     exit_stack: ExitStack = field(default_factory=ExitStack)
     reset_callback: tp.Callable[[torch.Tensor], None] | None = None
     set_exec_mask_callback: tp.Callable[[torch.Tensor], None] | None = None
@@ -552,6 +553,7 @@ class LMGen(StreamingModule[_LMGenState]):
         on_text_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         on_audio_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         support_out_of_sync: bool = False,
+        cfg_is_masked_until: list[int] | None = None,
         cfg_is_no_text: bool = False,
     ):
         assert not lm_model.training, "generation shouldn't be used in training mode."
@@ -576,9 +578,10 @@ class LMGen(StreamingModule[_LMGenState]):
         self.on_text_hook = on_text_hook
         self.on_audio_hook = on_audio_hook
         self.support_out_of_sync = support_out_of_sync
+        self.cfg_is_masked_until = cfg_is_masked_until
         self.cfg_is_no_text = cfg_is_no_text
         if self.cfg_coef != 1.:
-            if not self.cfg_is_no_text:
+            if not self.cfg_is_no_text and not self.cfg_is_masked_until:
                 assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
                 assert self.condition_tensors, "Missing condition tensors for CFG."
 
@@ -613,9 +616,15 @@ class LMGen(StreamingModule[_LMGenState]):
         else:
             graphed_depth = None
 
+        if self.cfg_is_masked_until is None:
+            cfg_is_masked_until = None
+        else:
+            cfg_is_masked_until = torch.tensor(self.cfg_is_masked_until, dtype=torch.long, device=lm_model.device)
+
         state = _LMGenState(
             batch_size, lm_model.device, cache, initial, graphed_main, graphed_depth,
-            offsets, condition_sum=condition_sum, condition_cross=condition_cross)
+            offsets, condition_sum=condition_sum, condition_cross=condition_cross,
+            cfg_is_masked_until=cfg_is_masked_until)
 
         if self.cfg_coef != 1.:
             batch_size *= 2
@@ -683,12 +692,18 @@ class LMGen(StreamingModule[_LMGenState]):
             assert (input_[:, lm_model.audio_offset :] <= lm_model.card).all(), input_
             assert (input_[:, :1] <= lm_model.text_card).all()
 
+        zero = torch.full((1,), self.lm_model.zero_token_id, dtype=torch.long, device=input_.device)
         if self.cfg_coef != 1.:
-            zero = torch.full((1,), self.lm_model.zero_token_id, dtype=torch.long, device=input_.device)
-            input_ = input_.repeat(2, 1, 1)
+            if state.cfg_is_masked_until is not None:
+                limit = self.delays_cuda[:, None] + state.cfg_is_masked_until.view(-1, 1, 1)
+                is_zeroed = state.offsets[:, None, None] <= limit
+
+                masked = torch.where(is_zeroed & ~is_init, zero, input_)
+                input_ = torch.cat([input_, masked], dim=0)
+            else:
+                input_ = input_.repeat(2, 1, 1)
             if self.cfg_is_no_text:
-                # Zero out text stream if we want to have the CFG over it.
-                input_[B:, :1] = torch.where(is_init[:, :1], input_[B:, :1], zero)
+                input_[B:, :1] = torch.where(~is_init[:, :1], zero, input_[B:, :1])
 
         transformer_out, text_logits = state.graphed_main(input_, state.condition_sum, state.condition_cross)
         if self.cfg_coef != 1.:
