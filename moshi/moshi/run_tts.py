@@ -102,7 +102,7 @@ def main():
         all_entries = []
         all_attributes = []
         prefixes = None
-        if not tts_model.multi_speaker and batch[0].voices is not None:
+        if not tts_model.multi_speaker:
             prefixes = []
         begin = time.time()
 
@@ -115,7 +115,7 @@ def main():
                 voices = []
             all_attributes.append(tts_model.make_condition_attributes(voices, cfg_coef_conditioning))
             if prefixes is not None:
-                assert len(request.voices) == 1, "For this model, at most one voice is supported."
+                assert len(request.voices) == 1, "For this model, only exactly one voice is supported."
                 prefix_path = hf_get(request.voices[0], args.voice_repo, check_local_file_exists=True)
                 prefixes.append(tts_model.get_prefix(prefix_path))
 

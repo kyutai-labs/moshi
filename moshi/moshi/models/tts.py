@@ -175,10 +175,12 @@ class StateMachine:
                 state.consumption_times.append(step)
                 if entry.tokens:
                     state.transcript.append((entry.word, step))
-                    # Entry contains a new word, we reset the max padding counter.
+                    # We queue the tokens to be fed to the model.
                     state.queued.extend(entry.tokens)
                     if self.second_stream_ahead:
+                        # We queue the tokens for the N+lookahead word into the second text stream.
                         state.lookahead.extend(state.get_tokens_ahead(self.second_stream_ahead))
+                    # Entry contains a new word, we reset the max padding counter.
                     state.remaining_padding = self.max_padding
                 else:
                     # Entry is only here to insert a break, pretend the token was a PAD.
@@ -214,13 +216,19 @@ class StateMachine:
         if self.second_stream_ahead:
             second = -1
             if output == self.token_ids.word:
+                # If sampled the `word` special token, we put it on the
+                # second text stream instead of the main one.
                 second = self.token_ids.word
                 if state.queued:
+                    # This allows us to pass the current word tokens faster.
                     output = state.queued.popleft()
                 else:
                     output = self.token_ids.pad
             elif state.lookahead:
+                # Otherwise if we have some lookahead tokens we feed them.
                 second = state.lookahead.popleft()
+            # Then we multiplex the two tokens. We add `+1` to `second` so that
+            # we can encode -1, which would translate to an all 0s embedding.
             output = (second + 1) * self.token_ids.card + output
 
         assert output is not None
@@ -478,11 +486,11 @@ class TTSModel:
             audio_prefixes = []
             for prefix in prefixes:
                 if cfg_is_masked_until is not None:
-                    cfg_is_masked_until.append(len(prefix))
+                    cfg_is_masked_until.append(len(prefix) + self.delay_steps)
                 K, _ = prefix.shape
                 assert K == self.lm.num_codebooks
                 text_prefixes.append(deque(prefix[0].cpu().tolist()))
-                delays = [d + self.delay_steps for d in self.lm.delays]
+                delays = [d + self.delay_steps for d in self.lm.delays[1:]]
                 delayed = _delayed(self.machine.token_ids, prefix[1:], delays)
                 delayed = delayed.to(device)
                 audio_prefixes.append(deque(delayed.t()))
