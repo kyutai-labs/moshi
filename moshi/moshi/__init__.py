@@ -16,4 +16,4 @@ from . import modules
 from . import quantization
 from . import utils
 
-__version__ = "0.2.5"
+__version__ = "0.2.6a1"

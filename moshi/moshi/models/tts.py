@@ -1,22 +1,23 @@
 # Copyright (c) Kyutai, all rights reserved.
+"""
+Implements the logic for the state machine around the Delayed Streams Modeling (DSM) based TTS model.
+"""
 
-import argparse
 from collections import deque
 from dataclasses import dataclass, field
-import json
+from functools import cached_property
 import re
 from pathlib import Path
-import sys
-import time
 import typing as tp
 
-from safetensors.torch import load_file, save_file
+from safetensors.torch import load_file
 from sentencepiece import SentencePieceProcessor
 import sphn
 import torch
 
-from moshi.conditioners import ConditionAttributes, dropout_all_conditions, TensorCondition
-from moshi.models import loaders, MimiModel, LMModel, LMGen
+from ..conditioners import ConditionAttributes, dropout_all_conditions, TensorCondition
+from ..conditioners.text import LUTConditioner
+from . import loaders, MimiModel, LMModel, LMGen
 
 
 @dataclass
@@ -25,11 +26,12 @@ class TokenIds:
     The token ids for special tokens:
         - word: a new word is starting.
         - pad: padding, nothing happens.
-        - main: indicate the start of turn of the main speaker.
-        - other: indicate the start of turn of the other speaker.
-        - zero: special value that will be embedded to exactly 0.
+        - main: indicates the start of turn of the main speaker.
+        - other: indicates the start of turn of the other speaker.
+        - zero: special value that is embedded to exactly 0.
         - ungenerated: indicate that a value is not yet generated but should be
         - card: text cardinality, including the initial token (1 + tokenizer cardinality).
+            This is used for multiplexing multiple input tokens into the text stream.
 
     """
     word = 0
@@ -85,8 +87,6 @@ class State:
     end_step: int | None = None
     consumption_times: list[int] = field(default_factory=list)
     transcript: list[tuple[str, int]] = field(default_factory=list)
-    audio_tokens_remaining: deque[torch.Tensor | None] = field(default_factory=deque)
-    zero_text_remaining: int = 0
 
     def get_tokens_ahead(self, lookahead: int) -> list[int]:
         assert lookahead > 0
@@ -108,29 +108,32 @@ def _delayed(token_ids: TokenIds, codes: torch.Tensor, delays: list[int]) -> tor
     return out
 
 
+def _make_null(all_attributes: tp.Sequence[ConditionAttributes]) -> list[ConditionAttributes]:
+    # When using CFG, returns the null conditions.
+    return dropout_all_conditions(all_attributes)
+
+
 @dataclass
 class StateMachine:
     """State machine that manipulates the `State` based on the model prediction.
+    In particular, every time the model predicts a `word` (see `TokenIds`) special token,
+    the state machine will pop the next word to synthesize and start feeding it.
+    The model is optionally equipped with a second input text stream providing a lookahead
+    into the future text.
 
     Args:
         token_ids: special token values.
         second_stream_ahead: if > 0, the model needs a second stream for lookahead.
-        max_paddings: maximum number of padding token that can be sampled in a row.
+        max_padding: maximum number of padding token that can be sampled in a row.
         initial_padding: number of padding tokens at the beginning, to prevent the first
             word from being cut.
-        old_interleaver: if True, the model was trained with the old interleaver.
-        audio_delays: semantic vs acoustic delays for the model.
-        tts_delay: delay between the audio and the text, in steps.
 
     """
 
     token_ids: TokenIds = field(default_factory=TokenIds)
     second_stream_ahead: int = 0
-    max_paddings: int = 6
+    max_padding: int = 6
     initial_padding: int = 2
-    old_interleaver: bool = False
-    audio_delays: list[int] = field(default_factory=lambda: [0, 2])
-    tts_delay: int = 25
 
     def new_state(self, entries: tp.Sequence[Entry]) -> State:
         state = State(
@@ -141,9 +144,10 @@ class StateMachine:
         )
         return state
 
-    def process(self, step: int, state: State, token: int) -> tuple[int, torch.Tensor | None, bool]:
+    def process(self, step: int, state: State, token: int) -> int:
         """
         Process the output of the model.
+
         Args:
             step: current step index.
             state: state to act upon.
@@ -152,16 +156,10 @@ class StateMachine:
         Returns:
             - output_token: value to use as the text input for the model at the next step.
         """
-        audio_tokens = None
         if token not in [self.token_ids.word, self.token_ids.pad]:
             token = self.token_ids.pad
 
-        if state.zero_text_remaining > 0:
-            state.zero_text_remaining -= 1
-            token = self.token_ids.zero
-        elif state.entries and state.entries[0].audio_tokens is not None:
-            token = self.token_ids.word
-        elif state.queued:
+        if state.queued:
             # Some text tokens are yet to be fed, we must PAD.
             token = self.token_ids.pad
         elif state.forced_padding > 0:
@@ -181,17 +179,10 @@ class StateMachine:
                     state.queued.extend(entry.tokens)
                     if self.second_stream_ahead:
                         state.lookahead.extend(state.get_tokens_ahead(self.second_stream_ahead))
-                    state.remaining_padding = self.max_paddings
+                    state.remaining_padding = self.max_padding
                 else:
                     # Entry is only here to insert a break, pretend the token was a PAD.
                     token = self.token_ids.pad
-                if entry.audio_tokens is not None:
-                    state.zero_text_remaining = entry.audio_tokens.shape[1] - 1
-                    codes = _delayed(self.token_ids, entry.audio_tokens, self.audio_delays)
-                    state.audio_tokens_remaining.extend([None] * self.tts_delay)
-                    for t in range(codes.shape[1]):
-                        state.audio_tokens_remaining.append(codes[:, t])
-                    token = self.token_ids.zero
                 state.forced_padding = entry.padding
             else:
                 token = self.token_ids.pad
@@ -215,17 +206,10 @@ class StateMachine:
                 output = self.token_ids.pad
         elif token == self.token_ids.word:
             output = self.token_ids.word
-            if self.old_interleaver:
-                assert state.queued
-                if state.queued[0] in [self.token_ids.main, self.token_ids.other]:
-                    output = state.queued.popleft()
         elif token == self.token_ids.zero:
             output = token
         else:
             raise RuntimeError(f"Invalid token {token}")
-
-        if state.audio_tokens_remaining:
-            audio_tokens = state.audio_tokens_remaining.popleft()
 
         if self.second_stream_ahead:
             second = -1
@@ -240,13 +224,29 @@ class StateMachine:
             output = (second + 1) * self.token_ids.card + output
 
         assert output is not None
-        return output, audio_tokens
+        return output
 
 
 def script_to_entries(tokenizer: SentencePieceProcessor, token_ids: TokenIds, frame_rate: float,
-                      script: tp.Sequence[str], old_interleaver: bool = False,
-                      use_bos_eos: bool = True, padding_between: int = 0) -> list[Entry]:
+                      script: tp.Sequence[str], multi_speaker: bool = True, padding_between: int = 0) -> list[Entry]:
+    """Process a given script into a list of `Entry` that will be consumed by the model.
+
+    This function will perform some replacements such as removing some caracters such as ':', etc.
+    It also supports a single XML tag from SSML, namely `<break time="0.5s">`. This allow the insertion
+    of a pause of roughly the requested duration.
+
+    Args:
+        tokenizer: text tokenizer.
+        token_ids: See `TokenIds`.
+        frame_rate: frame rate of the audio codec.
+        script: list of turns, with each element indicating a change of turn. Starts with the main speaker.
+            Use an empty first turn to start with the other speaker.
+        multi_speaker: whether the model was trained to handle more than one speaker.
+        padding_between: amount of padding to force between words. Will make the model articulate
+            a bit better with values such as 1.
+    """
     speaker_tokens = [token_ids.main, token_ids.other]
+    last_speaker = None
     opened_main = False
     entries = []
 
@@ -254,23 +254,15 @@ def script_to_entries(tokenizer: SentencePieceProcessor, token_ids: TokenIds, fr
     event_re = re.compile(r"(?:<break\s+time=\"([0-9]+(?:.[0-9]*)?)s\"\s*/?>)|(?:\s+)")
 
     def _add_entry(word: str):
-        nonlocal first_content, opened_main
+        nonlocal first_content, opened_main, last_speaker
         assert ' ' not in word
         assert word
         tokens = tokenizer.encode(word)  # type: ignore
         if first_content:
             speaker = idx % len(speaker_tokens)
-            if use_bos_eos:
-                if old_interleaver:
-                    if speaker == 0:
-                        tokens.insert(0, speaker_tokens[0])
-                        opened_main = True
-                    else:
-                        if opened_main:
-                            entries.append(Entry(tokens=[speaker_tokens[1]], word=""))
-                            opened_main = False
-                else:
-                    tokens.insert(0, speaker_tokens[speaker])
+            if multi_speaker and last_speaker != speaker:
+                last_speaker = speaker
+                tokens.insert(0, speaker_tokens[speaker])
             first_content = False
         padding = 0
         if padding_between > 0:
@@ -303,8 +295,23 @@ def script_to_entries(tokenizer: SentencePieceProcessor, token_ids: TokenIds, fr
 
 @dataclass
 class TTSResult:
+    """Represents the result of a run of the TTS model on a batch.
+
+    Args:
+        frames: list of long tensors with shape `[B, 1 + Q, 1]` representing
+            the audio and text tokens for each step. Note that acoustic delay is already corrected
+            at that point.
+        logged_text_tokens: for debugging, list of tuples `(predicted_tokens, next_input_token)`.
+        end_steps: gives the last valid step in `frames` for each item in the batch, or `None` if the
+            full text could not be fully synthesized within the provided budget.
+        all_consumption_times: for each item in the batch, a list of steps at which individual entries
+            (see `Entry`) were consumed as input to the model.
+        all_transcripts: for each item in the batch, a list of pairs `(word, step)` indicating
+            at which step the given `word` in the transcript should appear. Divide by the frame rate
+            to obtain a time stamp.
+    """
     frames: list[torch.Tensor]
-    logged_text_tokens: list[list[tuple[int, int, bool]]]
+    logged_text_tokens: list[list[tuple[int, int]]]
     end_steps: list[int | None]
     all_consumption_times: list[list[int]]
     all_transcripts: list[list[tuple[str, int]]]
@@ -312,30 +319,117 @@ class TTSResult:
 
 @dataclass
 class TTSModel:
+    """Wrapper around a multi-stream language model, a mimi codec, and a text tokenizer that
+    provides the functionality of a TTS model. As an end-user, you should use `from_checkpoint_info`
+    rather than trying to build a TTSModel directly.
+
+    Args:
+        lm: trained delayed streams model.
+        mimi: codec to use.
+        tokenizer: text tokenizer to use.
+        machine: TTS state machine to use, which depend on how the model was trained.
+        delay_steps: delay between the text and audio in steps.
+        max_speakers: maximum number of speakers in the cross attention for this model.
+        temp: temperature (for both text and audio).
+        cfg_coef: classifier free guidance coefficient. Note that some models were trained with
+            CFG distillation, e.g. CFG should not be used at inference time.
+        final_padding: how many steps to sample past the last word.
+        n_q: how many audio codebooks (e.g. RVQ levels) to generate. Trade off between quality and speed.
+        max_gen_length: will stop generating after that many steps even if the text has not been fully consumed.
+        padding_bonus: additive bonus for the padding logits, positive value will lead to slower speech.
+        kwargs: other arguments for `moshi.models.lm.LMGen`.
+
+    """
+
+    # the following params will be automatically set by `from_checkpoint_info`
     lm: LMModel
     mimi: MimiModel
     tokenizer: SentencePieceProcessor
 
+    voice_suffix: str
+    voice_repo: str
+
     machine: StateMachine
     delay_steps: int
+    max_speakers: int = 5
 
+    # The following params can be overriden to customize generation.
     temp: float = 0.6
     cfg_coef: float = 1.0
     final_padding: int = 4
     n_q: int = 32
     max_gen_length: int = 30000
     padding_bonus: float = 0.
-    kwargs: dict[str, tp.Any] = field(default_factory=dict)
 
-    def prepare_script(self, script: tp.Sequence[str], use_bos_eos: bool = True,
-                       padding_between: int = 0) -> list[Entry]:
+    @staticmethod
+    def from_checkpoint_info(checkpoint_info: loaders.CheckpointInfo,
+                             initial_padding: int = 2,
+                             max_padding: int = 8,
+                             voice_repo: str = 'alex-testing/dsm-tts-rc-voices',
+                             device: torch.device | str = 'cpu',
+                             dtype: torch.dtype = torch.bfloat16, **kwargs) -> 'TTSModel':
+        assert checkpoint_info.raw_config is not None
+        model_id = checkpoint_info.raw_config['model_id']
+        voice_suffix = f".{model_id['sig']}@{model_id['epoch']}.safetensors"
+
+        mimi = checkpoint_info.get_mimi(device=device)
+        tokenizer = checkpoint_info.get_text_tokenizer()
+        lm = checkpoint_info.get_moshi(device=device, dtype=dtype)
+
+        token_ids = TokenIds()
+        delay_steps = int(checkpoint_info.tts_config['audio_delay'] * mimi.frame_rate)
+        second_stream_ahead = checkpoint_info.tts_config.get('second_stream_ahead', 0)
+
+        machine = StateMachine(
+            token_ids=token_ids, second_stream_ahead=second_stream_ahead,
+            max_padding=max_padding, initial_padding=initial_padding)
+        tts_model = TTSModel(
+            lm=lm, mimi=mimi, tokenizer=tokenizer,
+            voice_suffix=voice_suffix, voice_repo=voice_repo,
+            machine=machine, delay_steps=delay_steps,
+            **kwargs)
+        mimi.set_num_codebooks(tts_model.n_q)
+        return tts_model
+
+    @cached_property
+    def valid_cfg_conditionings(self) -> set[float]:
+        valid_cfg_conditionings = set()
+        if self.lm.condition_provider is not None and 'cfg' in self.lm.condition_provider.conditioners:
+            cfg_conditioner = self.lm.condition_provider.conditioners['cfg']
+            assert isinstance(cfg_conditioner, LUTConditioner)
+            assert cfg_conditioner.tokenizer.possible_values is not None
+            valid_cfg_conditionings = set(float(x) for x in cfg_conditioner.tokenizer.possible_values)
+        return valid_cfg_conditionings
+
+    @cached_property
+    def multi_speaker(self) -> bool:
+        if self.lm.condition_provider is None:
+            return False
+        return 'speaker_wavs' in self.lm.condition_provider.conditioners
+
+    def prepare_script(self, script: tp.Sequence[str], padding_between: int = 0) -> list[Entry]:
+        """Wrapper around `script_to_entries`."""
         return script_to_entries(
             self.tokenizer, self.machine.token_ids, self.mimi.frame_rate, script,
-            self.machine.old_interleaver, use_bos_eos=use_bos_eos, padding_between=padding_between)
+            multi_speaker=self.multi_speaker, padding_between=padding_between)
 
     @torch.no_grad()
     def generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],
-                 attributes: tp.Sequence[ConditionAttributes], cfg_is_masked_until: list[int] | None):
+                 attributes: tp.Sequence[ConditionAttributes],
+                 prefixes: list[torch.Tensor] | None = None,
+                 cfg_is_no_prefix: bool = False,
+                 **kwargs
+                 ) -> TTSResult:
+        """Synthesize text to audio. Returns a `TTSResult`.
+
+        Args:
+            all_entries: list with one item per batch item, consisting of a list of `Entry`,
+                obtained from `prepare_script`.
+            attributes: list of `ConditionAttributes` for speaker conditioning.
+            prefixes: this should be the list of the lengths up until when to mask for the CFG.
+            cfg_is_no_prefix: if true, the null logits are computed with a masked prefix.
+            **kwargs: passed to `moshi.models.lm.LMGen`.
+        """
 
         def _main_wrapper(*args, **kwargs):
             transformer_out, text_logits = original(*args, **kwargs)
@@ -347,14 +441,21 @@ class TTSModel:
         self.lm.forward_text = _main_wrapper
 
         try:
-            return self._generate(all_entries, attributes, cfg_is_masked_until)
+            return self._generate(all_entries, attributes, prefixes, cfg_is_no_prefix, **kwargs)
         finally:
             self.lm.forward_text = original
 
-    def _generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]], attributes: tp.Sequence[ConditionAttributes],
-                  cfg_is_masked_until: list[int] | None):
+    def _generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],
+                  attributes: tp.Sequence[ConditionAttributes],
+                  prefixes: list[torch.Tensor] | None = None,
+                  cfg_is_no_prefix: bool = False, **kwargs):
+
         if self.cfg_coef != 1.0:
-            nulled = make_null(attributes)
+            if self.valid_cfg_conditionings:
+                raise ValueError(
+                    "This model does not support direct CFG, but was trained with "
+                    "CFG distillation. Pass instead `cfg_coef` to `make_condition_attributes`.")
+            nulled = _make_null(attributes)
             attributes = list(attributes) + nulled
 
         assert self.lm.condition_provider is not None
@@ -366,39 +467,60 @@ class TTSModel:
             state = self.machine.new_state(entries)
             states.append(state)
 
+        cfg_is_masked_until = None
+        text_prefixes = None
+        audio_prefixes = None
+        device = self.lm.device
+        if prefixes is not None:
+            cfg_is_masked_until = []
+            text_prefixes = []
+            audio_prefixes = []
+            for prefix in prefixes:
+                cfg_is_masked_until.append(len(prefix))
+                K, _ = prefix.shape
+                assert K == self.lm.num_codebooks
+                delayed = _delayed(self.machine.token_ids, prefix, self.lm.delays)
+                text_prefixes.append(deque(delayed[0].cpu().tolist()))
+                delayed = delayed.to(device)
+                audio_prefixes.append(deque(delayed[1:].t()))
+
+            prefixes = [
+                _delayed(self.machine.token_ids, prefix, self.lm.delays)
+                for prefix in prefixes
+            ]
+
         def _on_audio_hook(audio_tokens):
             for q in range(audio_tokens.shape[1]):
                 delay = self.lm.delays[q + 1]
                 if offset < delay + self.delay_steps:
                     audio_tokens[:, q] = self.machine.token_ids.zero
-            for b, forced_audio_tokens in enumerate(all_audio_tokens):
-                if forced_audio_tokens is not None:
-                    mask = forced_audio_tokens != self.machine.token_ids.ungenerated
-                    K = forced_audio_tokens.shape[0]
-                    audio_tokens[b, :K] = torch.where(mask, forced_audio_tokens, audio_tokens[b, :K])
+            if audio_prefixes is not None:
+                for b, audio_prefix in enumerate(audio_prefixes):
+                    if audio_prefix:
+                        audio_codes = audio_prefix.popleft()
+                        mask = audio_codes != self.machine.token_ids.ungenerated
+                        audio_tokens[b] = torch.where(mask, audio_codes, audio_tokens[b])
 
         def _on_text_hook(text_tokens):
-            all_audio_tokens.clear()
             tokens = text_tokens.tolist()
             out_tokens = []
-            for token, state, logged in zip(tokens, states, logged_text_tokens):
-                out_token, audio_tokens = self.machine.process(offset, state, token)
-                all_audio_tokens.append(audio_tokens)
+            for b, (token, state, logged) in enumerate(zip(tokens, states, logged_text_tokens)):
+                if text_prefixes is not None and text_prefixes[b]:
+                    out_token = text_prefixes[b].popleft()
+                else:
+                    out_token = self.machine.process(offset, state, token)
                 out_tokens.append(out_token)
-                logged.append((token, out_token, audio_tokens is None))
+                logged.append((token, out_token))
             text_tokens[:] = torch.tensor(out_tokens, dtype=torch.long, device=text_tokens.device)
 
         self.lm.dep_q = self.n_q
-        kwargs = {}
-        if cfg_is_masked_until:
-            kwargs['cfg_is_masked_until'] = cfg_is_masked_until
         lm_gen = LMGen(
             self.lm, temp=self.temp, temp_text=self.temp, cfg_coef=self.cfg_coef,
             condition_tensors=condition_tensors, on_text_hook=_on_text_hook,
-            on_audio_hook=_on_audio_hook, **self.kwargs)
+            on_audio_hook=_on_audio_hook, cfg_is_masked_until=cfg_is_masked_until,
+            **kwargs)
 
         logged_text_tokens = [[] for _ in states]
-        all_audio_tokens = []
         frames: list[torch.Tensor] = []
 
         with lm_gen.streaming(len(states)):
@@ -419,250 +541,62 @@ class TTSModel:
             [state.consumption_times for state in states],
             [state.transcript for state in states])
 
+    def get_voice_path(self, voice_name: str) -> Path:
+        """Returns a local path given a voice name, potentially fetching the voice
+        from a HuggingFace repository. To retrieve a voice from another repo, you can also use
+        the `hf://REPO/PATH` syntax.
+        """
+        file = loaders.hf_get(voice_name + self.voice_suffix, self.voice_repo,
+                              check_local_file_exists=True)
+        return Path(file)
 
-def make_condition_attributes(voices: list[Path], max_speakers: int = 5):
-    if voices:
-        voice_tensor = None
-        mask = None
-        for idx in range(5):
-            if idx < len(voices):
-                emb = load_file(voices[idx], device='cpu')['speaker_wavs']
-                assert emb.dim() == 3
-                if voice_tensor is None:
-                    voice_tensor = torch.zeros(1, max_speakers, emb.shape[2], emb.shape[1])
-                if mask is None:
-                    mask = torch.zeros(1, max_speakers, emb.shape[2], dtype=torch.bool)
-                voice_tensor[:, idx, :, :] = emb.transpose(1, 2)
-                mask[:, idx, :] = True
-        assert voice_tensor is not None
-        assert mask is not None
-        voice_tensor = voice_tensor.view(1, -1, voice_tensor.shape[-1])
-        mask = mask.view(1, -1)
-        tensors = {
-            'speaker_wavs': TensorCondition(voice_tensor, mask)
-        }
-    else:
-        tensors = {}
-    return ConditionAttributes(text={'control': 'ok'}, tensor=tensors)
+    def make_condition_attributes(
+            self, voices: list[Path], cfg_coef: float | None = None) -> ConditionAttributes:
+        """Given a list of pre computed voice embeddings, returns a ConditionAttributes.
 
-
-def get_voice_file(voice_file: str, ext: str) -> Path:
-    return Path(voice_file + ext)
-
-
-def make_null(all_attributes: tp.Sequence[ConditionAttributes]) -> list[ConditionAttributes]:
-    return dropout_all_conditions(all_attributes)
-
-
-def main():
-    stdout = sys.stdout
-    sys.stdout = sys.stderr
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--hf-repo", type=str, default='ship-it1/prot-1-prev2',
-                        help="HF repo to look into for pretrained models.")
-    parser.add_argument("--config", "--lm-config", dest="config", type=str, help="The config as a json file.")
-    parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
-    parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
-    parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
-
-    parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
-    parser.add_argument("--batch-size", type=int, default=32, help="Batch size to be used for inference.")
-    parser.add_argument("--nq", type=int, default=32, help="Number of codebooks to generate.")
-    parser.add_argument("--temp", type=float, default=0.6, help="Temperature for text and audio.")
-    parser.add_argument("--cfg-coef", type=float, default=2., help="CFG coefficient.")
-    parser.add_argument("--cfg-is-no-text", action='store_true')
-
-    parser.add_argument("--max-paddings", type=int, default=6, help="Max padding in a row.")
-    parser.add_argument("--initial-padding", type=int, default=2, help="Initial padding.")
-    parser.add_argument("--final-padding", type=int, default=4, help="Final padding.")
-    parser.add_argument("--padding-bonus", type=float, default=0., help="Bonus to the padding logits.")
-    parser.add_argument("--voice-is-prefix", action='store_true')
-    parser.add_argument("--no-voice", action='store_true')
-    parser.add_argument("--padding-between", type=int, default=0)
-
-    args = parser.parse_args()
-
-    print("retrieving checkpoint")
-    checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
-        args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer, args.config)
-    print("loading mimi")
-    mimi = checkpoint_info.get_mimi(device=args.device)
-    mimi.set_num_codebooks(args.nq)
-    print("mimi loaded")
-    text_tokenizer = checkpoint_info.get_text_tokenizer()
-    print("loading moshi")
-    lm = checkpoint_info.get_moshi(device=args.device, dtype=torch.bfloat16)
-    print("moshi loaded")
-
-    ext = ".safetensors"
-    assert checkpoint_info.raw_config is not None
-    model_id = checkpoint_info.raw_config['model_id']
-    ext = f".{model_id['sig']}@{model_id['epoch']}{ext}"
-
-    old_interleaver = checkpoint_info.tts_config.get('old_interleaver', False)
-
-    token_ids = TokenIds()
-    delay_steps = int(checkpoint_info.tts_config['audio_delay'] * mimi.frame_rate)
-    machine = StateMachine(
-        token_ids=token_ids, max_paddings=args.max_paddings, initial_padding=args.initial_padding,
-        second_stream_ahead=checkpoint_info.tts_config.get('second_stream_ahead', 0),
-        old_interleaver=old_interleaver, tts_delay=delay_steps, audio_delays=lm.delays[1:])
-    kwargs = {
-        'cfg_is_no_text': args.cfg_is_no_text,
-    }
-    tts_model = TTSModel(
-        lm=lm, mimi=mimi, tokenizer=text_tokenizer,
-        machine=machine, delay_steps=delay_steps, temp=args.temp, cfg_coef=args.cfg_coef,
-        final_padding=args.final_padding, n_q=args.nq, padding_bonus=args.padding_bonus, kwargs=kwargs)
-    first_batch = True
-
-    @torch.no_grad()
-    def _flush():
-        nonlocal first_batch
-        all_entries = []
-        all_attributes = []
-        cfg_is_masked_until = None
-        all_codes = []
-        if args.voice_is_prefix:
-            cfg_is_masked_until = []
-        begin = time.time()
-        for request in batch:
-            entries = tts_model.prepare_script(request.script, use_bos_eos=not args.voice_is_prefix,
-                                               padding_between=args.padding_between)
-            voices = [get_voice_file(voice, ext) for voice in request.voices]
-            if args.no_voice:
-                voices = []
-            elif args.voice_is_prefix:
-                assert len(request.voices) == 1
-                voices = []
-                wav, _ = sphn.read(request.voices[0], sample_rate=mimi.sample_rate)
-                codes = mimi.encode(torch.from_numpy(wav).to(device=args.device)[None])[0, :, :-2]
-                codes = codes.contiguous()
-                all_codes.append(codes)
-                entries.insert(0, Entry([], '', audio_tokens=codes))
-                assert cfg_is_masked_until is not None
-                cfg_is_masked_until.append(codes.shape[-1] + delay_steps)
-            all_attributes.append(make_condition_attributes(voices))
-            all_entries.append(entries)
-
-        print(f"Starting batch of size {len(batch)}")
-        result = tts_model.generate(all_entries, all_attributes, cfg_is_masked_until)
-        first_batch = False
-        frames = torch.cat(result.frames, dim=-1).cpu()
-        total_duration = frames.shape[0] * frames.shape[-1] / mimi.frame_rate
-        time_taken = time.time() - begin
-        total_speed = total_duration / time_taken
-        print(f"[LM] Batch of size {len(batch)} took {time_taken:.2f}s, "
-              f"total speed {total_speed:.2f}x")
-
-        wav_frames = []
-        with torch.no_grad(), mimi.streaming(len(all_entries)):
-            for frame in result.frames[tts_model.delay_steps:]:
-                wav_frames.append(mimi.decode(frame[:, 1:]))
-        wavs = torch.cat(wav_frames, dim=-1)
-        effective_duration = 0.
-        for idx, request in enumerate(batch):
-            end_step = result.end_steps[idx]
-            if end_step is None:
-                print(f"Warning: end step is None, generation failed for {request.output_file}")
-                wav_length = wavs.shape[-1]
-            else:
-                wav_length = int((mimi.sample_rate * (end_step + tts_model.final_padding) / mimi.frame_rate))
-            effective_duration += wav_length / mimi.sample_rate
-            wav = wavs[idx, :, :wav_length]
-            start_time = 0.
-
-            if cfg_is_masked_until is not None:
-                start_time = (cfg_is_masked_until[idx] - tts_model.delay_steps) / mimi.frame_rate
-
-            start = int(start_time * mimi.sample_rate)
-            wav = wav[:, start:]
-            duration = wav.shape[-1] / mimi.sample_rate
-            filename = Path(request.output_file)
-            debug_tensors = {
-                'frames': frames[idx].int(),
+        Args:
+            voices: list of file paths to pre computed voice embeddings, see `get_voice_path`.
+            cfg_coef: for model trained with CFG distillation, value of the CFG
+                to use as conditioning. Typically, values from 1. to 4. are supported
+                with 0.5 increments.
+            """
+        if voices:
+            voice_tensor = None
+            mask = None
+            for idx in range(5):
+                if idx < len(voices):
+                    emb = load_file(voices[idx], device='cpu')['speaker_wavs']
+                    assert emb.dim() == 3
+                    if voice_tensor is None:
+                        voice_tensor = torch.zeros(1, self.max_speakers, emb.shape[2], emb.shape[1])
+                    if mask is None:
+                        mask = torch.zeros(1, self.max_speakers, emb.shape[2], dtype=torch.bool)
+                    voice_tensor[:, idx, :, :] = emb.transpose(1, 2)
+                    mask[:, idx, :] = True
+            assert voice_tensor is not None
+            assert mask is not None
+            voice_tensor = voice_tensor.view(1, -1, voice_tensor.shape[-1])
+            mask = mask.view(1, -1)
+            tensors = {
+                'speaker_wavs': TensorCondition(voice_tensor, mask)
             }
-            if all_codes:
-                debug_tensors['prefix_codes'] = all_codes[idx]
-
-            segments = []
-            transcript = []
-            last_segment_start = 0
-            last_speaker = None
-            segment_has_content = False
-            for entry, step in zip(all_entries[idx], result.all_consumption_times[idx]):
-                if not entry.tokens:
-                    continue
-                timestamp = step / mimi.frame_rate - start_time
-                if entry.word:
-                    segment_has_content = True
-                    transcript.append((entry.word, timestamp))
-                if entry.tokens:
-                    speakers = [machine.token_ids.main, machine.token_ids.other]
-                    try:
-                        speaker = speakers.index(entry.tokens[0])
-                    except ValueError:
-                        pass
-                    else:
-                        if last_speaker is not None:
-                            assert speaker != last_speaker, (speaker, last_speaker, timestamp, entry.word)
-                            segments.append((last_speaker, (last_segment_start, timestamp)))
-                            last_segment_start = timestamp
-                            segment_has_content = False
-                        last_speaker = speaker
-            if segment_has_content:
-                segments.append((last_speaker, (last_segment_start, duration)))
-
-            sphn.write_wav(filename, wav.clamp(-0.99, 0.99).cpu().numpy(), mimi.sample_rate)
-            save_file(debug_tensors, filename.with_suffix('.safetensors'))
-            entries = all_entries[idx]
-            debug_info = {
-                'hf_repo': args.hf_repo,
-                'model_id': checkpoint_info.model_id,
-                'cfg_coef': tts_model.cfg_coef,
-                'temp': tts_model.temp,
-                'max_padding': tts_model.machine.max_paddings,
-                'initial_padding': tts_model.machine.initial_padding,
-                'final_padding': tts_model.final_padding,
-                'transcript': transcript,
-                'segments': segments,
-                'consumption_times': result.all_consumption_times[idx],
-                'script': request.script,
-                'voices': request.voices,
-                'logged_text_tokens': result.logged_text_tokens[idx],
-                'end_step': end_step,
-                'start_time': start_time,
-            }
-            with open(filename.with_suffix('.json'), 'w') as f:
-                json.dump(debug_info, f)
-            with open(filename.with_suffix('.segments.json'), 'w') as f:
-                json.dump({'segments': segments}, f)
-            print("Saved", filename)
-        time_taken = time.time() - begin
-        total_speed = total_duration / time_taken
-        effective_speed = effective_duration / time_taken
-        print(f"[TOT] Batch of size {len(batch)} took {time_taken:.2f}s, "
-              f"total speed {total_speed:.2f}x, "
-              f"effective speed {effective_speed:.2f}x")
-        batch.clear()
-
-    while True:
-        batch: list[TTSRequest] = []
-        line = sys.stdin.readline()
-        items = json.loads(line)
-        for item in items:
-            script = []
-            if len(item['speaker_audios']) == 1:
-                script = [" ".join(turn.strip() for turn in item['turns'])]
+        else:
+            tensors = {}
+        text: dict[str, str | None] = {'control': 'ok'}
+        if cfg_coef is None:
+            text['cfg'] = None
+        else:
+            if cfg_coef in self.valid_cfg_conditionings:
+                text['cfg'] = format(cfg_coef, '.1f')
             else:
-                script = item['turns']
-            batch.append(TTSRequest(voices=item['speaker_audios'],
-                                    script=script, output_file=item['output_file']))
-        _flush()
-        stdout.write("external_tts:" + json.dumps({"status": "ok"}) + "\n")
-        stdout.flush()
+                valids = ", ".join(str(x) for x in self.valid_cfg_conditionings)
+                raise ValueError(f"Unsupported value for cfg_coef, valid values are {valids}.")
+        return ConditionAttributes(text=text, tensor=tensors)
 
-
-if __name__ == "__main__":
-    main()
-
+    def get_prefix(self, audio_path: Path | str) -> torch.Tensor:
+        wav, _ = sphn.read(audio_path, sample_rate=self.mimi.sample_rate)
+        with torch.no_grad():
+            prefix = self.mimi.encode(torch.from_numpy(wav).to(device=self.lm.device)[None])[0, :, :-2]
+        null_text = torch.full_like(prefix[:1], self.machine.token_ids.zero)
+        prefix = torch.cat([null_text, prefix], dim=0)
+        return prefix
