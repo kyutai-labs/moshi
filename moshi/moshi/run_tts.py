@@ -146,8 +146,10 @@ def main():
                 wav_length = int((mimi.sample_rate * (end_step + tts_model.final_padding) / mimi.frame_rate))
             effective_duration += wav_length / mimi.sample_rate
             wav = wavs[idx, :, :wav_length]
+            start_step = 0
             if prefixes is not None:
-                start = int(mimi.sample_rate * prefixes[idx].shape[-1] / mimi.frame_rate)
+                start_step = prefixes[idx].shape[-1]
+                start = int(mimi.sample_rate * start_step / mimi.frame_rate)
                 wav = wav[:, start:]
             filename = args.out_folder / f"{request.id}.wav"
             debug_tensors = {
@@ -172,6 +174,7 @@ def main():
                 'voices': request.voices,
                 'logged_text_tokens': result.logged_text_tokens[idx],
                 'end_step': end_step,
+                'start_step': start_step,
             }
             with open(filename.with_suffix('.json'), 'w') as f:
                 json.dump(debug_info, f)

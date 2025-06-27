@@ -472,17 +472,20 @@ class TTSModel:
         audio_prefixes = None
         device = self.lm.device
         if prefixes is not None:
-            cfg_is_masked_until = []
+            if cfg_is_no_prefix:
+                cfg_is_masked_until = []
             text_prefixes = []
             audio_prefixes = []
             for prefix in prefixes:
-                cfg_is_masked_until.append(len(prefix))
+                if cfg_is_masked_until is not None:
+                    cfg_is_masked_until.append(len(prefix))
                 K, _ = prefix.shape
                 assert K == self.lm.num_codebooks
-                delayed = _delayed(self.machine.token_ids, prefix, self.lm.delays)
-                text_prefixes.append(deque(delayed[0].cpu().tolist()))
+                text_prefixes.append(deque(prefix[0].cpu().tolist()))
+                delays = [d + self.delay_steps for d in self.lm.delays]
+                delayed = _delayed(self.machine.token_ids, prefix[1:], delays)
                 delayed = delayed.to(device)
-                audio_prefixes.append(deque(delayed[1:].t()))
+                audio_prefixes.append(deque(delayed.t()))
 
             prefixes = [
                 _delayed(self.machine.token_ids, prefix, self.lm.delays)
