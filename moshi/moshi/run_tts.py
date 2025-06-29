@@ -12,7 +12,7 @@ from safetensors.torch import save_file
 import sphn
 import torch
 
-from .models.tts import TTSModel
+from .models.tts import TTSModel, DEFAULT_DSM_TTS_REPO, DEFAULT_DSM_TTS_VOICE_REPO
 from .models.loaders import CheckpointInfo, hf_get
 
 
@@ -39,9 +39,9 @@ def main():
     parser.add_argument("--out-folder", type=Path, help="Output folder for TTSed files.",
                         default=Path('tts-outputs'))
 
-    parser.add_argument("--hf-repo", type=str, default='alex-testing/dsm-tts-rc',
+    parser.add_argument("--hf-repo", type=str, default=DEFAULT_DSM_TTS_REPO,
                         help="HF repo in which to look for the pretrained models.")
-    parser.add_argument("--voice-repo", default="alex-testing/dsm-tts-rc-voices",
+    parser.add_argument("--voice-repo", default=DEFAULT_DSM_TTS_VOICE_REPO,
                         help="HF repo in which to look for pre-computed voice embeddings.")
 
     # The following flags are only to use a local checkpoint.

@@ -20,6 +20,10 @@ from ..conditioners.text import LUTConditioner
 from . import loaders, MimiModel, LMModel, LMGen
 
 
+DEFAULT_DSM_TTS_REPO = "alex-testing/dsm-tts-rc"
+DEFAULT_DSM_TTS_VOICE_REPO = 'alex-testing/dsm-tts-rc-voices'
+
+
 @dataclass
 class TokenIds:
     """
@@ -98,12 +102,12 @@ class State:
         return []
 
 
-def _delayed(token_ids: TokenIds, codes: torch.Tensor, delays: list[int]) -> torch.Tensor:
+def _delayed(codes: torch.Tensor, delays: list[int], fill_value: int) -> torch.Tensor:
     # Apply the acoustic delay on the provided audio tokens.
     K, T = codes.shape
-    out = torch.full((K, T + max(delays)), token_ids.ungenerated, device=codes.device, dtype=torch.long)
+    out = torch.full((K, T + max(delays)), fill_value, device=codes.device, dtype=torch.long)
     for k in range(K):
-        delay = delays[min(k, len(delays) - 1)]
+        delay = delays[k]
         out[k, delay: delay + T] = codes[k]
     return out
 
@@ -144,7 +148,7 @@ class StateMachine:
         )
         return state
 
-    def process(self, step: int, state: State, token: int) -> int:
+    def process(self, step: int, state: State, token: int) -> tuple[int, bool]:
         """
         Process the output of the model.
 
@@ -155,7 +159,9 @@ class StateMachine:
 
         Returns:
             - output_token: value to use as the text input for the model at the next step.
+            - consumed_new_word: True if a new word was consumed.
         """
+        consumed_new_word = False
         if token not in [self.token_ids.word, self.token_ids.pad]:
             token = self.token_ids.pad
 
@@ -174,6 +180,7 @@ class StateMachine:
                 entry = state.entries.popleft()
                 state.consumption_times.append(step)
                 if entry.tokens:
+                    consumed_new_word = True
                     state.transcript.append((entry.word, step))
                     # We queue the tokens to be fed to the model.
                     state.queued.extend(entry.tokens)
@@ -232,7 +239,7 @@ class StateMachine:
             output = (second + 1) * self.token_ids.card + output
 
         assert output is not None
-        return output
+        return output, consumed_new_word
 
 
 def script_to_entries(tokenizer: SentencePieceProcessor, token_ids: TokenIds, frame_rate: float,
@@ -373,7 +380,7 @@ class TTSModel:
     def from_checkpoint_info(checkpoint_info: loaders.CheckpointInfo,
                              initial_padding: int = 2,
                              max_padding: int = 8,
-                             voice_repo: str = 'alex-testing/dsm-tts-rc-voices',
+                             voice_repo: str = DEFAULT_DSM_TTS_VOICE_REPO,
                              device: torch.device | str = 'cpu',
                              dtype: torch.dtype = torch.bfloat16, **kwargs) -> 'TTSModel':
         assert checkpoint_info.raw_config is not None
@@ -425,7 +432,8 @@ class TTSModel:
     def generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],
                  attributes: tp.Sequence[ConditionAttributes],
                  prefixes: list[torch.Tensor] | None = None,
-                 cfg_is_no_prefix: bool = False,
+                 cfg_is_no_prefix: bool = True,
+                 cfg_is_no_text: bool = True,
                  **kwargs
                  ) -> TTSResult:
         """Synthesize text to audio. Returns a `TTSResult`.
@@ -436,6 +444,7 @@ class TTSModel:
             attributes: list of `ConditionAttributes` for speaker conditioning.
             prefixes: this should be the list of the lengths up until when to mask for the CFG.
             cfg_is_no_prefix: if true, the null logits are computed with a masked prefix.
+            cfg_is_no_text: if true, the null logits are computed without the text.
             **kwargs: passed to `moshi.models.lm.LMGen`.
         """
 
@@ -449,14 +458,16 @@ class TTSModel:
         self.lm.forward_text = _main_wrapper
 
         try:
-            return self._generate(all_entries, attributes, prefixes, cfg_is_no_prefix, **kwargs)
+            return self._generate(all_entries, attributes, prefixes,
+                                  cfg_is_no_prefix, cfg_is_no_text, **kwargs)
         finally:
             self.lm.forward_text = original
 
     def _generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],
                   attributes: tp.Sequence[ConditionAttributes],
                   prefixes: list[torch.Tensor] | None = None,
-                  cfg_is_no_prefix: bool = False, **kwargs):
+                  cfg_is_no_prefix: bool = True, cfg_is_no_text: bool = True,
+                  **kwargs):
 
         if self.cfg_coef != 1.0:
             if self.valid_cfg_conditionings:
@@ -480,36 +491,35 @@ class TTSModel:
         audio_prefixes = None
         device = self.lm.device
         if prefixes is not None:
+            assert len(all_entries) == len(prefixes), f"Not enough prefixes, expected {len(all_entries)}."
             if cfg_is_no_prefix:
                 cfg_is_masked_until = []
             text_prefixes = []
             audio_prefixes = []
             for prefix in prefixes:
                 if cfg_is_masked_until is not None:
-                    cfg_is_masked_until.append(len(prefix) + self.delay_steps)
+                    cfg_is_masked_until.append(prefix.shape[-1] + self.delay_steps)
                 K, _ = prefix.shape
                 assert K == self.lm.num_codebooks
                 text_prefixes.append(deque(prefix[0].cpu().tolist()))
-                delays = [d + self.delay_steps for d in self.lm.delays[1:]]
-                delayed = _delayed(self.machine.token_ids, prefix[1:], delays)
+                delays = [d + self.delay_steps for d in self.lm.delays[self.lm.audio_offset:]]
+                delayed = _delayed(prefix[self.lm.audio_offset:], delays, self.machine.token_ids.ungenerated)
                 delayed = delayed.to(device)
                 audio_prefixes.append(deque(delayed.t()))
 
-            prefixes = [
-                _delayed(self.machine.token_ids, prefix, self.lm.delays)
-                for prefix in prefixes
-            ]
-
         def _on_audio_hook(audio_tokens):
+            audio_offset = self.lm.audio_offset
+            delays = self.lm.delays
+            ungenerated = self.machine.token_ids.ungenerated
             for q in range(audio_tokens.shape[1]):
-                delay = self.lm.delays[q + 1]
+                delay = delays[q + audio_offset]
                 if offset < delay + self.delay_steps:
                     audio_tokens[:, q] = self.machine.token_ids.zero
             if audio_prefixes is not None:
                 for b, audio_prefix in enumerate(audio_prefixes):
                     if audio_prefix:
                         audio_codes = audio_prefix.popleft()
-                        mask = audio_codes != self.machine.token_ids.ungenerated
+                        mask = audio_codes != ungenerated
                         audio_tokens[b] = torch.where(mask, audio_codes, audio_tokens[b])
 
         def _on_text_hook(text_tokens):
@@ -519,16 +529,17 @@ class TTSModel:
                 if text_prefixes is not None and text_prefixes[b]:
                     out_token = text_prefixes[b].popleft()
                 else:
-                    out_token = self.machine.process(offset, state, token)
+                    out_token, _ = self.machine.process(offset, state, token)
                 out_tokens.append(out_token)
                 logged.append((token, out_token))
             text_tokens[:] = torch.tensor(out_tokens, dtype=torch.long, device=text_tokens.device)
 
         self.lm.dep_q = self.n_q
         lm_gen = LMGen(
-            self.lm, temp=self.temp, temp_text=self.temp, cfg_coef=self.cfg_coef,
-            condition_tensors=condition_tensors, on_text_hook=_on_text_hook,
-            on_audio_hook=_on_audio_hook, cfg_is_masked_until=cfg_is_masked_until,
+            self.lm, temp=self.temp, temp_text=self.temp,
+            cfg_coef=self.cfg_coef, condition_tensors=condition_tensors,
+            on_text_hook=_on_text_hook, on_audio_hook=_on_audio_hook,
+            cfg_is_masked_until=cfg_is_masked_until, cfg_is_no_text=cfg_is_no_text,
             **kwargs)
 
         logged_text_tokens = [[] for _ in states]
