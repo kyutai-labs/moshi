@@ -267,14 +267,13 @@ def script_to_entries(tokenizer: SentencePieceProcessor, token_ids: TokenIds, fr
     """
     speaker_tokens = [token_ids.main, token_ids.other]
     last_speaker = None
-    opened_main = False
     entries = []
 
     # break is indicated as e.g. <break time="3s"/>
     event_re = re.compile(r"(?:<break\s+time=\"([0-9]+(?:.[0-9]*)?)s\"\s*/?>)|(?:\s+)")
 
     def _add_entry(idx: int, word: str):
-        nonlocal first_content, opened_main, last_speaker
+        nonlocal first_content, last_speaker
         assert ' ' not in word
         assert word
         tokens = tokenizer.encode(word)  # type: ignore
