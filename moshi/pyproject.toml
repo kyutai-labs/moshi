@@ -24,6 +24,8 @@ readme = "README.md"
 [project.scripts]
 moshi-server = "moshi.server:main"
 moshi-client = "moshi.client:main"
+moshi-inference = "moshi.run_inference:main"
+moshi-tts = "moshi.run_tts:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "moshi.__version__"}
