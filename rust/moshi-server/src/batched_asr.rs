@@ -122,7 +122,7 @@ impl Logger {
     ) -> Result<Self> {
         let since_epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
         let (secs, us) = (since_epoch.as_secs(), since_epoch.subsec_micros());
-        let base_path = log_dir.as_ref().join(format!("{}-asr-{secs}-{us}", instance_name));
+        let base_path = log_dir.as_ref().join(format!("{instance_name}-asr-{secs}-{us}"));
         let (log_tx, log_rx) = std::sync::mpsc::channel::<(Tensor, Tensor)>();
         Ok(Self { base_path, log_tx, log_rx, log_frequency_s })
     }
