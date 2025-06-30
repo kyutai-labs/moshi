@@ -1,6 +1,11 @@
 # Copyright (c) Kyutai, all rights reserved.
 """
 Implements the logic for the state machine around the Delayed Streams Modeling (DSM) based TTS model.
+Things are more compelx than for STT models, where we can simply force feed the audio tokens and
+sample the text ones. For TTS we start from pure text, not text properly padded with time alignment.
+We co-generate the padded text sequence along with the audio output from the original text by
+having the model signal us when it thinks the next step will be the start of a word. We then pop a word
+to feed and feed it the token representation of the word over the next few steps.
 """
 
 from collections import deque
@@ -20,7 +25,7 @@ from ..conditioners.text import LUTConditioner
 from . import loaders, MimiModel, LMModel, LMGen
 
 
-DEFAULT_DSM_TTS_REPO = "alex-testing/dsm-tts-rc"
+DEFAULT_DSM_TTS_REPO = "kyutai/tts-1.6b-en_fr"
 DEFAULT_DSM_TTS_VOICE_REPO = 'alex-testing/dsm-tts-rc-voices'
 
 
@@ -28,23 +33,23 @@ DEFAULT_DSM_TTS_VOICE_REPO = 'alex-testing/dsm-tts-rc-voices'
 class TokenIds:
     """
     The token ids for special tokens:
-        - word: a new word is starting.
+        - card: text cardinality, including the initial token (1 + tokenizer cardinality).
+            This is used for multiplexing multiple input tokens into the text stream.
+        - new_word: a new word is starting.
         - pad: padding, nothing happens.
         - main: indicates the start of turn of the main speaker.
         - other: indicates the start of turn of the other speaker.
         - zero: special value that is embedded to exactly 0.
         - ungenerated: indicate that a value is not yet generated but should be
-        - card: text cardinality, including the initial token (1 + tokenizer cardinality).
-            This is used for multiplexing multiple input tokens into the text stream.
 
     """
-    word = 0
-    pad = 3
-    main = 1
-    other = 2
-    zero = -1
-    ungenerated = -2
-    card: int = 8001
+    card: int
+    new_word: int = 0
+    pad: int = 3
+    main: int = 1
+    other: int = 2
+    zero: int = -1
+    ungenerated: int = -2
 
 
 @dataclass
@@ -53,13 +58,13 @@ class Entry:
 
     Args:
         tokens: list of tokens for this word.
-        word: word as string.
-        padding: if > 0, we will force that many padding after the word.
-            To have an effect this should be more than len(tokens), as we will
-            prevent new word until we have passed all the text tokens.
+        text: word as string.
+        padding: if > 0, we will prevent the model from sampling a new word for that
+            many steps after the current word. Note that even for `padding=0`, the model
+            will be forbidden to sample a new word until all the tokens for the current word are consumed.
         audio_tokens: is used when some audio should be used as a prefix in the model."""
     tokens: list[int]
-    word: str
+    text: str
     padding: int = 0
     audio_tokens: torch.Tensor | None = None
 
@@ -73,7 +78,7 @@ class State:
         remaining_padding: how many times the model can still sample a pad.
         forced_padding: how many times the model is still forced to sample a pad.
         queued: queue containing the main stream text tokens to feed.
-        lookahead: queue containing the lookahead text tokens to feed.
+        lookahead_queued: queue containing the lookahead text tokens to feed.
         end_step: once we reach the end of the generation, this is set to the current step.
             The end of the generation is once the model samples a `word` but `entries` is empty.
         consumption_times: list of steps at which each entry in `entries` was consumed.
@@ -87,7 +92,7 @@ class State:
     remaining_padding: int
     forced_padding: int
     queued: deque[int] = field(default_factory=deque)
-    lookahead: deque[int] = field(default_factory=deque)
+    lookahead_queued: deque[int] = field(default_factory=deque)
     end_step: int | None = None
     consumption_times: list[int] = field(default_factory=list)
     transcript: list[tuple[str, int]] = field(default_factory=list)
@@ -106,8 +111,7 @@ def _delayed(codes: torch.Tensor, delays: list[int], fill_value: int) -> torch.T
     # Apply the acoustic delay on the provided audio tokens.
     K, T = codes.shape
     out = torch.full((K, T + max(delays)), fill_value, device=codes.device, dtype=torch.long)
-    for k in range(K):
-        delay = delays[k]
+    for k, delay in enumerate(delays):
         out[k, delay: delay + T] = codes[k]
     return out
 
@@ -128,13 +132,13 @@ class StateMachine:
     Args:
         token_ids: special token values.
         second_stream_ahead: if > 0, the model needs a second stream for lookahead.
-        max_padding: maximum number of padding token that can be sampled in a row.
+        max_padding: maximum number of padding tokens that can be sampled in a row.
         initial_padding: number of padding tokens at the beginning, to prevent the first
             word from being cut.
 
     """
 
-    token_ids: TokenIds = field(default_factory=TokenIds)
+    token_ids: TokenIds
     second_stream_ahead: int = 0
     max_padding: int = 6
     initial_padding: int = 2
@@ -142,7 +146,7 @@ class StateMachine:
     def new_state(self, entries: tp.Sequence[Entry]) -> State:
         state = State(
             entries=deque(entries),
-            lookahead=deque(),
+            lookahead_queued=deque(),
             remaining_padding=self.initial_padding,
             forced_padding=self.initial_padding,
         )
@@ -162,7 +166,7 @@ class StateMachine:
             - consumed_new_word: True if a new word was consumed.
         """
         consumed_new_word = False
-        if token not in [self.token_ids.word, self.token_ids.pad]:
+        if token not in [self.token_ids.new_word, self.token_ids.pad]:
             token = self.token_ids.pad
 
         if state.queued:
@@ -173,20 +177,20 @@ class StateMachine:
             token = self.token_ids.pad
         elif state.remaining_padding <= 0:
             # We are not allowed to pad, we must ask for a new WORD.
-            token = self.token_ids.word
+            token = self.token_ids.new_word
 
-        if token == self.token_ids.word:
+        if token == self.token_ids.new_word:
             if state.entries:
                 entry = state.entries.popleft()
                 state.consumption_times.append(step)
                 if entry.tokens:
                     consumed_new_word = True
-                    state.transcript.append((entry.word, step))
+                    state.transcript.append((entry.text, step))
                     # We queue the tokens to be fed to the model.
                     state.queued.extend(entry.tokens)
                     if self.second_stream_ahead:
                         # We queue the tokens for the N+lookahead word into the second text stream.
-                        state.lookahead.extend(state.get_tokens_ahead(self.second_stream_ahead))
+                        state.lookahead_queued.extend(state.get_tokens_ahead(self.second_stream_ahead))
                     # Entry contains a new word, we reset the max padding counter.
                     state.remaining_padding = self.max_padding
                 else:
@@ -196,7 +200,7 @@ class StateMachine:
             else:
                 token = self.token_ids.pad
                 if self.second_stream_ahead and state.end_step is None:
-                    token = self.token_ids.word
+                    token = self.token_ids.new_word
                 # Trying to consume past the last word, we reached the end.
                 if state.end_step is None:
                     state.end_step = step
@@ -213,8 +217,8 @@ class StateMachine:
                 output = state.queued.popleft()
             else:
                 output = self.token_ids.pad
-        elif token == self.token_ids.word:
-            output = self.token_ids.word
+        elif token == self.token_ids.new_word:
+            output = self.token_ids.new_word
         elif token == self.token_ids.zero:
             output = token
         else:
@@ -222,20 +226,21 @@ class StateMachine:
 
         if self.second_stream_ahead:
             second = -1
-            if output == self.token_ids.word:
+            if output == self.token_ids.new_word:
                 # If sampled the `word` special token, we put it on the
                 # second text stream instead of the main one.
-                second = self.token_ids.word
+                second = self.token_ids.new_word
                 if state.queued:
                     # This allows us to pass the current word tokens faster.
                     output = state.queued.popleft()
                 else:
                     output = self.token_ids.pad
-            elif state.lookahead:
+            elif state.lookahead_queued:
                 # Otherwise if we have some lookahead tokens we feed them.
-                second = state.lookahead.popleft()
+                second = state.lookahead_queued.popleft()
             # Then we multiplex the two tokens. We add `+1` to `second` so that
             # we can encode -1, which would translate to an all 0s embedding.
+            # This will get de-multiplexed in the embedding in lm.py.
             output = (second + 1) * self.token_ids.card + output
 
         assert output is not None
@@ -268,7 +273,7 @@ def script_to_entries(tokenizer: SentencePieceProcessor, token_ids: TokenIds, fr
     # break is indicated as e.g. <break time="3s"/>
     event_re = re.compile(r"(?:<break\s+time=\"([0-9]+(?:.[0-9]*)?)s\"\s*/?>)|(?:\s+)")
 
-    def _add_entry(word: str):
+    def _add_entry(idx: int, word: str):
         nonlocal first_content, opened_main, last_speaker
         assert ' ' not in word
         assert word
@@ -282,12 +287,12 @@ def script_to_entries(tokenizer: SentencePieceProcessor, token_ids: TokenIds, fr
         padding = 0
         if padding_between > 0:
             padding = max(0, padding_between + len(tokens) - 1)
-        entries.append(Entry(tokens=tokens, word=word, padding=padding))
+        entries.append(Entry(tokens=tokens, text=word, padding=padding))
 
     for idx, line in enumerate(script):
         first_content = True
         line = line.replace('’', "'")
-        line = line.replace(' : ', " ")
+        line = line.replace(':', " ")
         line = line.replace('(', "")
         line = line.replace(')', "")
         while line:
@@ -297,14 +302,14 @@ def script_to_entries(tokenizer: SentencePieceProcessor, token_ids: TokenIds, fr
             word = line[:match.start()]
             line = line[match.end():]
             if word:
-                _add_entry(word)
+                _add_entry(idx, word)
             if match.group(1):
                 break_duration = float(match.group(1))
                 padding = int(round(break_duration * frame_rate))
-                entry = Entry(tokens=[], word='', padding=padding)
+                entry = Entry(tokens=[], text='', padding=padding)
                 entries.append(entry)
         if line:
-            _add_entry(line)
+            _add_entry(idx, line)
     return entries
 
 
@@ -391,7 +396,7 @@ class TTSModel:
         tokenizer = checkpoint_info.get_text_tokenizer()
         lm = checkpoint_info.get_moshi(device=device, dtype=dtype)
 
-        token_ids = TokenIds()
+        token_ids = TokenIds(lm.text_card + 1)
         delay_steps = int(checkpoint_info.tts_config['audio_delay'] * mimi.frame_rate)
         second_stream_ahead = checkpoint_info.tts_config.get('second_stream_ahead', 0)
 
@@ -451,7 +456,7 @@ class TTSModel:
         def _main_wrapper(*args, **kwargs):
             transformer_out, text_logits = original(*args, **kwargs)
             if self.padding_bonus:
-                text_logits[..., 3] += self.padding_bonus
+                text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
             return transformer_out, text_logits
 
         original = self.lm.forward_text
