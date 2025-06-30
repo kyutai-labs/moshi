@@ -98,7 +98,7 @@ impl Logger {
         let audio_tokens = Tensor::cat(&audio_tokens, candle::D::Minus1)?;
         let since_epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
         let (secs, us) = (since_epoch.as_secs(), since_epoch.subsec_micros());
-        let base_path = log_dir.as_ref().join(format!("{}-tts-{secs}-{us}", instance_name));
+        let base_path = log_dir.as_ref().join(format!("{instance_name}-tts-{secs}-{us}"));
         let json_filename = base_path.with_extension("json");
         let query = QueryWithTexts { query, texts };
         let json_content = serde_json::to_string_pretty(&query)?;

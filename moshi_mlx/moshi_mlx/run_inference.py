@@ -57,7 +57,7 @@ def main():
     with open(hf_get(lm_config), "r") as fobj:
         lm_config = json.load(fobj)
     print(lm_config)
-    model_type = lm_config.get("model_type", "moshi")
+    stt_config = lm_config.get("stt_config", None)
 
     mimi_weights = args.mimi_weights
     if mimi_weights is None:
@@ -91,8 +91,12 @@ def main():
 
     log("info", f"loading input file {args.infile}")
     in_pcms, _ = sphn.read(args.infile, sample_rate=24000)
-    if model_type == "stt":
-        in_pcms = np.pad(in_pcms, pad_width=[(0, 0), (0, 1920 * 30)], mode="constant")
+    if stt_config is not None:
+        pad_right = stt_config.get("audio_delay_seconds", 0.0)
+        pad_left = stt_config.get("audio_silence_prefix_seconds", 0.0)
+        pad_left = int(pad_left * 24000)
+        pad_right = int((pad_right + 1.0) * 24000)
+        in_pcms = np.pad(in_pcms, pad_width=[(0, 0), (pad_left, pad_right)], mode="constant")
 
     log("info", f"loading the audio tokenizer {mimi_weights}")
     generated_codebooks = lm_config.generated_codebooks

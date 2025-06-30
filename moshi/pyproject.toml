@@ -5,7 +5,7 @@ description = "Moshi is moshi"
 dependencies = [
     "numpy >= 1.26, < 2.3",
     "safetensors >= 0.4.0, < 0.6",
-    "huggingface-hub >= 0.24, < 0.29",
+    "huggingface-hub >= 0.24, < 0.34",
     "bitsandbytes >= 0.45, < 0.46; sys_platform == 'linux'",
     "einops >= 0.7, < 0.9",
     "sentencepiece == 0.2",
