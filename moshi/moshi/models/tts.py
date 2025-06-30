@@ -1,7 +1,7 @@
 # Copyright (c) Kyutai, all rights reserved.
 """
 Implements the logic for the state machine around the Delayed Streams Modeling (DSM) based TTS model.
-Things are more compelx than for STT models, where we can simply force feed the audio tokens and
+Things are more complex than for STT models, where we can simply force feed the audio tokens and
 sample the text ones. For TTS we start from pure text, not text properly padded with time alignment.
 We co-generate the padded text sequence along with the audio output from the original text by
 having the model signal us when it thinks the next step will be the start of a word. We then pop a word
@@ -25,8 +25,8 @@ from ..conditioners.text import LUTConditioner
 from . import loaders, MimiModel, LMModel, LMGen
 
 
-DEFAULT_DSM_TTS_REPO = "kyutai/tts-1.6b-en_fr"
-DEFAULT_DSM_TTS_VOICE_REPO = 'alex-testing/dsm-tts-rc-voices'
+DEFAULT_DSM_TTS_REPO = 'kyutai/tts-1.6b-en_fr'
+DEFAULT_DSM_TTS_VOICE_REPO = 'kyutai/tts-voices'
 
 
 @dataclass
