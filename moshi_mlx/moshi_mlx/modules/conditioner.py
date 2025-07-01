@@ -13,6 +13,19 @@ import mlx.nn as nn
 
 
 @dataclass
+class TensorConditionerConfig:
+    dim: int
+
+
+class TensorConditioner(nn.Module):
+    def __init__(self, output_dim: int, cfg: TensorConditionerConfig):
+        super().__init__()
+
+        self.output_proj = nn.Linear(cfg.dim, output_dim, bias=False)
+        self.learnt_padding = mx.zeros((1, 1, output_dim))
+
+
+@dataclass
 class LutConditionerConfig:
     n_bins: int
     dim: int
@@ -44,8 +57,16 @@ class ConditionTensor:
     tensor: mx.array
 
 class ConditionProvider(nn.Module):
-    def __init__(self, output_dim: int, cfg: dict[str, LutConditionerConfig]):
-        self.conditioners = { name: LutConditioner(output_dim, c) for name, c in cfg.items() }
+    def __init__(self, output_dim: int, cfg: dict):
+        self.conditioners = {}
+        for name, c in cfg.items():
+            if isinstance(c, LutConditionerConfig):
+                cond = LutConditioner(output_dim, c)
+            elif isinstance(c, TensorConditionerConfig):
+                cond = TensorConditioner(output_dim, c)
+            else:
+                raise ValueError(f"unsupported config type {type(c)}")
+            self.conditioners[name] = cond
 
     def condition_tensor(self, name: str, value: str) -> ConditionTensor:
         if name not in self.conditioners:

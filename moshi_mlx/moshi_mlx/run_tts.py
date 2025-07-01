@@ -11,6 +11,7 @@ from pathlib import Path
 import time
 
 from huggingface_hub import hf_hub_download
+import numpy as np
 import mlx.core as mx
 import mlx.nn as nn
 import sphn
@@ -212,7 +213,7 @@ def main():
                 print(f"Warning: end step is None, generation failed for {request.id}")
                 wav_length = wavs.shape[-1]
             else:
-                wav_length = int((mimi.cfg.sample_rate * (end_step + tts_model.final_padding) / mimi.cfg.frame_rate))
+                wav_length = int((mimi.sample_rate * (end_step + tts_model.final_padding) / mimi.frame_rate))
             effective_duration += wav_length / mimi.sample_rate
             wav = wavs[idx, :, :wav_length]
             start_step = 0
@@ -222,13 +223,13 @@ def main():
                 wav = wav[:, start:]
             filename = args.out_folder / f"{request.id}.wav"
             debug_tensors = {'frames': frames[idx]}
-            sphn.write_wav(filename, wav.clamp(-1, 1).cpu().numpy(), mimi.cfg.sample_rate)
+            sphn.write_wav(filename, np.array(mx.clip(wav, -1, 1)), mimi.sample_rate)
             if not args.only_wav:
                 mx.save_safetensors(filename.with_suffix('.safetensors'), debug_tensors)
                 debug_info = {
                     'hf_repo': args.hf_repo,
                     'voice_repo': args.voice_repo,
-                    'model_id': checkpoint_info.model_id,
+                    'model_id': raw_config['model_id'],
                     'cfg_coef': tts_model.cfg_coef,
                     'temp': tts_model.temp,
                     'max_padding': tts_model.machine.max_padding,

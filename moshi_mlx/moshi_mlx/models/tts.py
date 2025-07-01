@@ -437,7 +437,7 @@ class TTSModel:
     def prepare_script(self, script: tp.Sequence[str], padding_between: int = 0) -> list[Entry]:
         """Wrapper around `script_to_entries`."""
         return script_to_entries(
-            self.tokenizer, self.machine.token_ids, self.mimi.cfg.frame_rate, script,
+            self.tokenizer, self.machine.token_ids, self.mimi.frame_rate, script,
             multi_speaker=self.multi_speaker, padding_between=padding_between)
 
     def generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],

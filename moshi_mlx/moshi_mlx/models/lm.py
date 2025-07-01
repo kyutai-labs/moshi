@@ -9,6 +9,7 @@ import mlx.nn as nn
 
 from ..modules.conditioner import (
     LutConditionerConfig,
+    TensorConditionerConfig,
     ConditionProvider,
     ConditionTensor,
 )
@@ -34,7 +35,7 @@ class LmConfig:
     audio_vocab_size: int
     audio_codebooks: int
     audio_delays: list[int]
-    conditioners: dict[str, LutConditionerConfig]
+    conditioners: dict[str, LutConditionerConfig | TensorConditionerConfig]
 
     @property
     def generated_codebooks(self):
@@ -104,15 +105,21 @@ class LmConfig:
         conditioners = {}
         if "conditioners" in data:
             for _name, _cfg in data["conditioners"].items():
-                if _cfg["type"] != "lut":
+                if _cfg["type"] == "lut":
+                    _cfg = _cfg["lut"]
+                    _cfg = LutConditionerConfig(
+                        n_bins=_cfg["n_bins"],
+                        dim=_cfg["dim"],
+                        tokenizer=_cfg["tokenizer"],
+                        possible_values=_cfg["possible_values"],
+                    )
+                elif _cfg["type"] == "tensor":
+                    _cfg = _cfg["tensor"]
+                    _cfg = TensorConditionerConfig(
+                        dim=_cfg["dim"],
+                    )
+                else:
                     raise ValueError(f"unsupported conditioner type {_cfg['type']}")
-                _cfg = _cfg["lut"]
-                _cfg = LutConditionerConfig(
-                    n_bins=_cfg["n_bins"],
-                    dim=_cfg["dim"],
-                    tokenizer=_cfg["tokenizer"],
-                    possible_values=_cfg["possible_values"],
-                )
                 conditioners[_name] = _cfg
         return LmConfig(
             transformer=transformer,

@@ -169,6 +169,14 @@ class Mimi(nn.Module):
         pcm_out = self.decode(codes)
         mx.eval(pcm_out)
 
+    @property
+    def frame_rate(self) -> float:
+        return self.cfg.frame_rate
+
+    @property
+    def sample_rate(self) -> float:
+        return self.cfg.sample_rate
+
     def load_pytorch_weights(
         self,
         file: str,
