@@ -59,7 +59,10 @@ class LmGen:
 
     # Runs one step of inference and return the generated text token.
     def step(
-        self, other_audio_tokens: mx.array, ct: ConditionTensor | None = None
+        self,
+        other_audio_tokens: mx.array,
+        ct: ConditionTensor | None = None,
+        cross_attention_src: mx.array | None = None,
     ) -> mx.array:
         if self.step_idx >= self.max_steps:
             raise ValueError(f"reached max-steps {self.max_steps}")
@@ -93,6 +96,7 @@ class LmGen:
             self.text_sampler,
             self.audio_sampler,
             ct=ct,
+            cross_attention_src=cross_attention_src,
             cfg_coef=self.cfg_coef,
             on_text_hook=self.on_text_hook,
             on_audio_hook=self.on_audio_hook,

@@ -479,6 +479,7 @@ class TTSModel:
 
         assert self.lm.condition_provider is not None
         ct = None
+        cross_attention_src = None
         print(attributes)
         for _attr in attributes:
             # TODO: handle _attr.tensor for the speaker cross-attention.
@@ -488,6 +489,8 @@ class TTSModel:
                     ct = _ct
                 else:
                     ct = ConditionTensor(ct.tensor + _ct.tensor)
+            for _key, _value in _attr.tensor.items():
+                print(">>>", _key, _value.tensor.shape)
 
         states = []
         for entries in all_entries:
@@ -554,7 +557,6 @@ class TTSModel:
 
         logged_text_tokens = [[] for _ in states]
         frames: list[mx.array] = []
-        ct = None
 
         for offset in range(self.max_gen_length):
             if all(state.end_step is not None for state in states):
@@ -563,7 +565,7 @@ class TTSModel:
                     break
             missing = self.lm.n_q - self.lm.dep_q
             input_tokens = mx.ones((len(states), missing), dtype=mx.int64) * self.machine.token_ids.zero
-            lm_gen.step(input_tokens, ct)
+            lm_gen.step(input_tokens, ct=ct, cross_attention_src=cross_attention_src)
             frame = lm_gen.last_audio_tokens()
             if frame is not None:
                 frames.append(mx.array(frame)[:, :, None])
