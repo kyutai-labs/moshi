@@ -70,9 +70,8 @@ class CrossAttention(nn.Module):
     def __call__(
         self,
         xs: mx.array,
-        cross_attention_src: None | mx.array,
+        cross_attention_src: mx.array,
     ) -> mx.array:
-        # TODO: use cross_attention_src
         assert self.cfg.kv_repeat == 1, "only kv_repeat==1 is supported"
 
         b, t, hd = xs.shape
@@ -80,9 +79,9 @@ class CrossAttention(nn.Module):
         qkv_w = self.in_proj.weight
         q = xs @ qkv_w[:self.cfg.d_model].T
         q = q.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
-        k = xs @ qkv_w[self.cfg.d_model:2*self.cfg.d_model].T
+        k = cross_attention_src @ qkv_w[self.cfg.d_model:2 * self.cfg.d_model].T
         k = k.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
-        v = xs @ qkv_w[2*self.cfg.d_model:].T
+        v = cross_attention_src @ qkv_w[2 * self.cfg.d_model:].T
         v = v.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
 
         k_len = k.shape[2]

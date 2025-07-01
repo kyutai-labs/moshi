@@ -20,8 +20,8 @@ class LmGen:
         audio_sampler: sampling.Sampler,
         cfg_coef: float = 1.0,
         check: bool = False,
-        on_text_hook = None,
-        on_audio_hook = None,
+        on_text_hook=None,
+        on_audio_hook=None,
     ):
         self.model: Lm = model
         self.text_sampler = text_sampler

@@ -48,7 +48,6 @@ def convert_pth(pth_t, lm_config: models.LmConfig):
         if k.startswith("condition_provider."):
             mlx_t[k] = v
 
-
     for slice_idx in range(lm_config.depformer.num_slices):
         pth_idx = slice_idx
         if lm_config.depformer.weights_per_step_schedule is not None:
@@ -62,15 +61,17 @@ def convert_pth(pth_t, lm_config: models.LmConfig):
                 if f"depformer_text_emb.{_n}.weight" in pth_t:
                     mlx_t[f"{slice_p}.emb.{_n}.weight"] = pth_t[f"depformer_text_emb.{_n}.weight"]
         else:
-            mlx_t[f"{slice_p}.emb.weight"] = pth_t[f"depformer_emb.{slice_idx-1}.weight"]
-            if f"depformer_emb.{slice_idx-1}.low_rank.weight" in pth_t:
-                mlx_t[f"{slice_p}.emb.low_rank.weight"] = pth_t[f"depformer_emb.{slice_idx-1}.low_rank.weight"]
+            mlx_t[f"{slice_p}.emb.weight"] = pth_t[f"depformer_emb.{slice_idx - 1}.weight"]
+            if f"depformer_emb.{slice_idx - 1}.low_rank.weight" in pth_t:
+                mlx_t[f"{slice_p}.emb.low_rank.weight"] = pth_t[f"depformer_emb.{slice_idx - 1}.low_rank.weight"]
         for layer_idx in range(lm_config.depformer.transformer.num_layers):
             p = f"{slice_p}.transformer.layers.{layer_idx}"
             mlx_t[f"{p}.norm1.weight"] = pth_t[f"depformer.layers.{layer_idx}.norm1.alpha"][0, 0]
             mlx_t[f"{p}.norm2.weight"] = pth_t[f"depformer.layers.{layer_idx}.norm2.alpha"][0, 0]
-            mlx_t[f"{p}.gating.linear_in.weight"] = pth_t[f"depformer.layers.{layer_idx}.gating.{pth_idx}.linear_in.weight"]
-            mlx_t[f"{p}.gating.linear_out.weight"] = pth_t[f"depformer.layers.{layer_idx}.gating.{pth_idx}.linear_out.weight"]
+            mlx_t[f"{p}.gating.linear_in.weight"] = (
+                pth_t[f"depformer.layers.{layer_idx}.gating.{pth_idx}.linear_in.weight"])
+            mlx_t[f"{p}.gating.linear_out.weight"] = (
+                pth_t[f"depformer.layers.{layer_idx}.gating.{pth_idx}.linear_out.weight"])
             mlx_t[f"{p}.self_attn.in_proj.weight"] = mx.split(
                 pth_t[f"depformer.layers.{layer_idx}.self_attn.in_proj_weight"], depformer_chunks
             )[pth_idx]

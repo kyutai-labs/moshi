@@ -370,8 +370,8 @@ class Lm(nn.Module):
         audio_sampler: sampling.Sampler,
         ct: ConditionTensor | None = None,
         cfg_coef: float = 1.0,
-        on_text_hook = None,
-        on_audio_hook = None,
+        on_text_hook=None,
+        on_audio_hook=None,
     ) -> tuple[mx.array, mx.array | None]:
         xs = self.text_emb(text_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
