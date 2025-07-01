@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 import mlx.nn as nn
+from numpy import cross
 
 from ..modules.conditioner import (
     LutConditionerConfig,
@@ -343,10 +344,11 @@ class Lm(nn.Module):
     def forward_text(
         self,
         token_ids: mx.array,
+        cross_attention_src: None | mx.array = None,
     ) -> tuple[mx.array, mx.array]:
         # Note that this does not apply the depformer.
         xs = self.text_emb(token_ids)
-        transformer_out = self.transformer(xs, cache=self.transformer_cache)
+        transformer_out = self.transformer(xs, cache=self.transformer_cache, cross_attention_src=cross_attention_src)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
         return (transformer_out, text_logits)
@@ -354,10 +356,11 @@ class Lm(nn.Module):
     def __call__(
         self,
         token_ids: mx.array,
+        cross_attention_src: None | mx.array = None,
     ) -> mx.array:
         # Note that this does not apply the depformer.
         xs = self.text_emb(token_ids)
-        transformer_out = self.transformer(xs, cache=self.transformer_cache)
+        transformer_out = self.transformer(xs, cache=self.transformer_cache, cross_attention_src=cross_attention_src)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
         return text_logits
@@ -369,6 +372,7 @@ class Lm(nn.Module):
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
         ct: ConditionTensor | None = None,
+        cross_attention_src: None | mx.array = None,
         cfg_coef: float = 1.0,
         on_text_hook=None,
         on_audio_hook=None,
@@ -381,7 +385,11 @@ class Lm(nn.Module):
 
         if cfg_coef != 1:
             xs = mx.tile(xs, (2, 1, 1))
-        transformer_out = self.transformer(xs, cache=self.transformer_cache)
+        transformer_out = self.transformer(
+            xs,
+            cache=self.transformer_cache,
+            cross_attention_src=cross_attention_src,
+        )
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
         if cfg_coef != 1:

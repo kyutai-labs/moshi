@@ -3,6 +3,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass
+
 from .kv_cache import KVCache, RotatingKVCache
 
 import mlx.core as mx
@@ -72,6 +73,7 @@ class CrossAttention(nn.Module):
         xs: mx.array,
         cross_attention_src: mx.array,
     ) -> mx.array:
+        # TODO: Add some cross-attention kv caching.
         assert self.cfg.kv_repeat == 1, "only kv_repeat==1 is supported"
 
         b, t, hd = xs.shape
@@ -202,6 +204,8 @@ class TransformerLayer(nn.Module):
             # Always use layer-norm for the cross-attention.
             self.norm_cross = nn.LayerNorm(cfg.d_model, 1e-5)
             self.cross_attention = CrossAttention(cfg)
+        else:
+            self.cross_attention = None
 
     def _cross_attention_block(self, x: mx.array, cross_attention_src: mx.array) -> mx.array:
         assert self.cross_attention is not None
@@ -239,9 +243,10 @@ class Transformer(nn.Module):
         self,
         xs: mx.array,
         cache: list[KVCache] | list[RotatingKVCache],
+        cross_attention_src: None | mx.array = None,
     ) -> mx.array:
         for layer, c in zip(self.layers, cache):
-            xs = layer(xs, cache=c)
+            xs = layer(xs, cache=c, cross_attention_src=cross_attention_src)
         return xs
 
     def make_cache(self) -> list[KVCache]:
@@ -287,12 +292,13 @@ class ProjectedTransformer(nn.Module):
         self,
         xs: mx.array,
         cache: list[KVCache] | list[RotatingKVCache],
+        cross_attention_src: None | mx.array = None,
     ) -> list[mx.array]:
         if self.conv_layout:
             xs = xs.swapaxes(1, 2)
         if self.input_proj is not None:
             xs = self.input_proj(xs)
-        xs = self.transformer(xs, cache=cache)
+        xs = self.transformer(xs, cache=cache, cross_attention_src=cross_attention_src)
         outs = []
         for output_proj in self.output_projs:
             if output_proj is None:
