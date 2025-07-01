@@ -507,13 +507,12 @@ class TTSModel:
                 audio_prefixes.append(deque(delayed.t()))
 
         def _on_audio_hook(audio_tokens):
-            audio_offset = self.lm.audio_offset
             delays = self.lm.delays
             ungenerated = self.machine.token_ids.ungenerated
-            for q in range(audio_tokens.shape[1]):
-                delay = delays[q + audio_offset]
+            for q in range(audio_tokens.shape[0]):
+                delay = delays[q]
                 if offset < delay + self.delay_steps:
-                    audio_tokens[:, q] = self.machine.token_ids.zero
+                    audio_tokens[q] = self.machine.token_ids.zero
             if audio_prefixes is not None:
                 for b, audio_prefix in enumerate(audio_prefixes):
                     if audio_prefix:
@@ -557,9 +556,10 @@ class TTSModel:
                     break
             missing = self.lm.n_q - self.lm.dep_q
             input_tokens = mx.ones((len(states), missing), dtype=mx.int64) * self.machine.token_ids.zero
-            frame = lm_gen.step(input_tokens)
+            lm_gen.step(input_tokens)
+            frame = lm_gen.last_audio_tokens()
             if frame is not None:
-                frames.append(mx.array(frame))
+                frames.append(mx.array(frame)[:, :, None])
         return TTSResult(
             frames, logged_text_tokens,
             [state.end_step for state in states],

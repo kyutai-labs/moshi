@@ -72,7 +72,6 @@ def main():
     parser.add_argument("--moshi-weights", type=str, help="Path to a local checkpoint file for Moshi.")
 
     # The following flags will customize generation.
-    parser.add_argument("--batch-size", type=int, default=32, help="Batch size to be used for inference.")
     parser.add_argument("--nq", type=int, default=32, help="Number of codebooks to generate.")
     parser.add_argument("--temp", type=float, default=0.6, help="Temperature for text and audio.")
     parser.add_argument("--cfg-coef", type=float, default=2., help="CFG coefficient.")
@@ -228,7 +227,7 @@ def main():
             debug_tensors = {'frames': frames[idx]}
             sphn.write_wav(filename, np.array(mx.clip(wav, -1, 1)), mimi.sample_rate)
             if not args.only_wav:
-                mx.save_safetensors(filename.with_suffix('.safetensors'), debug_tensors)
+                mx.save_safetensors(str(filename.with_suffix('.safetensors')), debug_tensors)
                 debug_info = {
                     'hf_repo': args.hf_repo,
                     'voice_repo': args.voice_repo,
@@ -272,8 +271,8 @@ def main():
             data = json.loads(line)
             batch.append(TTSRequest(**data))
 
-            if len(batch) >= args.batch_size:
-                _flush()
+            # We currently only support a batch size of 1 in the mlx implementation.
+            _flush()
     if batch:
         _flush()
 
