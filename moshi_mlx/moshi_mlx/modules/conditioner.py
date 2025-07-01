@@ -71,6 +71,30 @@ class ConditionAttributes:
         return ConditionAttributes(dict(self.text), dict(self.tensor))
 
 
+def create_sin_embedding(
+    positions: mx.array,
+    dim: int,
+    max_period: float = 10000,
+    dtype: mx.Dtype = mx.float32,
+    ) -> mx.array:
+    """Create sinusoidal positional embedding, with shape `[B, T, C]`.
+
+    Args:
+        positions (torch.Tensor): LongTensor of positions.
+        dim (int): Dimension of the embedding.
+        max_period (float): Maximum period of the cosine/sine functions.
+        dtype (torch.dtype or str): dtype to use to generate the embedding.
+    Returns:
+        torch.Tensor: Sinusoidal positional embedding.
+    """
+    # We aim for BTC format
+    assert dim % 2 == 0
+    half_dim = dim // 2
+    positions = positions.astype(dtype)
+    adim = mx.arange(half_dim, dtype=dtype).reshape(1, 1, -1)
+    phase = positions / (max_period ** (adim / (half_dim - 1)))
+    return mx.concat([mx.cos(phase), mx.sin(phase)], axis=-1)
+
 
 @dataclass
 class TensorConditionerConfig:
@@ -90,7 +114,10 @@ class TensorConditioner(nn.Module):
         mask = mask.astype(cond.dtype)
         mask = mx.expand_dims(mask, axis=-1)
         cond = cond * mask + self.learnt_padding * (1 - mask)
-        return cond
+        # sin embeddings
+        pos = mx.arange(cond.shape[1])[None, :, None]
+        emb = create_sin_embedding(pos, cond.shape[-1]).astype(cond.dtype)
+        return cond + emb
 
 
 @dataclass
