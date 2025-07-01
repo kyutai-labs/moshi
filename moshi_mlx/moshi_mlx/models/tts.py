@@ -511,7 +511,7 @@ class TTSModel:
                 text_prefixes.append(deque(prefix[0].tolist()))
                 delays = [d + self.delay_steps for d in self.lm.delays[self.lm.audio_offset:]]
                 delayed = _delayed(prefix[self.lm.audio_offset:], delays, self.machine.token_ids.ungenerated)
-                audio_prefixes.append(deque(delayed.t()))
+                audio_prefixes.append(deque(delayed.T))
 
         def _on_audio_hook(audio_tokens):
             delays = self.lm.delays

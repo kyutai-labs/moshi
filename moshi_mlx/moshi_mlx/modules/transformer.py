@@ -76,10 +76,14 @@ class CrossAttention(nn.Module):
         assert self.cfg.kv_repeat == 1, "only kv_repeat==1 is supported"
 
         b, t, hd = xs.shape
-        qkv = self.in_proj(xs).reshape(b, t, 3, self.cfg.num_heads, self.cfg.head_dim)
-        q = qkv[:, :, 0].transpose(0, 2, 1, 3)
-        k = qkv[:, :, 1].transpose(0, 2, 1, 3)
-        v = qkv[:, :, 2].transpose(0, 2, 1, 3)
+        assert "bias" not in self.in_proj
+        qkv_w = self.in_proj.weight
+        q = xs @ qkv_w[:self.cfg.d_model].T
+        q = q.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
+        k = xs @ qkv_w[self.cfg.d_model:2*self.cfg.d_model].T
+        k = k.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
+        v = xs @ qkv_w[2*self.cfg.d_model:].T
+        v = v.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
 
         k_len = k.shape[2]
         k_target_len = t + min(self.cfg.context, k_len - t)
@@ -200,12 +204,11 @@ class TransformerLayer(nn.Module):
             self.norm_cross = nn.LayerNorm(cfg.d_model, 1e-5)
             self.cross_attention = CrossAttention(cfg)
 
-    def _cross_attention_block(self, x: mx.array,
-                               cross_attention_src: mx.array) -> mx.array:
+    def _cross_attention_block(self, x: mx.array, cross_attention_src: mx.array) -> mx.array:
         assert self.cross_attention is not None
         x_orig = x
         x = self.norm_cross(x)
-        update = self.cross_attention(x) # TODO: cross_attention_src, cross_attention_src)
+        update = self.cross_attention(x, cross_attention_src)
         return x_orig + update
 
     def __call__(
