@@ -291,7 +291,6 @@ class Lm(nn.Module):
         self.text_emb = ScaledEmbedding(
             cfg.text_in_vocab_size,
             dim,
-            low_rank=cfg.depformer.low_rank_embeddings,
             demux_second_stream=cfg.demux_second_stream
         )
         self.cfg: LmConfig = cfg
