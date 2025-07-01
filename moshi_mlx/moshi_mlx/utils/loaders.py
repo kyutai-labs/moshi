@@ -25,5 +25,3 @@ def hf_get(filename: str | Path, hf_repo: str | None = None,
         return Path(hf_hub_download(hf_repo, filename))
     else:
         return Path(filename)
-
-

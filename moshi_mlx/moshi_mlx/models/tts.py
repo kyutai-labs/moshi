@@ -22,7 +22,8 @@ from sentencepiece import SentencePieceProcessor
 import sphn
 
 from . import Lm, LmGen
-from ..modules.conditioner import ConditionAttributes, LutConditioner, dropout_all_conditions, TensorCondition
+from ..modules.conditioner import (
+    ConditionAttributes, LutConditioner, dropout_all_conditions, TensorCondition, ConditionTensor)
 from .mimi import Mimi
 from ..utils.loaders import hf_get
 from ..utils.sampling import Sampler
@@ -477,11 +478,16 @@ class TTSModel:
             attributes = list(attributes) + nulled
 
         assert self.lm.condition_provider is not None
-        condition_tensors = {}
+        ct = None
+        print(attributes)
         for _attr in attributes:
+            # TODO: handle _attr.tensor for the speaker cross-attention.
             for _key, _value in _attr.text.items():
                 _ct = self.lm.condition_provider.condition_tensor(_key, _value)
-                condition_tensors[_key] = _ct
+                if ct is None:
+                    ct = _ct
+                else:
+                    ct = ConditionTensor(ct.tensor + _ct.tensor)
 
         states = []
         for entries in all_entries:
@@ -542,13 +548,13 @@ class TTSModel:
             on_text_hook=_on_text_hook,
             on_audio_hook=_on_audio_hook,
             # TODO:
-            # condition_tensors=condition_tensors,
             # cfg_is_masked_until=cfg_is_masked_until,
             # cfg_is_no_text=cfg_is_no_text,
         )
 
         logged_text_tokens = [[] for _ in states]
         frames: list[mx.array] = []
+        ct = None
 
         for offset in range(self.max_gen_length):
             if all(state.end_step is not None for state in states):
@@ -557,7 +563,7 @@ class TTSModel:
                     break
             missing = self.lm.n_q - self.lm.dep_q
             input_tokens = mx.ones((len(states), missing), dtype=mx.int64) * self.machine.token_ids.zero
-            lm_gen.step(input_tokens)
+            lm_gen.step(input_tokens, ct)
             frame = lm_gen.last_audio_tokens()
             if frame is not None:
                 frames.append(mx.array(frame)[:, :, None])
