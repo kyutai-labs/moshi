@@ -570,7 +570,8 @@ class TTSModel:
             input_tokens = mx.ones((len(states), missing), dtype=mx.int64) * self.machine.token_ids.zero
             lm_gen.step(input_tokens, ct=ct, cross_attention_src=cross_attention_src)
             frame = lm_gen.last_audio_tokens()
-            if frame is not None:
+            if frame is not None and (frame != self.machine.token_ids.zero).all():
+                print(frame)
                 frames.append(mx.array(frame)[:, :, None])
         return TTSResult(
             frames, logged_text_tokens,
