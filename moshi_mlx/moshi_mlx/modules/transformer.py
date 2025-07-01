@@ -89,12 +89,6 @@ class CrossAttention(nn.Module):
         v = cross_attention_src @ qkv_w[2 * self.cfg.d_model:].T
         v = v.reshape(b, t_kv, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
 
-        k_len = k.shape[2]
-        k_target_len = t + min(self.cfg.context, k_len - t)
-        if k_target_len < k_len:
-            k = k[:, :, k_len - k_target_len :]
-            v = v[:, :, k_len - k_target_len :]
-
         xs = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale)
         xs = xs.transpose(0, 2, 1, 3).reshape(b, t, hd)
         xs = self.out_proj(xs)
