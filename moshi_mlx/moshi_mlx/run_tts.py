@@ -248,7 +248,7 @@ def main():
               f"total speed {total_speed:.2f}x")
 
         wav_frames = []
-        for frame in result.frames[tts_model.delay_steps:]:
+        for frame in result.frames:
             # We are processing frames one by one, although we could group them to improve speed.
             wav_frames.append(tts_model.mimi.decode_step(frame))
         wavs = mx.concat(wav_frames, axis=-1)

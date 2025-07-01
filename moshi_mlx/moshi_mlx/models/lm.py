@@ -397,6 +397,7 @@ class Lm(nn.Module):
             text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
 
         text_token, _ = text_sampler(text_logits[:, 0])
+        text_token = text_token.astype(mx.int32)
         if on_text_hook is not None:
             on_text_hook(text_token)
         if len(self.depformer.slices) > 0:
@@ -406,7 +407,7 @@ class Lm(nn.Module):
                 text_token,
                 self.depformer_cache,
                 cfg_coef=cfg_coef,
-            )
+            ).astype(mx.int32)
             if on_audio_hook is not None:
                 on_audio_hook(audio_tokens)
         else:
