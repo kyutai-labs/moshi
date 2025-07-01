@@ -10,12 +10,29 @@ import json
 from pathlib import Path
 import time
 
-from safetensors.torch import save_file
+from huggingface_hub import hf_hub_download
+import mlx.core as mx
+import mlx.nn as nn
 import sphn
-import torch
 
+from .client_utils import make_log
+from . import models
 from .models.tts import TTSModel, DEFAULT_DSM_TTS_REPO, DEFAULT_DSM_TTS_VOICE_REPO
-from .models.loaders import CheckpointInfo, hf_get
+
+
+def log(level: str, msg: str):
+    print(make_log(level, msg))
+
+
+def hf_get(filename: str) -> str:
+    if filename.startswith("hf://"):
+        parts = filename[5:].split("/")
+        repo_name = parts[0] + "/" + parts[1]
+        filename = "/".join(parts[2:])
+        log("info", f"retrieving {filename} from hf repo {repo_name}")
+        return hf_hub_download(repo_name, filename)
+    else:
+        return filename
 
 
 @dataclass
@@ -49,8 +66,8 @@ def main():
     # The following flags are only to use a local checkpoint.
     parser.add_argument("--config", "--lm-config", dest="config", type=str, help="The config as a json file.")
     parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
-    parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
-    parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
+    parser.add_argument("--mimi-weights", type=str, help="Path to a local checkpoint file for Mimi.")
+    parser.add_argument("--moshi-weights", type=str, help="Path to a local checkpoint file for Moshi.")
 
     # The following flags will customize generation.
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size to be used for inference.")
@@ -67,10 +84,6 @@ def main():
     parser.add_argument("--padding-between", type=int, default=1,
                         help="Forces a minimal amount of fixed padding between words.")
 
-    parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
-    parser.add_argument("--half", action="store_const", const=torch.float16, default=torch.bfloat16,
-                        dest="dtype", help="Run inference with float16, not bfloat16, better for old GPUs.")
-
     parser.add_argument("--only-wav", action='store_true',
                         help='Only save the audio. Otherwise, a .safetensors file with raw tokens is saved, '
                              'along with a .json file with various informations on the generation.')
@@ -80,15 +93,70 @@ def main():
     assert args.jsonl.exists(), f"Not found: {args.jsonl}"
     args.out_folder.mkdir(parents=True, exist_ok=True)
 
+    mx.random.seed(299792458)
+
     print("retrieving checkpoint")
-    checkpoint_info = CheckpointInfo.from_hf_repo(
-        args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer, args.config)
+
+    raw_config = args.config
+    if raw_config is None:
+        raw_config = hf_hub_download(args.hf_repo, "config.json")
+
+    log("info", f"loading config from {args.config}")
+    with open(hf_get(raw_config), "r") as fobj:
+        raw_config = json.load(fobj)
+    print(raw_config)
+
+    mimi_weights = args.mimi_weights
+    if mimi_weights is None:
+        mimi_weights = hf_hub_download(args.hf_repo, raw_config["mimi_name"])
+    mimi_weights = hf_get(mimi_weights)
+
+    moshi_weights = args.moshi_weights
+    if moshi_weights is None:
+        moshi_name = raw_config.get("moshi_name", "model.safetensors")
+        moshi_weights = hf_hub_download(args.hf_repo, moshi_name)
+    moshi_weights = hf_get(moshi_weights)
+
+    tokenizer = args.tokenizer
+    if tokenizer is None:
+        tokenizer = hf_hub_download(args.hf_repo, raw_config["tokenizer_name"])
+    tokenizer = hf_get(tokenizer)
+
+    lm_config = models.LmConfig.from_config_dict(raw_config)
+    model = models.Lm(lm_config)
+    model.set_dtype(mx.bfloat16)
+    if moshi_weights.endswith(".q4.safetensors"):
+        nn.quantize(model, bits=4, group_size=32)
+    elif moshi_weights.endswith(".q8.safetensors"):
+        nn.quantize(model, bits=8, group_size=64)
+
+    log("info", f"loading model weights from {moshi_weights}")
+    model.load_weights(moshi_weights, strict=True)
+
+    log("info", f"loading the text tokenizer from {tokenizer}")
+    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer)  # type: ignore
+
+    log("info", f"loading the audio tokenizer {mimi_weights}")
+    generated_codebooks = lm_config.generated_codebooks
+    audio_tokenizer = models.mimi.Mimi(models.mimi_202407(generated_codebooks))
+    audio_tokenizer.load_pytorch_weights(mimi_weights, strict=True)
+
 
     cfg_coef_conditioning = None
-    tts_model = TTSModel.from_checkpoint_info(
-        checkpoint_info, voice_repo=args.voice_repo, n_q=args.nq, temp=args.temp, cfg_coef=args.cfg_coef,
-        max_padding=args.max_padding, initial_padding=args.initial_padding, final_padding=args.final_padding,
-        padding_bonus=args.padding_bonus, device=args.device, dtype=args.dtype)
+    tts_model = TTSModel(
+        model,
+        audio_tokenizer,
+        text_tokenizer,
+        voice_repo=args.voice_repo,
+        n_q=args.nq,
+        temp=args.temp,
+        cfg_coef=args.cfg_coef,
+        max_padding=args.max_padding,
+        initial_padding=args.initial_padding,
+        final_padding=args.final_padding,
+        padding_bonus=args.padding_bonus,
+        raw_config=raw_config,
+    )
     if tts_model.valid_cfg_conditionings:
         # Model was trained with CFG distillation.
         cfg_coef_conditioning = tts_model.cfg_coef
@@ -125,7 +193,7 @@ def main():
         result = tts_model.generate(
             all_entries, all_attributes, prefixes=prefixes,
             cfg_is_no_prefix=cfg_is_no_prefix, cfg_is_no_text=cfg_is_no_text)
-        frames = torch.cat(result.frames, dim=-1).cpu()
+        frames = mx.concat(result.frames, axis=-1)
         total_duration = frames.shape[0] * frames.shape[-1] / mimi.frame_rate
         time_taken = time.time() - begin
         total_speed = total_duration / time_taken
@@ -133,11 +201,10 @@ def main():
               f"total speed {total_speed:.2f}x")
 
         wav_frames = []
-        with torch.no_grad(), tts_model.mimi.streaming(len(all_entries)):
-            for frame in result.frames[tts_model.delay_steps:]:
-                # We are processing frames one by one, although we could group them to improve speed.
-                wav_frames.append(tts_model.mimi.decode(frame[:, 1:]))
-        wavs = torch.cat(wav_frames, dim=-1)
+        for frame in result.frames[tts_model.delay_steps:]:
+            # We are processing frames one by one, although we could group them to improve speed.
+            wav_frames.append(tts_model.mimi.decode(frame[:, 1:]))
+        wavs = mx.concat(wav_frames, axis=-1)
         effective_duration = 0.
         for idx, request in enumerate(batch):
             end_step = result.end_steps[idx]
@@ -145,7 +212,7 @@ def main():
                 print(f"Warning: end step is None, generation failed for {request.id}")
                 wav_length = wavs.shape[-1]
             else:
-                wav_length = int((mimi.sample_rate * (end_step + tts_model.final_padding) / mimi.frame_rate))
+                wav_length = int((mimi.cfg.sample_rate * (end_step + tts_model.final_padding) / mimi.cfg.frame_rate))
             effective_duration += wav_length / mimi.sample_rate
             wav = wavs[idx, :, :wav_length]
             start_step = 0
@@ -154,12 +221,10 @@ def main():
                 start = int(mimi.sample_rate * start_step / mimi.frame_rate)
                 wav = wav[:, start:]
             filename = args.out_folder / f"{request.id}.wav"
-            debug_tensors = {
-                'frames': frames[idx].short(),
-            }
-            sphn.write_wav(filename, wav.clamp(-1, 1).cpu().numpy(), mimi.sample_rate)
+            debug_tensors = {'frames': frames[idx]}
+            sphn.write_wav(filename, wav.clamp(-1, 1).cpu().numpy(), mimi.cfg.sample_rate)
             if not args.only_wav:
-                save_file(debug_tensors, filename.with_suffix('.safetensors'))
+                mx.save_safetensors(filename.with_suffix('.safetensors'), debug_tensors)
                 debug_info = {
                     'hf_repo': args.hf_repo,
                     'voice_repo': args.voice_repo,
@@ -211,3 +276,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

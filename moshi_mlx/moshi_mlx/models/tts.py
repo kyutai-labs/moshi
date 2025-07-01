@@ -13,6 +13,7 @@ to feed and feed it the token representation of the word over the next few steps
 from collections import deque
 from dataclasses import dataclass, field
 from functools import cached_property
+from typing_extensions import final
 import mlx.core as mx
 import re
 from pathlib import Path
@@ -329,7 +330,7 @@ class TTSResult:
             at which step the given `word` in the transcript should appear. Divide by the frame rate
             to obtain a time stamp.
     """
-    frames: list[torch.Tensor]
+    frames: list[mx.array]
     logged_text_tokens: list[list[tuple[int, int]]]
     end_steps: list[int | None]
     all_consumption_times: list[list[int]]
@@ -360,7 +361,6 @@ class TTSModel:
 
     """
 
-    # the following params will be automatically set by `from_checkpoint_info`
     lm: Lm
     mimi: Mimi
     tokenizer: SentencePieceProcessor
@@ -380,35 +380,43 @@ class TTSModel:
     max_gen_length: int = 30000
     padding_bonus: float = 0.
 
-    @staticmethod
-    def from_checkpoint_info(checkpoint_info: loaders.CheckpointInfo,
-                             initial_padding: int = 2,
-                             max_padding: int = 8,
-                             voice_repo: str = DEFAULT_DSM_TTS_VOICE_REPO,
-                             device: torch.device | str = 'cpu',
-                             dtype: torch.dtype = torch.bfloat16, **kwargs) -> 'TTSModel':
-        assert checkpoint_info.raw_config is not None
-        model_id = checkpoint_info.raw_config['model_id']
-        voice_suffix = f".{model_id['sig']}@{model_id['epoch']}.safetensors"
+    def __init__(
+            self,
+            lm: Lm,
+            mimi: Mimi,
+            tokenizer: SentencePieceProcessor,
+            temp: float = 0.6,
+            cfg_coef: float = 1.0,
+            final_padding: int = 4,
+            n_q: int = 32,
+            max_gen_length: int = 30000,
+            padding_bonus: float = 0.,
+            initial_padding: int = 2,
+            max_padding: int = 8,
+            voice_repo: str = DEFAULT_DSM_TTS_VOICE_REPO,
+            raw_config: dict = {},
+    ):
+        self.lm = lm
+        self.mimi = mimi
+        self.tokenizer = tokenizer
+        self.temp = temp
+        self.cfg_coef = cfg_coef
+        self.final_padding = final_padding
+        self.n_q = n_q
+        self.max_gen_length = max_gen_length
+        self.padding_bonus = padding_bonus
+        model_id = raw_config['model_id']
+        self.voice_suffix = f".{model_id['sig']}@{model_id['epoch']}.safetensors"
+        self.voice_repo = voice_repo
 
-        mimi = checkpoint_info.get_mimi(device=device)
-        tokenizer = checkpoint_info.get_text_tokenizer()
-        lm = checkpoint_info.get_moshi(device=device, dtype=dtype)
+        token_ids = TokenIds(lm.cfg.text_out_vocab_size + 1)
+        tts_config = raw_config['tts_config']
+        self.delay_steps = int(tts_config['audio_delay'] * mimi.frame_rate)
+        second_stream_ahead = tts_config.get('second_stream_ahead', 0)
 
-        token_ids = TokenIds(lm.text_card + 1)
-        delay_steps = int(checkpoint_info.tts_config['audio_delay'] * mimi.frame_rate)
-        second_stream_ahead = checkpoint_info.tts_config.get('second_stream_ahead', 0)
-
-        machine = StateMachine(
+        self.machine = StateMachine(
             token_ids=token_ids, second_stream_ahead=second_stream_ahead,
             max_padding=max_padding, initial_padding=initial_padding)
-        tts_model = TTSModel(
-            lm=lm, mimi=mimi, tokenizer=tokenizer,
-            voice_suffix=voice_suffix, voice_repo=voice_repo,
-            machine=machine, delay_steps=delay_steps,
-            **kwargs)
-        mimi.set_num_codebooks(tts_model.n_q)
-        return tts_model
 
     @cached_property
     def valid_cfg_conditionings(self) -> set[float]:
@@ -429,13 +437,12 @@ class TTSModel:
     def prepare_script(self, script: tp.Sequence[str], padding_between: int = 0) -> list[Entry]:
         """Wrapper around `script_to_entries`."""
         return script_to_entries(
-            self.tokenizer, self.machine.token_ids, self.mimi.frame_rate, script,
+            self.tokenizer, self.machine.token_ids, self.mimi.cfg.frame_rate, script,
             multi_speaker=self.multi_speaker, padding_between=padding_between)
 
-    @torch.no_grad()
     def generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],
-                 attributes: tp.Sequence[ConditionAttributes],
-                 prefixes: list[torch.Tensor] | None = None,
+                 attributes: tp.Sequence[tp.Any],
+                 prefixes: list[mx.array] | None = None,
                  cfg_is_no_prefix: bool = True,
                  cfg_is_no_text: bool = True,
                  **kwargs
@@ -468,8 +475,8 @@ class TTSModel:
             self.lm.forward_text = original
 
     def _generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],
-                  attributes: tp.Sequence[ConditionAttributes],
-                  prefixes: list[torch.Tensor] | None = None,
+                  attributes: tp.Sequence[tp.Any],
+                  prefixes: list[mx.array] | None = None,
                   cfg_is_no_prefix: bool = True, cfg_is_no_text: bool = True,
                   **kwargs):
 
@@ -577,7 +584,7 @@ class TTSModel:
         return Path(file)
 
     def make_condition_attributes(
-            self, voices: list[Path], cfg_coef: float | None = None) -> ConditionAttributes:
+            self, voices: list[Path], cfg_coef: float | None = None):
         """Given a list of pre computed voice embeddings, returns a ConditionAttributes.
 
         Args:
