@@ -304,7 +304,7 @@ class Lm(nn.Module):
 
         self.text_linear = nn.Linear(dim, cfg.text_out_vocab_size, bias=False)
         self.audio_embs = [
-            nn.Embedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)
+            ScaledEmbedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)
         ]
         self.transformer_cache: list[RotatingKVCache] = (
             self.transformer.make_rot_cache()
@@ -378,7 +378,8 @@ class Lm(nn.Module):
     ) -> tuple[mx.array, mx.array | None]:
         xs = self.text_emb(text_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
-            xs = xs + emb(token_ids)
+            _emb = emb(token_ids)
+            xs = xs + _emb
         if ct is not None:
             xs = xs + ct.tensor
 
