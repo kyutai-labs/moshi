@@ -13,18 +13,16 @@ to feed and feed it the token representation of the word over the next few steps
 from collections import deque
 from dataclasses import dataclass, field
 from functools import cached_property
+import mlx.core as mx
 import re
 from pathlib import Path
 import typing as tp
 
-from safetensors.torch import load_file
 from sentencepiece import SentencePieceProcessor
 import sphn
-import torch
 
-from ..conditioners import ConditionAttributes, dropout_all_conditions, TensorCondition
-from ..conditioners.text import LUTConditioner
-from . import loaders, MimiModel, LMModel, LMGen
+from . import Lm
+from .mimi import Mimi
 
 
 DEFAULT_DSM_TTS_REPO = 'kyutai/tts-1.6b-en_fr'
@@ -68,7 +66,7 @@ class Entry:
     tokens: list[int]
     text: str
     padding: int = 0
-    audio_tokens: torch.Tensor | None = None
+    audio_tokens: mx.array | None = None
 
 
 @dataclass
@@ -109,18 +107,18 @@ class State:
         return []
 
 
-def _delayed(codes: torch.Tensor, delays: list[int], fill_value: int) -> torch.Tensor:
+def _delayed(codes: mx.array, delays: list[int], fill_value: int) -> mx.array:
     # Apply the acoustic delay on the provided audio tokens.
     K, T = codes.shape
-    out = torch.full((K, T + max(delays)), fill_value, device=codes.device, dtype=torch.long)
+    out = mx.full((K, T + max(delays)), fill_value, dtype=mx.int64)
     for k, delay in enumerate(delays):
         out[k, delay: delay + T] = codes[k]
     return out
 
-
-def _make_null(all_attributes: tp.Sequence[ConditionAttributes]) -> list[ConditionAttributes]:
-    # When using CFG, returns the null conditions.
-    return dropout_all_conditions(all_attributes)
+# TODO
+# def _make_null(all_attributes: tp.Sequence[ConditionAttributes]) -> list[ConditionAttributes]:
+#     # When using CFG, returns the null conditions.
+#     return dropout_all_conditions(all_attributes)
 
 
 @dataclass
@@ -363,8 +361,8 @@ class TTSModel:
     """
 
     # the following params will be automatically set by `from_checkpoint_info`
-    lm: LMModel
-    mimi: MimiModel
+    lm: Lm
+    mimi: Mimi
     tokenizer: SentencePieceProcessor
 
     voice_suffix: str
@@ -621,10 +619,10 @@ class TTSModel:
                 raise ValueError(f"Unsupported value for cfg_coef, valid values are {valids}.")
         return ConditionAttributes(text=text, tensor=tensors)
 
-    def get_prefix(self, audio_path: Path | str) -> torch.Tensor:
+    def get_prefix(self, audio_path: Path | str) -> mx.array:
         wav, _ = sphn.read(audio_path, sample_rate=self.mimi.sample_rate)
-        with torch.no_grad():
-            prefix = self.mimi.encode(torch.from_numpy(wav).to(device=self.lm.device)[None])[0, :, :-2]
-        null_text = torch.full_like(prefix[:1], self.machine.token_ids.zero)
-        prefix = torch.cat([null_text, prefix], dim=0)
+        prefix = self.mimi.encode(mx.array(wav)[None])[0, :, :-2]
+        null_text = mx.ones_like(prefix[:1]) * self.machine.token_ids.zero
+        prefix = mx.concat([null_text, prefix], axis=0)
         return prefix
+
