@@ -480,9 +480,7 @@ class TTSModel:
         assert self.lm.condition_provider is not None
         ct = None
         cross_attention_src = None
-        print(attributes)
         for _attr in attributes:
-            # TODO: handle _attr.tensor for the speaker cross-attention.
             for _key, _value in _attr.text.items():
                 _ct = self.lm.condition_provider.condition_tensor(_key, _value)
                 if ct is None:
@@ -490,7 +488,13 @@ class TTSModel:
                 else:
                     ct = ConditionTensor(ct.tensor + _ct.tensor)
             for _key, _value in _attr.tensor.items():
-                print(">>>", _key, _value.tensor.shape)
+                _conditioner = self.lm.condition_provider.conditioners[_key]
+                _ca_src = _conditioner.condition(_value)
+                if cross_attention_src is None:
+                    print(_ca_src.shape)
+                    cross_attention_src = _ca_src
+                else:
+                    raise ValueError("multiple cross-attention conditioners")
 
         states = []
         for entries in all_entries:

@@ -77,14 +77,17 @@ class CrossAttention(nn.Module):
         assert self.cfg.kv_repeat == 1, "only kv_repeat==1 is supported"
 
         b, t, hd = xs.shape
+        b_kv, t_kv, hd_kv = cross_attention_src.shape
+        assert b == b_kv
+        assert hd == hd_kv
         assert "bias" not in self.in_proj
         qkv_w = self.in_proj.weight
         q = xs @ qkv_w[:self.cfg.d_model].T
         q = q.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
         k = cross_attention_src @ qkv_w[self.cfg.d_model:2 * self.cfg.d_model].T
-        k = k.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
+        k = k.reshape(b, t_kv, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
         v = cross_attention_src @ qkv_w[2 * self.cfg.d_model:].T
-        v = v.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
+        v = v.reshape(b, t_kv, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
 
         k_len = k.shape[2]
         k_target_len = t + min(self.cfg.context, k_len - t)

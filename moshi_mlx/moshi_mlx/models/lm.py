@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 import mlx.nn as nn
-from numpy import cross
 
 from ..modules.conditioner import (
     LutConditionerConfig,

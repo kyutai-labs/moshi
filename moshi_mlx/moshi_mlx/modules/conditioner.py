@@ -84,6 +84,14 @@ class TensorConditioner(nn.Module):
         self.output_proj = nn.Linear(cfg.dim, output_dim, bias=False)
         self.learnt_padding = mx.zeros((1, 1, output_dim))
 
+    def condition(self, tc: TensorCondition) -> mx.array:
+        cond, mask = tc.tensor, tc.mask
+        cond = self.output_proj(cond)
+        mask = mask.astype(cond.dtype)
+        mask = mx.expand_dims(mask, axis=-1)
+        cond = cond * mask + self.learnt_padding * (1 - mask)
+        return cond
+
 
 @dataclass
 class LutConditionerConfig:
