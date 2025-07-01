@@ -13,7 +13,6 @@ to feed and feed it the token representation of the word over the next few steps
 from collections import deque
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing_extensions import final
 import mlx.core as mx
 import re
 from pathlib import Path
@@ -117,6 +116,7 @@ def _delayed(codes: mx.array, delays: list[int], fill_value: int) -> mx.array:
     for k, delay in enumerate(delays):
         out[k, delay: delay + T] = codes[k]
     return out
+
 
 def _make_null(all_attributes: tp.Sequence[ConditionAttributes]) -> list[ConditionAttributes]:
     # When using CFG, returns the null conditions.
@@ -624,4 +624,3 @@ class TTSModel:
         null_text = mx.ones_like(prefix[:1]) * self.machine.token_ids.zero
         prefix = mx.concat([null_text, prefix], axis=0)
         return prefix
-

@@ -134,7 +134,7 @@ def main():
     log("info", f"loading model weights from {moshi_weights}")
     moshi_weights = mx.load(moshi_weights)
     # TODO: convert the pytorch weights to the mlx naming scheme.
-    #model.load_weights(moshi_weights, strict=True)
+    # model.load_weights(moshi_weights, strict=True)
 
     log("info", f"loading the text tokenizer from {tokenizer}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer)  # type: ignore
@@ -143,7 +143,6 @@ def main():
     generated_codebooks = lm_config.generated_codebooks
     audio_tokenizer = models.mimi.Mimi(models.mimi_202407(generated_codebooks))
     audio_tokenizer.load_pytorch_weights(mimi_weights, strict=True)
-
 
     cfg_coef_conditioning = None
     tts_model = TTSModel(
@@ -279,4 +278,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
