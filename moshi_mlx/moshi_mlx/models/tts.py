@@ -24,6 +24,7 @@ import sphn
 from . import Lm, LmGen
 from ..modules.conditioner import ConditionAttributes, LutConditioner, dropout_all_conditions, TensorCondition
 from .mimi import Mimi
+from ..utils.loaders import hf_get
 from ..utils.sampling import Sampler
 
 
@@ -571,8 +572,8 @@ class TTSModel:
         from a HuggingFace repository. To retrieve a voice from another repo, you can also use
         the `hf://REPO/PATH` syntax.
         """
-        file = loaders.hf_get(voice_name + self.voice_suffix, self.voice_repo,
-                              check_local_file_exists=True)
+        file = hf_get(voice_name + self.voice_suffix, self.voice_repo,
+                      check_local_file_exists=True)
         return Path(file)
 
     def make_condition_attributes(
@@ -590,18 +591,18 @@ class TTSModel:
             mask = None
             for idx in range(5):
                 if idx < len(voices):
-                    emb = load_file(voices[idx], device='cpu')['speaker_wavs']
-                    assert emb.dim() == 3
+                    emb: mx.array = mx.load(str(voices[idx]))['speaker_wavs']
+                    assert emb.ndim == 3
                     if voice_tensor is None:
-                        voice_tensor = mx.zeros(1, self.max_speakers, emb.shape[2], emb.shape[1])
+                        voice_tensor = mx.zeros((1, self.max_speakers, emb.shape[2], emb.shape[1]))
                     if mask is None:
-                        mask = mx.zeros(1, self.max_speakers, emb.shape[2], dtype=mx.bool)
-                    voice_tensor[:, idx, :, :] = emb.transpose(1, 2)
+                        mask = mx.zeros((1, self.max_speakers, emb.shape[2]), dtype=mx.uint8)
+                    voice_tensor[:, idx, :, :] = emb.swapaxes(1, 2)
                     mask[:, idx, :] = True
             assert voice_tensor is not None
             assert mask is not None
-            voice_tensor = voice_tensor.view(1, -1, voice_tensor.shape[-1])
-            mask = mask.view(1, -1)
+            voice_tensor = voice_tensor.reshape(1, -1, voice_tensor.shape[-1])
+            mask = mask.reshape(1, -1)
             tensors = {
                 'speaker_wavs': TensorCondition(voice_tensor, mask)
             }

@@ -19,22 +19,12 @@ import sphn
 
 from .client_utils import make_log
 from . import models
+from .utils.loaders import hf_get
 from .models.tts import TTSModel, DEFAULT_DSM_TTS_REPO, DEFAULT_DSM_TTS_VOICE_REPO
 
 
 def log(level: str, msg: str):
     print(make_log(level, msg))
-
-
-def hf_get(filename: str) -> str:
-    if filename.startswith("hf://"):
-        parts = filename[5:].split("/")
-        repo_name = parts[0] + "/" + parts[1]
-        filename = "/".join(parts[2:])
-        log("info", f"retrieving {filename} from hf repo {repo_name}")
-        return hf_hub_download(repo_name, filename)
-    else:
-        return filename
 
 
 @dataclass
@@ -126,23 +116,23 @@ def main():
     lm_config = models.LmConfig.from_config_dict(raw_config)
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
-    if moshi_weights.endswith(".q4.safetensors"):
+    if moshi_weights.name.endswith(".q4.safetensors"):
         nn.quantize(model, bits=4, group_size=32)
-    elif moshi_weights.endswith(".q8.safetensors"):
+    elif moshi_weights.name.endswith(".q8.safetensors"):
         nn.quantize(model, bits=8, group_size=64)
 
     log("info", f"loading model weights from {moshi_weights}")
-    moshi_weights = mx.load(moshi_weights)
+    moshi_weights = mx.load(str(moshi_weights))
     # TODO: convert the pytorch weights to the mlx naming scheme.
     # model.load_weights(moshi_weights, strict=True)
 
     log("info", f"loading the text tokenizer from {tokenizer}")
-    text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer)  # type: ignore
+    text_tokenizer = sentencepiece.SentencePieceProcessor(str(tokenizer))  # type: ignore
 
     log("info", f"loading the audio tokenizer {mimi_weights}")
     generated_codebooks = lm_config.generated_codebooks
     audio_tokenizer = models.mimi.Mimi(models.mimi_202407(generated_codebooks))
-    audio_tokenizer.load_pytorch_weights(mimi_weights, strict=True)
+    audio_tokenizer.load_pytorch_weights(str(mimi_weights), strict=True)
 
     cfg_coef_conditioning = None
     tts_model = TTSModel(
