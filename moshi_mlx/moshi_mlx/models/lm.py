@@ -84,7 +84,7 @@ class LmConfig:
                 bias_ff=False,
                 bias_attn=data.get("depformer_layer_scale", False),
                 layer_scale=None,
-                context=data.get("depformer_context", 8),
+                context=data.get("depformer_context", data["dep_q"]),
                 max_period=data.get("depformer_max_period", 8),
                 use_conv_block=False,
                 use_conv_bias=True,
