@@ -56,6 +56,43 @@ class LayerScale(nn.Module):
         return xs * self.scale
 
 
+class CrossAttention(nn.Module):
+    def __init__(self, cfg: TransformerConfig):
+        super().__init__()
+
+        num_kv = cfg.num_heads // cfg.kv_repeat
+        out_dim = cfg.d_model + 2 * num_kv * cfg.d_model // cfg.num_heads
+        self.cfg = cfg
+        self.in_proj = nn.Linear(cfg.d_model, out_dim, bias=cfg.bias_attn)
+        self.out_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=cfg.bias_attn)
+        self.scale = cfg.head_dim ** (-0.5)
+
+    def __call__(
+        self,
+        xs: mx.array,
+        cross_attention_src: None | mx.array,
+    ) -> mx.array:
+        # TODO: use cross_attention_src
+        assert self.cfg.kv_repeat == 1, "only kv_repeat==1 is supported"
+
+        b, t, hd = xs.shape
+        qkv = self.in_proj(xs).reshape(b, t, 3, self.cfg.num_heads, self.cfg.head_dim)
+        q = qkv[:, :, 0].transpose(0, 2, 1, 3)
+        k = qkv[:, :, 1].transpose(0, 2, 1, 3)
+        v = qkv[:, :, 2].transpose(0, 2, 1, 3)
+
+        k_len = k.shape[2]
+        k_target_len = t + min(self.cfg.context, k_len - t)
+        if k_target_len < k_len:
+            k = k[:, :, k_len - k_target_len :]
+            v = v[:, :, k_len - k_target_len :]
+
+        xs = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale)
+        xs = xs.transpose(0, 2, 1, 3).reshape(b, t, hd)
+        xs = self.out_proj(xs)
+        return xs
+
+
 class Attention(nn.Module):
     def __init__(self, cfg: TransformerConfig):
         super().__init__()
@@ -134,7 +171,6 @@ class TransformerLayer(nn.Module):
         super().__init__()
 
         assert not cfg.use_conv_block, "conv-block is not supported"
-        assert not cfg.cross_attention, "cross-attn is not supported"
         if cfg.gating:
             self.gating = MlpGating(cfg)
         else:
@@ -157,15 +193,35 @@ class TransformerLayer(nn.Module):
             self.layer_scale_1 = Id()
             self.layer_scale_2 = Id()
         self.self_attn = Attention(cfg)
+        self.cfg = cfg
+
+        if cfg.cross_attention:
+            # Always use layer-norm for the cross-attention.
+            self.norm_cross = nn.LayerNorm(cfg.d_model, 1e-5)
+            self.cross_attention = CrossAttention(cfg)
+
+    def _cross_attention_block(self, x: mx.array,
+                               cross_attention_src: mx.array) -> mx.array:
+        assert self.cross_attention is not None
+        x_orig = x
+        x = self.norm_cross(x)
+        update = self.cross_attention(x) # TODO: cross_attention_src, cross_attention_src)
+        return x_orig + update
 
     def __call__(
         self,
         xs: mx.array,
         cache: KVCache | RotatingKVCache,
+        cross_attention_src: None | mx.array = None,
     ) -> mx.array:
         n1 = self.norm1(xs)
         n1 = self.self_attn(n1, cache=cache)
         xs = xs + self.layer_scale_1(n1)
+        if self.cross_attention is not None:
+            assert cross_attention_src is not None
+            xs = self._cross_attention_block(xs, cross_attention_src)
+        else:
+            assert cross_attention_src is None
         xs = xs + self.layer_scale_2(self.gating(self.norm2(xs)))
         return xs
 

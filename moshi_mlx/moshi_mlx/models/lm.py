@@ -64,7 +64,7 @@ class LmConfig:
             max_period=data["max_period"],
             use_conv_block=False,
             use_conv_bias=True,
-            cross_attention=False,
+            cross_attention=data.get("cross_attention", False),
             gating=True,
             norm="rms_norm",
             positional_embedding=data["positional_embedding"],

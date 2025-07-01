@@ -44,8 +44,6 @@ def convert_pth(pth_t, lm_config: models.LmConfig):
                 v = v[0, 0]
             k = k.replace(".alpha", ".weight")
             k = k.replace(".in_proj_weight", ".in_proj.weight")
-            if "norm_cross" in k or "cross_attention" in k:
-                continue # TODO
             mlx_t[k] = v
         if k.startswith("condition_provider."):
             mlx_t[k] = v
