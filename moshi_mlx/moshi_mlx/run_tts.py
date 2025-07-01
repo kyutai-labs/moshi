@@ -14,6 +14,7 @@ from huggingface_hub import hf_hub_download
 import numpy as np
 import mlx.core as mx
 import mlx.nn as nn
+import sentencepiece
 import sphn
 
 from .client_utils import make_log
@@ -132,7 +133,9 @@ def main():
         nn.quantize(model, bits=8, group_size=64)
 
     log("info", f"loading model weights from {moshi_weights}")
-    model.load_weights(moshi_weights, strict=True)
+    moshi_weights = mx.load(moshi_weights)
+    # TODO: convert the pytorch weights to the mlx naming scheme.
+    #model.load_weights(moshi_weights, strict=True)
 
     log("info", f"loading the text tokenizer from {tokenizer}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer)  # type: ignore

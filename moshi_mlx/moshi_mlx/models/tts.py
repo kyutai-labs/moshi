@@ -22,7 +22,8 @@ import typing as tp
 from sentencepiece import SentencePieceProcessor
 import sphn
 
-from . import Lm
+from . import Lm, LmGen
+from ..modules.conditioner import ConditionAttributes, LutConditioner
 from .mimi import Mimi
 
 
@@ -116,10 +117,9 @@ def _delayed(codes: mx.array, delays: list[int], fill_value: int) -> mx.array:
         out[k, delay: delay + T] = codes[k]
     return out
 
-# TODO
-# def _make_null(all_attributes: tp.Sequence[ConditionAttributes]) -> list[ConditionAttributes]:
-#     # When using CFG, returns the null conditions.
-#     return dropout_all_conditions(all_attributes)
+def _make_null(all_attributes: tp.Sequence[ConditionAttributes]) -> list[ConditionAttributes]:
+    # When using CFG, returns the null conditions.
+    return dropout_all_conditions(all_attributes)
 
 
 @dataclass
@@ -423,9 +423,9 @@ class TTSModel:
         valid_cfg_conditionings = set()
         if self.lm.condition_provider is not None and 'cfg' in self.lm.condition_provider.conditioners:
             cfg_conditioner = self.lm.condition_provider.conditioners['cfg']
-            assert isinstance(cfg_conditioner, LUTConditioner)
-            assert cfg_conditioner.tokenizer.possible_values is not None
-            valid_cfg_conditionings = set(float(x) for x in cfg_conditioner.tokenizer.possible_values)
+            assert isinstance(cfg_conditioner, LutConditioner)
+            assert cfg_conditioner.possible_values is not None
+            valid_cfg_conditionings = set(float(x) for x in cfg_conditioner.possible_values)
         return valid_cfg_conditionings
 
     @cached_property
@@ -500,7 +500,6 @@ class TTSModel:
         cfg_is_masked_until = None
         text_prefixes = None
         audio_prefixes = None
-        device = self.lm.device
         if prefixes is not None:
             assert len(all_entries) == len(prefixes), f"Not enough prefixes, expected {len(all_entries)}."
             if cfg_is_no_prefix:
@@ -515,7 +514,6 @@ class TTSModel:
                 text_prefixes.append(deque(prefix[0].cpu().tolist()))
                 delays = [d + self.delay_steps for d in self.lm.delays[self.lm.audio_offset:]]
                 delayed = _delayed(prefix[self.lm.audio_offset:], delays, self.machine.token_ids.ungenerated)
-                delayed = delayed.to(device)
                 audio_prefixes.append(deque(delayed.t()))
 
         def _on_audio_hook(audio_tokens):
@@ -531,7 +529,7 @@ class TTSModel:
                     if audio_prefix:
                         audio_codes = audio_prefix.popleft()
                         mask = audio_codes != ungenerated
-                        audio_tokens[b] = torch.where(mask, audio_codes, audio_tokens[b])
+                        audio_tokens[b] = mx.where(mask, audio_codes, audio_tokens[b])
 
         def _on_text_hook(text_tokens):
             tokens = text_tokens.tolist()
@@ -543,10 +541,10 @@ class TTSModel:
                     out_token, _ = self.machine.process(offset, state, token)
                 out_tokens.append(out_token)
                 logged.append((token, out_token))
-            text_tokens[:] = torch.tensor(out_tokens, dtype=torch.long, device=text_tokens.device)
+            text_tokens[:] = torch.tensor(out_tokens, dtype=torch.long)
 
         self.lm.dep_q = self.n_q
-        lm_gen = LMGen(
+        lm_gen = LmGen(
             self.lm, temp=self.temp, temp_text=self.temp,
             cfg_coef=self.cfg_coef, condition_tensors=condition_tensors,
             on_text_hook=_on_text_hook, on_audio_hook=_on_audio_hook,
@@ -601,9 +599,9 @@ class TTSModel:
                     emb = load_file(voices[idx], device='cpu')['speaker_wavs']
                     assert emb.dim() == 3
                     if voice_tensor is None:
-                        voice_tensor = torch.zeros(1, self.max_speakers, emb.shape[2], emb.shape[1])
+                        voice_tensor = mx.zeros(1, self.max_speakers, emb.shape[2], emb.shape[1])
                     if mask is None:
-                        mask = torch.zeros(1, self.max_speakers, emb.shape[2], dtype=torch.bool)
+                        mask = mx.zeros(1, self.max_speakers, emb.shape[2], dtype=mx.bool)
                     voice_tensor[:, idx, :, :] = emb.transpose(1, 2)
                     mask[:, idx, :] = True
             assert voice_tensor is not None

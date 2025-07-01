@@ -6,10 +6,70 @@
 Conditioners
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import typing as tp
 
 import mlx.core as mx
 import mlx.nn as nn
+
+
+@dataclass(frozen=True)
+class TensorCondition:
+    """Looks quite similar to ConditionType, but represents the input to TensorConditioners.
+    `tensor` should be [B | 1, T, D], and `mask` should be `[B | 1, T]`.
+    """
+    tensor: mx.array
+    mask: mx.array
+
+    @staticmethod
+    def from_tensor(tensor: mx.array):
+        B, T, _ = tensor.shape
+        mask = mx.ones((B, T), dtype=mx.uint8)
+        return TensorCondition(tensor, mask)
+
+    @staticmethod
+    def cat(conditions: tp.Sequence['TensorCondition']) -> 'TensorCondition':
+        assert conditions, "Cannot cat empty list."
+        ref_tensor = conditions[0].tensor
+        B, _, D = ref_tensor.shape
+        assert B == 1
+        B = len(conditions)
+        T = max(condition.tensor.shape[1] for condition in conditions)
+        mask = mx.zeros((B, T), dtype=mx.uint8)
+        tensor = mx.zeros((B, T, D), dtype=ref_tensor.dtype)
+        for b, condition in enumerate(conditions):
+            tensor[b, :condition.tensor.shape[1], :] = condition.tensor[0]
+            mask[b, :condition.mask.shape[1]] = condition.mask[0]
+        return TensorCondition(tensor, mask)
+
+
+@dataclass
+class ConditionAttributes:
+    """Standard class for representing the set of potential inputs to the conditioners.
+    Typically, `audiocraft.data.audio_dataset.SegmentInfo` will convert
+    to this class to make conditioning agnostic to the type of dataset.
+
+    There are two kinds of conditionings: text (or None), or raw torch tensors (with a mask).
+
+    """
+    text: tp.Dict[str, tp.Optional[str]] = field(default_factory=dict)
+    tensor: tp.Dict[str, TensorCondition] = field(default_factory=dict)
+
+    @property
+    def text_attributes(self) -> tp.Iterable[str]:
+        return self.text.keys()
+
+    @property
+    def tensor_attributes(self) -> tp.Iterable[str]:
+        return self.text.keys()
+
+    @staticmethod
+    def condition_types() -> tp.FrozenSet[str]:
+        return frozenset(["text", "tensor"])
+
+    def copy(self) -> 'ConditionAttributes':
+        return ConditionAttributes(dict(self.text), dict(self.tensor))
+
 
 
 @dataclass
