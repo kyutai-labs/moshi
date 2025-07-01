@@ -20,6 +20,8 @@ class LmGen:
         audio_sampler: sampling.Sampler,
         cfg_coef: float = 1.0,
         check: bool = False,
+        on_text_hook = None,
+        on_audio_hook = None,
     ):
         self.model: Lm = model
         self.text_sampler = text_sampler
@@ -38,6 +40,8 @@ class LmGen:
         self.max_delay = max(self.audio_delays)
         self.main_codebooks = self.model.cfg.depformer.num_slices
         self.cfg_coef = cfg_coef
+        self.on_text_hook = on_text_hook
+        self.on_audio_hook = on_audio_hook
 
     @property
     def zero_token(self) -> int:
@@ -90,6 +94,8 @@ class LmGen:
             self.audio_sampler,
             ct=ct,
             cfg_coef=self.cfg_coef,
+            on_text_hook=self.on_text_hook,
+            on_audio_hook=self.on_audio_hook,
         )
         assert text_tokens.shape == (1,), "invalid output text-token shape"
         assert audio_tokens is None or audio_tokens.shape == (

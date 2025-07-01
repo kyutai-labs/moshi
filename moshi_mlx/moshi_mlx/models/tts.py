@@ -23,8 +23,9 @@ from sentencepiece import SentencePieceProcessor
 import sphn
 
 from . import Lm, LmGen
-from ..modules.conditioner import ConditionAttributes, LutConditioner
+from ..modules.conditioner import ConditionAttributes, LutConditioner, dropout_all_conditions, TensorCondition
 from .mimi import Mimi
+from ..utils.sampling import Sampler
 
 
 DEFAULT_DSM_TTS_REPO = 'kyutai/tts-1.6b-en_fr'
@@ -459,26 +460,12 @@ class TTSModel:
             **kwargs: passed to `moshi.models.lm.LMGen`.
         """
 
-        def _main_wrapper(*args, **kwargs):
-            transformer_out, text_logits = original(*args, **kwargs)
-            if self.padding_bonus:
-                text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
-            return transformer_out, text_logits
-
-        original = self.lm.forward_text
-        self.lm.forward_text = _main_wrapper
-
-        try:
-            return self._generate(all_entries, attributes, prefixes,
-                                  cfg_is_no_prefix, cfg_is_no_text, **kwargs)
-        finally:
-            self.lm.forward_text = original
-
-    def _generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],
-                  attributes: tp.Sequence[tp.Any],
-                  prefixes: list[mx.array] | None = None,
-                  cfg_is_no_prefix: bool = True, cfg_is_no_text: bool = True,
-                  **kwargs):
+        # TODO
+        # def _main_wrapper(*args, **kwargs):
+        #     transformer_out, text_logits = original(*args, **kwargs)
+        #     if self.padding_bonus:
+        #         text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
+        #     return transformer_out, text_logits
 
         if self.cfg_coef != 1.0:
             if self.valid_cfg_conditionings:
@@ -489,8 +476,11 @@ class TTSModel:
             attributes = list(attributes) + nulled
 
         assert self.lm.condition_provider is not None
-        prepared = self.lm.condition_provider.prepare(attributes)
-        condition_tensors = self.lm.condition_provider(prepared)
+        condition_tensors = {}
+        for _attr in attributes:
+            for _key, _value in _attr.text.items():
+                _ct = self.lm.condition_provider.condition_tensor(_key, _value)
+                condition_tensors[_key] = _ct
 
         states = []
         for entries in all_entries:
@@ -511,7 +501,7 @@ class TTSModel:
                     cfg_is_masked_until.append(prefix.shape[-1] + self.delay_steps)
                 K, _ = prefix.shape
                 assert K == self.lm.num_codebooks
-                text_prefixes.append(deque(prefix[0].cpu().tolist()))
+                text_prefixes.append(deque(prefix[0].tolist()))
                 delays = [d + self.delay_steps for d in self.lm.delays[self.lm.audio_offset:]]
                 delayed = _delayed(prefix[self.lm.audio_offset:], delays, self.machine.token_ids.ungenerated)
                 audio_prefixes.append(deque(delayed.t()))
@@ -541,31 +531,35 @@ class TTSModel:
                     out_token, _ = self.machine.process(offset, state, token)
                 out_tokens.append(out_token)
                 logged.append((token, out_token))
-            text_tokens[:] = torch.tensor(out_tokens, dtype=torch.long)
+            text_tokens[:] = mx.array(out_tokens, dtype=mx.int64)
 
-        self.lm.dep_q = self.n_q
         lm_gen = LmGen(
-            self.lm, temp=self.temp, temp_text=self.temp,
-            cfg_coef=self.cfg_coef, condition_tensors=condition_tensors,
-            on_text_hook=_on_text_hook, on_audio_hook=_on_audio_hook,
-            cfg_is_masked_until=cfg_is_masked_until, cfg_is_no_text=cfg_is_no_text,
-            **kwargs)
+            self.lm,
+            max_steps=self.max_gen_length,
+            text_sampler=Sampler(temp=self.temp),
+            audio_sampler=Sampler(temp=self.temp),
+            cfg_coef=self.cfg_coef,
+            on_text_hook=_on_text_hook,
+            on_audio_hook=_on_audio_hook,
+            # TODO:
+            # condition_tensors=condition_tensors,
+            # cfg_is_masked_until=cfg_is_masked_until,
+            # cfg_is_no_text=cfg_is_no_text,
+        )
 
         logged_text_tokens = [[] for _ in states]
-        frames: list[torch.Tensor] = []
+        frames: list[mx.array] = []
 
-        with lm_gen.streaming(len(states)):
-            for offset in range(self.max_gen_length):
-                if all(state.end_step is not None for state in states):
-                    max_end_step = max(state.end_step for state in states)
-                    if offset >= max_end_step + self.delay_steps + self.final_padding:
-                        break
-                missing = self.lm.n_q - self.lm.dep_q
-                input_tokens = torch.full((len(states), missing, 1), self.machine.token_ids.zero,
-                                          dtype=torch.long, device=self.lm.device)
-                frame = lm_gen.step(input_tokens)
-                if frame is not None:
-                    frames.append(frame.clone())
+        for offset in range(self.max_gen_length):
+            if all(state.end_step is not None for state in states):
+                max_end_step = max(state.end_step for state in states)
+                if offset >= max_end_step + self.delay_steps + self.final_padding:
+                    break
+            missing = self.lm.n_q - self.lm.dep_q
+            input_tokens = mx.ones((len(states), missing), dtype=mx.int64) * self.machine.token_ids.zero
+            frame = lm_gen.step(input_tokens)
+            if frame is not None:
+                frames.append(mx.array(frame))
         return TTSResult(
             frames, logged_text_tokens,
             [state.end_step for state in states],

@@ -271,6 +271,33 @@ class Lm(nn.Module):
         else:
             self.condition_provider = None
 
+    @property
+    def n_q(self) -> int:
+        return self.cfg.audio_codebooks
+
+    @property
+    def dep_q(self) -> int:
+        return self.cfg.depformer.num_slices
+
+    @property
+    def audio_offset(self) -> int:
+        return 1
+
+    @property
+    def delays(self) -> list[int]:
+        return self.cfg.audio_delays
+
+    def forward_text(
+        self,
+        token_ids: mx.array,
+    ) -> tuple[mx.array, mx.array]:
+        # Note that this does not apply the depformer.
+        xs = self.text_emb(token_ids)
+        transformer_out = self.transformer(xs, cache=self.transformer_cache)
+        transformer_out = self.out_norm(transformer_out)
+        text_logits = self.text_linear(transformer_out)
+        return (transformer_out, text_logits)
+
     def __call__(
         self,
         token_ids: mx.array,
@@ -290,6 +317,8 @@ class Lm(nn.Module):
         audio_sampler: sampling.Sampler,
         ct: ConditionTensor | None = None,
         cfg_coef: float = 1.0,
+        on_text_hook = None,
+        on_audio_hook = None,
     ) -> tuple[mx.array, mx.array | None]:
         xs = self.text_emb(text_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
@@ -307,6 +336,8 @@ class Lm(nn.Module):
             text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
 
         text_token, _ = text_sampler(text_logits[:, 0])
+        if on_text_hook is not None:
+            on_text_hook(text_token)
         if len(self.depformer.slices) > 0:
             audio_tokens = self.depformer.sample(
                 transformer_out,
@@ -315,6 +346,8 @@ class Lm(nn.Module):
                 self.depformer_cache,
                 cfg_coef=cfg_coef,
             )
+            if on_audio_hook is not None:
+                on_audio_hook(audio_tokens)
         else:
             audio_tokens = None
         return text_token, audio_tokens

@@ -49,7 +49,7 @@ class ConditionAttributes:
     Typically, `audiocraft.data.audio_dataset.SegmentInfo` will convert
     to this class to make conditioning agnostic to the type of dataset.
 
-    There are two kinds of conditionings: text (or None), or raw torch tensors (with a mask).
+    There are two kinds of conditionings: text (or None), or raw mlx tensors (with a mask).
 
     """
     text: tp.Dict[str, tp.Optional[str]] = field(default_factory=dict)
@@ -133,3 +133,53 @@ class ConditionProvider(nn.Module):
             raise ValueError(f"unsupported conditioner {name}")
         tensor = self.conditioners[name].condition(value)
         return ConditionTensor(tensor)
+
+def dropout_tensor(condition: TensorCondition) -> TensorCondition:
+    """Utility function for nullifying a WavCondition object.
+    """
+    return TensorCondition(
+        tensor=mx.zeros_like(condition.tensor),
+        mask=mx.zeros_like(condition.mask))
+
+
+def dropout_condition_(sample: ConditionAttributes, condition_type: str, condition: str) -> None:
+    """Utility function for nullifying an attribute inside a ConditionAttributes object.
+    Works in-place.
+    """
+    valid_conditions = ConditionAttributes.condition_types()
+    if condition_type not in valid_conditions:
+        raise ValueError(
+            "dropout_condition got an unexpected condition type!"
+            f" expected one of {valid_conditions} but got '{condition_type}'")
+
+    if condition not in getattr(sample, condition_type):
+        raise ValueError(
+            "dropout_condition received an unexpected condition!"
+            f" expected tensor={sample.tensor.keys()} and text={sample.text.keys()}"
+            f" but got '{condition}' of type '{condition_type}'!"
+        )
+
+    if condition_type == 'tensor':
+        tensor_condition = sample.tensor[condition]
+        sample.tensor[condition] = dropout_tensor(tensor_condition)
+    elif condition_type == 'text':
+        sample.text[condition] = None
+    else:
+        assert False
+
+
+def dropout_all_conditions(attributes: tp.Sequence[ConditionAttributes]) -> list[ConditionAttributes]:
+    """
+    Args:
+        attributes (list[ConditionAttributes]): All conditions attributes.
+    Returns:
+        list[ConditionAttributes]: Same with all conditions dropped.
+    """
+    attributes = [attribute.copy() for attribute in attributes]
+    for condition_type in ConditionAttributes.condition_types():
+        for attribute in attributes:
+            for condition in getattr(attribute, condition_type):
+                dropout_condition_(attribute, condition_type, condition)
+    return attributes
+
+
