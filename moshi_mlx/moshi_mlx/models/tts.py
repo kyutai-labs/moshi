@@ -491,7 +491,6 @@ class TTSModel:
                 _conditioner = self.lm.condition_provider.conditioners[_key]
                 _ca_src = _conditioner.condition(_value)
                 if cross_attention_src is None:
-                    print(_ca_src.shape)
                     cross_attention_src = _ca_src
                 else:
                     raise ValueError("multiple cross-attention conditioners")
