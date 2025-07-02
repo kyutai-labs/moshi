@@ -10,7 +10,7 @@ dependencies = [
     "sentencepiece == 0.2",
     "sounddevice == 0.5",
     "sphn >= 0.1.4, < 0.2.0",
-    "mlx >= 0.24.0, < 0.25",
+    "mlx >= 0.26.0, < 0.27",
     "aiohttp>=3.10.5, <3.12",
 ]
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]

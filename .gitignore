@@ -182,3 +182,4 @@ client/node_modules
 timings.json
 mlx-trace.json
 /scripts/token.txt
+tts-outputs

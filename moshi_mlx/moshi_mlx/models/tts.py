@@ -13,18 +13,20 @@ to feed and feed it the token representation of the word over the next few steps
 from collections import deque
 from dataclasses import dataclass, field
 from functools import cached_property
+import mlx.core as mx
 import re
 from pathlib import Path
 import typing as tp
 
-from safetensors.torch import load_file
 from sentencepiece import SentencePieceProcessor
 import sphn
-import torch
 
-from ..conditioners import ConditionAttributes, dropout_all_conditions, TensorCondition
-from ..conditioners.text import LUTConditioner
-from . import loaders, MimiModel, LMModel, LMGen
+from . import Lm, LmGen
+from ..modules.conditioner import (
+    ConditionAttributes, LutConditioner, dropout_all_conditions, TensorCondition, ConditionTensor)
+from .mimi import Mimi
+from ..utils.loaders import hf_get
+from ..utils.sampling import Sampler
 
 
 DEFAULT_DSM_TTS_REPO = 'kyutai/tts-1.6b-en_fr'
@@ -68,7 +70,7 @@ class Entry:
     tokens: list[int]
     text: str
     padding: int = 0
-    audio_tokens: torch.Tensor | None = None
+    audio_tokens: mx.array | None = None
 
 
 @dataclass
@@ -109,10 +111,10 @@ class State:
         return []
 
 
-def _delayed(codes: torch.Tensor, delays: list[int], fill_value: int) -> torch.Tensor:
+def _delayed(codes: mx.array, delays: list[int], fill_value: int) -> mx.array:
     # Apply the acoustic delay on the provided audio tokens.
     K, T = codes.shape
-    out = torch.full((K, T + max(delays)), fill_value, device=codes.device, dtype=torch.long)
+    out = mx.full((K, T + max(delays)), fill_value, dtype=mx.int64)
     for k, delay in enumerate(delays):
         out[k, delay: delay + T] = codes[k]
     return out
@@ -331,7 +333,7 @@ class TTSResult:
             at which step the given `word` in the transcript should appear. Divide by the frame rate
             to obtain a time stamp.
     """
-    frames: list[torch.Tensor]
+    frames: list[mx.array]
     logged_text_tokens: list[list[tuple[int, int]]]
     end_steps: list[int | None]
     all_consumption_times: list[list[int]]
@@ -362,9 +364,8 @@ class TTSModel:
 
     """
 
-    # the following params will be automatically set by `from_checkpoint_info`
-    lm: LMModel
-    mimi: MimiModel
+    lm: Lm
+    mimi: Mimi
     tokenizer: SentencePieceProcessor
 
     voice_suffix: str
@@ -382,44 +383,52 @@ class TTSModel:
     max_gen_length: int = 30000
     padding_bonus: float = 0.
 
-    @staticmethod
-    def from_checkpoint_info(checkpoint_info: loaders.CheckpointInfo,
-                             initial_padding: int = 2,
-                             max_padding: int = 8,
-                             voice_repo: str = DEFAULT_DSM_TTS_VOICE_REPO,
-                             device: torch.device | str = 'cpu',
-                             dtype: torch.dtype = torch.bfloat16, **kwargs) -> 'TTSModel':
-        assert checkpoint_info.raw_config is not None
-        model_id = checkpoint_info.raw_config['model_id']
-        voice_suffix = f".{model_id['sig']}@{model_id['epoch']}.safetensors"
+    def __init__(
+            self,
+            lm: Lm,
+            mimi: Mimi,
+            tokenizer: SentencePieceProcessor,
+            temp: float = 0.6,
+            cfg_coef: float = 1.0,
+            final_padding: int = 4,
+            n_q: int = 32,
+            max_gen_length: int = 30000,
+            padding_bonus: float = 0.,
+            initial_padding: int = 2,
+            max_padding: int = 8,
+            voice_repo: str = DEFAULT_DSM_TTS_VOICE_REPO,
+            raw_config: dict = {},
+    ):
+        self.lm = lm
+        self.mimi = mimi
+        self.tokenizer = tokenizer
+        self.temp = temp
+        self.cfg_coef = cfg_coef
+        self.final_padding = final_padding
+        self.n_q = n_q
+        self.max_gen_length = max_gen_length
+        self.padding_bonus = padding_bonus
+        model_id = raw_config['model_id']
+        self.voice_suffix = f".{model_id['sig']}@{model_id['epoch']}.safetensors"
+        self.voice_repo = voice_repo
 
-        mimi = checkpoint_info.get_mimi(device=device)
-        tokenizer = checkpoint_info.get_text_tokenizer()
-        lm = checkpoint_info.get_moshi(device=device, dtype=dtype)
+        token_ids = TokenIds(lm.cfg.text_out_vocab_size + 1)
+        tts_config = raw_config['tts_config']
+        self.delay_steps = int(tts_config['audio_delay'] * mimi.frame_rate)
+        second_stream_ahead = tts_config.get('second_stream_ahead', 0)
 
-        token_ids = TokenIds(lm.text_card + 1)
-        delay_steps = int(checkpoint_info.tts_config['audio_delay'] * mimi.frame_rate)
-        second_stream_ahead = checkpoint_info.tts_config.get('second_stream_ahead', 0)
-
-        machine = StateMachine(
+        self.machine = StateMachine(
             token_ids=token_ids, second_stream_ahead=second_stream_ahead,
             max_padding=max_padding, initial_padding=initial_padding)
-        tts_model = TTSModel(
-            lm=lm, mimi=mimi, tokenizer=tokenizer,
-            voice_suffix=voice_suffix, voice_repo=voice_repo,
-            machine=machine, delay_steps=delay_steps,
-            **kwargs)
-        mimi.set_num_codebooks(tts_model.n_q)
-        return tts_model
 
     @cached_property
     def valid_cfg_conditionings(self) -> set[float]:
         valid_cfg_conditionings = set()
         if self.lm.condition_provider is not None and 'cfg' in self.lm.condition_provider.conditioners:
             cfg_conditioner = self.lm.condition_provider.conditioners['cfg']
-            assert isinstance(cfg_conditioner, LUTConditioner)
-            assert cfg_conditioner.tokenizer.possible_values is not None
-            valid_cfg_conditionings = set(float(x) for x in cfg_conditioner.tokenizer.possible_values)
+            assert isinstance(cfg_conditioner, LutConditioner)
+            assert cfg_conditioner.possible_values is not None
+            valid_cfg_conditionings = set(float(x) for x in cfg_conditioner.possible_values)
         return valid_cfg_conditionings
 
     @cached_property
@@ -434,10 +443,9 @@ class TTSModel:
             self.tokenizer, self.machine.token_ids, self.mimi.frame_rate, script,
             multi_speaker=self.multi_speaker, padding_between=padding_between)
 
-    @torch.no_grad()
     def generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],
-                 attributes: tp.Sequence[ConditionAttributes],
-                 prefixes: list[torch.Tensor] | None = None,
+                 attributes: tp.Sequence[tp.Any],
+                 prefixes: list[mx.array] | None = None,
                  cfg_is_no_prefix: bool = True,
                  cfg_is_no_text: bool = True,
                  **kwargs
@@ -454,26 +462,13 @@ class TTSModel:
             **kwargs: passed to `moshi.models.lm.LMGen`.
         """
 
-        def _main_wrapper(*args, **kwargs):
-            transformer_out, text_logits = original(*args, **kwargs)
-            if self.padding_bonus:
-                text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
-            return transformer_out, text_logits
-
-        original = self.lm.forward_text
-        self.lm.forward_text = _main_wrapper
-
-        try:
-            return self._generate(all_entries, attributes, prefixes,
-                                  cfg_is_no_prefix, cfg_is_no_text, **kwargs)
-        finally:
-            self.lm.forward_text = original
-
-    def _generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],
-                  attributes: tp.Sequence[ConditionAttributes],
-                  prefixes: list[torch.Tensor] | None = None,
-                  cfg_is_no_prefix: bool = True, cfg_is_no_text: bool = True,
-                  **kwargs):
+        # TODO(laurent):
+        # Re-enable the padding bonus.
+        # def _main_wrapper(*args, **kwargs):
+        #     transformer_out, text_logits = original(*args, **kwargs)
+        #     if self.padding_bonus:
+        #         text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
+        #     return transformer_out, text_logits
 
         if self.cfg_coef != 1.0:
             if self.valid_cfg_conditionings:
@@ -484,8 +479,22 @@ class TTSModel:
             attributes = list(attributes) + nulled
 
         assert self.lm.condition_provider is not None
-        prepared = self.lm.condition_provider.prepare(attributes)
-        condition_tensors = self.lm.condition_provider(prepared)
+        ct = None
+        cross_attention_src = None
+        for _attr in attributes:
+            for _key, _value in _attr.text.items():
+                _ct = self.lm.condition_provider.condition_tensor(_key, _value)
+                if ct is None:
+                    ct = _ct
+                else:
+                    ct = ConditionTensor(ct.tensor + _ct.tensor)
+            for _key, _value in _attr.tensor.items():
+                _conditioner = self.lm.condition_provider.conditioners[_key]
+                _ca_src = _conditioner.condition(_value)
+                if cross_attention_src is None:
+                    cross_attention_src = _ca_src
+                else:
+                    raise ValueError("multiple cross-attention conditioners")
 
         states = []
         for entries in all_entries:
@@ -495,7 +504,6 @@ class TTSModel:
         cfg_is_masked_until = None
         text_prefixes = None
         audio_prefixes = None
-        device = self.lm.device
         if prefixes is not None:
             assert len(all_entries) == len(prefixes), f"Not enough prefixes, expected {len(all_entries)}."
             if cfg_is_no_prefix:
@@ -507,26 +515,24 @@ class TTSModel:
                     cfg_is_masked_until.append(prefix.shape[-1] + self.delay_steps)
                 K, _ = prefix.shape
                 assert K == self.lm.num_codebooks
-                text_prefixes.append(deque(prefix[0].cpu().tolist()))
+                text_prefixes.append(deque(prefix[0].tolist()))
                 delays = [d + self.delay_steps for d in self.lm.delays[self.lm.audio_offset:]]
                 delayed = _delayed(prefix[self.lm.audio_offset:], delays, self.machine.token_ids.ungenerated)
-                delayed = delayed.to(device)
-                audio_prefixes.append(deque(delayed.t()))
+                audio_prefixes.append(deque(delayed.T))
 
         def _on_audio_hook(audio_tokens):
-            audio_offset = self.lm.audio_offset
             delays = self.lm.delays
             ungenerated = self.machine.token_ids.ungenerated
-            for q in range(audio_tokens.shape[1]):
-                delay = delays[q + audio_offset]
+            for q in range(audio_tokens.shape[0]):
+                delay = delays[q]
                 if offset < delay + self.delay_steps:
-                    audio_tokens[:, q] = self.machine.token_ids.zero
+                    audio_tokens[q] = self.machine.token_ids.zero
             if audio_prefixes is not None:
                 for b, audio_prefix in enumerate(audio_prefixes):
                     if audio_prefix:
                         audio_codes = audio_prefix.popleft()
                         mask = audio_codes != ungenerated
-                        audio_tokens[b] = torch.where(mask, audio_codes, audio_tokens[b])
+                        audio_tokens[b] = mx.where(mask, audio_codes, audio_tokens[b])
 
         def _on_text_hook(text_tokens):
             tokens = text_tokens.tolist()
@@ -538,31 +544,35 @@ class TTSModel:
                     out_token, _ = self.machine.process(offset, state, token)
                 out_tokens.append(out_token)
                 logged.append((token, out_token))
-            text_tokens[:] = torch.tensor(out_tokens, dtype=torch.long, device=text_tokens.device)
+            text_tokens[:] = mx.array(out_tokens, dtype=mx.int64)
 
-        self.lm.dep_q = self.n_q
-        lm_gen = LMGen(
-            self.lm, temp=self.temp, temp_text=self.temp,
-            cfg_coef=self.cfg_coef, condition_tensors=condition_tensors,
-            on_text_hook=_on_text_hook, on_audio_hook=_on_audio_hook,
-            cfg_is_masked_until=cfg_is_masked_until, cfg_is_no_text=cfg_is_no_text,
-            **kwargs)
+        lm_gen = LmGen(
+            self.lm,
+            max_steps=self.max_gen_length,
+            text_sampler=Sampler(temp=self.temp),
+            audio_sampler=Sampler(temp=self.temp),
+            cfg_coef=self.cfg_coef,
+            on_text_hook=_on_text_hook,
+            on_audio_hook=_on_audio_hook,
+            # TODO(laurent):
+            # cfg_is_masked_until=cfg_is_masked_until,
+            # cfg_is_no_text=cfg_is_no_text,
+        )
 
         logged_text_tokens = [[] for _ in states]
-        frames: list[torch.Tensor] = []
+        frames: list[mx.array] = []
 
-        with lm_gen.streaming(len(states)):
-            for offset in range(self.max_gen_length):
-                if all(state.end_step is not None for state in states):
-                    max_end_step = max(state.end_step for state in states)
-                    if offset >= max_end_step + self.delay_steps + self.final_padding:
-                        break
-                missing = self.lm.n_q - self.lm.dep_q
-                input_tokens = torch.full((len(states), missing, 1), self.machine.token_ids.zero,
-                                          dtype=torch.long, device=self.lm.device)
-                frame = lm_gen.step(input_tokens)
-                if frame is not None:
-                    frames.append(frame.clone())
+        for offset in range(self.max_gen_length):
+            if all(state.end_step is not None for state in states):
+                max_end_step = max(state.end_step for state in states)
+                if offset >= max_end_step + self.delay_steps + self.final_padding:
+                    break
+            missing = self.lm.n_q - self.lm.dep_q
+            input_tokens = mx.ones((len(states), missing), dtype=mx.int64) * self.machine.token_ids.zero
+            lm_gen.step(input_tokens, ct=ct, cross_attention_src=cross_attention_src)
+            frame = lm_gen.last_audio_tokens()
+            if frame is not None and (frame != self.machine.token_ids.zero).all():
+                frames.append(mx.array(frame)[:, :, None])
         return TTSResult(
             frames, logged_text_tokens,
             [state.end_step for state in states],
@@ -574,12 +584,12 @@ class TTSModel:
         from a HuggingFace repository. To retrieve a voice from another repo, you can also use
         the `hf://REPO/PATH` syntax.
         """
-        file = loaders.hf_get(voice_name + self.voice_suffix, self.voice_repo,
-                              check_local_file_exists=True)
+        file = hf_get(voice_name + self.voice_suffix, self.voice_repo,
+                      check_local_file_exists=True)
         return Path(file)
 
     def make_condition_attributes(
-            self, voices: list[Path], cfg_coef: float | None = None) -> ConditionAttributes:
+            self, voices: list[Path], cfg_coef: float | None = None):
         """Given a list of pre computed voice embeddings, returns a ConditionAttributes.
 
         Args:
@@ -593,18 +603,18 @@ class TTSModel:
             mask = None
             for idx in range(5):
                 if idx < len(voices):
-                    emb = load_file(voices[idx], device='cpu')['speaker_wavs']
-                    assert emb.dim() == 3
+                    emb: mx.array = mx.load(str(voices[idx]))['speaker_wavs']
+                    assert emb.ndim == 3
                     if voice_tensor is None:
-                        voice_tensor = torch.zeros(1, self.max_speakers, emb.shape[2], emb.shape[1])
+                        voice_tensor = mx.zeros((1, self.max_speakers, emb.shape[2], emb.shape[1]))
                     if mask is None:
-                        mask = torch.zeros(1, self.max_speakers, emb.shape[2], dtype=torch.bool)
-                    voice_tensor[:, idx, :, :] = emb.transpose(1, 2)
+                        mask = mx.zeros((1, self.max_speakers, emb.shape[2]), dtype=mx.uint8)
+                    voice_tensor[:, idx, :, :] = emb.swapaxes(1, 2)
                     mask[:, idx, :] = True
             assert voice_tensor is not None
             assert mask is not None
-            voice_tensor = voice_tensor.view(1, -1, voice_tensor.shape[-1])
-            mask = mask.view(1, -1)
+            voice_tensor = voice_tensor.reshape(1, -1, voice_tensor.shape[-1])
+            mask = mask.reshape(1, -1)
             tensors = {
                 'speaker_wavs': TensorCondition(voice_tensor, mask)
             }
@@ -621,10 +631,9 @@ class TTSModel:
                 raise ValueError(f"Unsupported value for cfg_coef, valid values are {valids}.")
         return ConditionAttributes(text=text, tensor=tensors)
 
-    def get_prefix(self, audio_path: Path | str) -> torch.Tensor:
+    def get_prefix(self, audio_path: Path | str) -> mx.array:
         wav, _ = sphn.read(audio_path, sample_rate=self.mimi.sample_rate)
-        with torch.no_grad():
-            prefix = self.mimi.encode(torch.from_numpy(wav).to(device=self.lm.device)[None])[0, :, :-2]
-        null_text = torch.full_like(prefix[:1], self.machine.token_ids.zero)
-        prefix = torch.cat([null_text, prefix], dim=0)
+        prefix = self.mimi.encode(mx.array(wav)[None])[0, :, :-2]
+        null_text = mx.ones_like(prefix[:1]) * self.machine.token_ids.zero
+        prefix = mx.concat([null_text, prefix], axis=0)
         return prefix

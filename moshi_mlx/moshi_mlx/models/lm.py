@@ -9,11 +9,11 @@ import mlx.nn as nn
 
 from ..modules.conditioner import (
     LutConditionerConfig,
+    TensorConditionerConfig,
     ConditionProvider,
     ConditionTensor,
 )
-from ..modules.kv_cache import KVCache, RotatingKVCache
-from ..modules.transformer import Transformer, TransformerConfig
+from ..modules.transformer import Transformer, TransformerConfig, LayerCache
 from ..utils import sampling
 
 
@@ -34,7 +34,8 @@ class LmConfig:
     audio_vocab_size: int
     audio_codebooks: int
     audio_delays: list[int]
-    conditioners: dict[str, LutConditionerConfig]
+    conditioners: dict[str, LutConditionerConfig | TensorConditionerConfig]
+    demux_second_stream: bool = False
 
     @property
     def generated_codebooks(self):
@@ -62,7 +63,7 @@ class LmConfig:
             max_period=data["max_period"],
             use_conv_block=False,
             use_conv_bias=True,
-            cross_attention=False,
+            cross_attention=data.get("cross_attention", False),
             gating=True,
             norm="rms_norm",
             positional_embedding=data["positional_embedding"],
@@ -82,7 +83,7 @@ class LmConfig:
                 bias_ff=False,
                 bias_attn=data.get("depformer_layer_scale", False),
                 layer_scale=None,
-                context=data.get("depformer_context", 8),
+                context=data.get("depformer_context", data["dep_q"]),
                 max_period=data.get("depformer_max_period", 8),
                 use_conv_block=False,
                 use_conv_bias=True,
@@ -104,15 +105,21 @@ class LmConfig:
         conditioners = {}
         if "conditioners" in data:
             for _name, _cfg in data["conditioners"].items():
-                if _cfg["type"] != "lut":
+                if _cfg["type"] == "lut":
+                    _cfg = _cfg["lut"]
+                    _cfg = LutConditionerConfig(
+                        n_bins=_cfg["n_bins"],
+                        dim=_cfg["dim"],
+                        tokenizer=_cfg["tokenizer"],
+                        possible_values=_cfg["possible_values"],
+                    )
+                elif _cfg["type"] == "tensor":
+                    _cfg = _cfg["tensor"]
+                    _cfg = TensorConditionerConfig(
+                        dim=_cfg["dim"],
+                    )
+                else:
                     raise ValueError(f"unsupported conditioner type {_cfg['type']}")
-                _cfg = _cfg["lut"]
-                _cfg = LutConditionerConfig(
-                    n_bins=_cfg["n_bins"],
-                    dim=_cfg["dim"],
-                    tokenizer=_cfg["tokenizer"],
-                    possible_values=_cfg["possible_values"],
-                )
                 conditioners[_name] = _cfg
         return LmConfig(
             transformer=transformer,
@@ -122,6 +129,7 @@ class LmConfig:
             audio_vocab_size=data["card"] + 1,
             audio_delays=data["delays"][1:],  # the first delay is for the text token.
             audio_codebooks=data["n_q"],
+            demux_second_stream=data.get("demux_second_stream", False),
             conditioners=conditioners,
         )
 
@@ -134,20 +142,63 @@ class LmConfig:
         return self.audio_vocab_size - 1
 
 
-class LowRankEmbeddings(nn.Module):
+class ScaledEmbedding(nn.Embedding):
+    """Boost learning rate for embeddings (with `scale`).
+
+    Args:
+        norm (bool): if True, uses a layer norm after the embedding.
+        zero_idx (int): special value indicating that the output should be exactly 0.
+        low_rank (int | None): if provided, uses low rank embedding with a linear layer to reach
+            the desired dimension. Quite efficient for reducing the number of weights for very large vocabs.
+        lr (float or None): learning rate to use, only valid if the `make_optim_group()` method is used.
+        demux_second_stream (bool): input tokens can be the cartesian product of the vocab size,
+            and they will be demuxed, e.g. `(tok2 * card + tok1)`. In that case the same embedding
+            is used with different linear matrices.
+    """
+
     def __init__(
         self,
-        in_vocab_size: int,
-        dim: int,
-        low_rank_dim: int,
+        num_embeddings: int,
+        embedding_dim: int,
+        zero_idx: int = -1,
+        low_rank: int | None = None,
+        demux_second_stream: bool = False,
     ):
-        super().__init__()
-        scale = (1.0 / low_rank_dim) ** 0.5
-        self.weight = mx.random.normal(shape=(in_vocab_size, low_rank_dim), scale=scale)
-        self.low_rank = nn.Linear(low_rank_dim, dim, bias=False)
+        super().__init__(num_embeddings, low_rank or embedding_dim)
+        assert zero_idx < 0, "Please use negative values for the zero_idx."
+        self.num_embeddings = num_embeddings
+        self.zero_idx = zero_idx
+        self.low_rank = None
+        if low_rank is not None:
+            self.low_rank = nn.Linear(low_rank, embedding_dim, bias=False)
 
-    def __call__(self, x: mx.array) -> mx.array:
-        return self.low_rank(self.weight[x])
+        self.demux_second_stream = demux_second_stream
+        assert self.zero_idx == -1, "When demuxing a second stream, zero_idx must be -1."
+        if self.demux_second_stream:
+            self.out1 = nn.Linear(low_rank or embedding_dim, embedding_dim, bias=False)
+            self.out2 = nn.Linear(low_rank or embedding_dim, embedding_dim, bias=False)
+
+    def __call__(self, input: mx.array) -> mx.array:
+        is_zero = input == self.zero_idx
+        zero = mx.zeros(1, dtype=input.dtype)
+        input = mx.max(input, 0)
+        if self.demux_second_stream:
+            left = input % self.num_embeddings
+            right = input // self.num_embeddings
+            # Right is itself between [-1, ..., card - 1], with -1 being the zero value.
+            right = right - 1
+            left = self.weight[left]
+            right_zero = (right < 0)[..., None]
+            right = mx.max(right, 0)
+            right = self.weight[right]
+            y = self.out1(left) + mx.where(right_zero, zero, self.out2(right))
+            y = mx.where(is_zero[..., None], zero, y)
+        else:
+            y = self.weight[input]
+            y = mx.where(is_zero[..., None], zero, y)
+            if self.low_rank is not None:
+                y = self.low_rank(y)
+        return y
 
 
 class DepFormerSlice(nn.Module):
@@ -156,15 +207,18 @@ class DepFormerSlice(nn.Module):
         in_vocab_size: int,
         out_vocab_size: int,
         main_transformer_dim: int,
+        demux_second_stream: bool,
         cfg: DepFormerConfig,
     ):
         super().__init__()
 
         dim = cfg.transformer.d_model
-        if cfg.low_rank_embeddings is None:
-            self.emb = nn.Embedding(in_vocab_size, dim)
-        else:
-            self.emb = LowRankEmbeddings(in_vocab_size, dim, cfg.low_rank_embeddings)
+        self.emb = ScaledEmbedding(
+            in_vocab_size,
+            dim,
+            low_rank=cfg.low_rank_embeddings,
+            demux_second_stream=demux_second_stream
+        )
         self.linear_in = nn.Linear(main_transformer_dim, dim, bias=False)
         self.linear_out = nn.Linear(dim, out_vocab_size, bias=False)
         self.transformer = Transformer(cfg.transformer)
@@ -184,6 +238,7 @@ class DepFormer(nn.Module):
                 in_vs,
                 cfg.audio_vocab_size - 1,
                 main_transformer_dim=cfg.transformer.d_model,
+                demux_second_stream=slice_idx == 0 and cfg.demux_second_stream,
                 cfg=cfg.depformer,
             )
             self.slices.append(slice)
@@ -196,7 +251,7 @@ class DepFormer(nn.Module):
         main_transformer_out: mx.array,
         sampler: sampling.Sampler,
         text_token: mx.array,
-        cache: list[KVCache] | list[RotatingKVCache],
+        cache: list[LayerCache],
         cfg_coef: float = 1.0,
     ) -> mx.array:
         tokens = []
@@ -232,7 +287,11 @@ class Lm(nn.Module):
         dim = cfg.transformer.d_model
         self.transformer: Transformer = Transformer(cfg.transformer)
         self.depformer: DepFormer = DepFormer(cfg)
-        self.text_emb = nn.Embedding(cfg.text_in_vocab_size, dim)
+        self.text_emb = ScaledEmbedding(
+            cfg.text_in_vocab_size,
+            dim,
+            demux_second_stream=cfg.demux_second_stream
+        )
         self.cfg: LmConfig = cfg
 
         if cfg.transformer.norm == "layer_norm":
@@ -244,14 +303,14 @@ class Lm(nn.Module):
 
         self.text_linear = nn.Linear(dim, cfg.text_out_vocab_size, bias=False)
         self.audio_embs = [
-            nn.Embedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)
+            ScaledEmbedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)
         ]
-        self.transformer_cache: list[RotatingKVCache] = (
+        self.transformer_cache: list[LayerCache] = (
             self.transformer.make_rot_cache()
         )
 
         if len(self.depformer.slices) > 0:
-            self.depformer_cache: list[KVCache] = self.depformer.slices[
+            self.depformer_cache: list[LayerCache] = self.depformer.slices[
                 0
             ].transformer.make_cache()
         else:
@@ -264,13 +323,42 @@ class Lm(nn.Module):
         else:
             self.condition_provider = None
 
+    @property
+    def n_q(self) -> int:
+        return self.cfg.audio_codebooks
+
+    @property
+    def dep_q(self) -> int:
+        return self.cfg.depformer.num_slices
+
+    @property
+    def audio_offset(self) -> int:
+        return 1
+
+    @property
+    def delays(self) -> list[int]:
+        return self.cfg.audio_delays
+
+    def forward_text(
+        self,
+        token_ids: mx.array,
+        cross_attention_src: None | mx.array = None,
+    ) -> tuple[mx.array, mx.array]:
+        # Note that this does not apply the depformer.
+        xs = self.text_emb(token_ids)
+        transformer_out = self.transformer(xs, cache=self.transformer_cache, cross_attention_src=cross_attention_src)
+        transformer_out = self.out_norm(transformer_out)
+        text_logits = self.text_linear(transformer_out)
+        return (transformer_out, text_logits)
+
     def __call__(
         self,
         token_ids: mx.array,
+        cross_attention_src: None | mx.array = None,
     ) -> mx.array:
         # Note that this does not apply the depformer.
         xs = self.text_emb(token_ids)
-        transformer_out = self.transformer(xs, cache=self.transformer_cache)
+        transformer_out = self.transformer(xs, cache=self.transformer_cache, cross_attention_src=cross_attention_src)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
         return text_logits
@@ -282,17 +370,25 @@ class Lm(nn.Module):
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
         ct: ConditionTensor | None = None,
+        cross_attention_src: None | mx.array = None,
         cfg_coef: float = 1.0,
+        on_text_hook=None,
+        on_audio_hook=None,
     ) -> tuple[mx.array, mx.array | None]:
         xs = self.text_emb(text_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
-            xs = xs + emb(token_ids)
+            _emb = emb(token_ids)
+            xs = xs + _emb
         if ct is not None:
             xs = xs + ct.tensor
 
         if cfg_coef != 1:
             xs = mx.tile(xs, (2, 1, 1))
-        transformer_out = self.transformer(xs, cache=self.transformer_cache)
+        transformer_out = self.transformer(
+            xs,
+            cache=self.transformer_cache,
+            cross_attention_src=cross_attention_src,
+        )
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
         if cfg_coef != 1:
@@ -300,6 +396,8 @@ class Lm(nn.Module):
             text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
 
         text_token, _ = text_sampler(text_logits[:, 0])
+        if on_text_hook is not None:
+            on_text_hook(text_token)
         if len(self.depformer.slices) > 0:
             audio_tokens = self.depformer.sample(
                 transformer_out,
@@ -308,6 +406,8 @@ class Lm(nn.Module):
                 self.depformer_cache,
                 cfg_coef=cfg_coef,
             )
+            if on_audio_hook is not None:
+                on_audio_hook(audio_tokens)
         else:
             audio_tokens = None
         return text_token, audio_tokens
