@@ -15,7 +15,7 @@ import sphn
 import torch
 
 from .models.tts import TTSModel, DEFAULT_DSM_TTS_REPO, DEFAULT_DSM_TTS_VOICE_REPO
-from .models.loaders import CheckpointInfo, hf_get
+from .models.loaders import CheckpointInfo
 
 
 @dataclass
@@ -118,7 +118,7 @@ def main():
             all_attributes.append(tts_model.make_condition_attributes(voices, cfg_coef_conditioning))
             if prefixes is not None:
                 assert len(request.voices) == 1, "For this model, only exactly one voice is supported."
-                prefix_path = hf_get(request.voices[0], args.voice_repo, check_local_file_exists=True)
+                prefix_path = tts_model.get_voice_path(request.voices[0])
                 prefixes.append(tts_model.get_prefix(prefix_path))
 
         print(f"Starting batch of size {len(batch)}")

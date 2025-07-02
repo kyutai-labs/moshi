@@ -1,0 +1,2 @@
+{"id": "hello", "turns": ["Hello, this is a test of the moshi text to speech system, this should result in some nicely sounding generated voice."], "voices": ["expresso/ex03-ex01_happy_001_channel1_334s.wav"]}
+{"id": "ceci_test", "turns": ["Bonjour, ceci est un test. Merci de bien vouloir respecter la consigne. Nous allons aussi synthétiser une voix en français."], "voices": ["unmute-prod-website/developpeuse-3.wav"]}
