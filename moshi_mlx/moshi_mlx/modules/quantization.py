@@ -20,6 +20,11 @@ class EuclideanCodebook(nn.Module):
         self._embedding = self.embedding_sum / cluster_usage
         self._c2 = self._embedding.square().sum(axis=-1) / 2
 
+    def update_in_place(self):
+        cluster_usage = mx.maximum(self.cluster_usage, self._epsilon)[:, None]
+        self._embedding = self.embedding_sum / cluster_usage
+        self._c2 = self._embedding.square().sum(axis=-1) / 2
+
     def update(self, parameters: dict) -> nn.Module:
         super().update(parameters)
         cluster_usage = mx.maximum(self.cluster_usage, self._epsilon)[:, None]
