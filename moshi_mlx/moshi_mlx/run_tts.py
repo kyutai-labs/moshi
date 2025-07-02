@@ -10,7 +10,6 @@ import json
 from pathlib import Path
 import time
 
-from huggingface_hub import hf_hub_download
 import numpy as np
 import mlx.core as mx
 import mlx.nn as nn
@@ -121,6 +120,7 @@ def main():
     parser.add_argument("--temp", type=float, default=0.6, help="Temperature for text and audio.")
     parser.add_argument("--cfg-coef", type=float, default=2., help="CFG coefficient.")
 
+    parser.add_argument("--quantize", type=int, help="The quantization to be applied, e.g. 8 for 8 bits.")
     parser.add_argument("--max-padding", type=int, default=8, help="Max padding in a row, in steps.")
     parser.add_argument("--initial-padding", type=int, default=2, help="Initial padding, in steps.")
     parser.add_argument("--final-padding", type=int, default=4, help="Amount of padding after the last word, in steps.")
@@ -145,7 +145,7 @@ def main():
 
     raw_config = args.config
     if raw_config is None:
-        raw_config = hf_hub_download(args.hf_repo, "config.json")
+        raw_config = hf_get("config.json", args.hf_repo)
 
     log("info", f"loading config from {args.config}")
     with open(hf_get(raw_config), "r") as fobj:
@@ -153,32 +153,35 @@ def main():
 
     mimi_weights = args.mimi_weights
     if mimi_weights is None:
-        mimi_weights = hf_hub_download(args.hf_repo, raw_config["mimi_name"])
+        mimi_weights = hf_get(raw_config["mimi_name"], args.hf_repo)
     mimi_weights = hf_get(mimi_weights)
 
     moshi_weights = args.moshi_weights
     if moshi_weights is None:
         moshi_name = raw_config.get("moshi_name", "model.safetensors")
-        moshi_weights = hf_hub_download(args.hf_repo, moshi_name)
+        moshi_weights = hf_get(moshi_name, args.hf_repo)
     moshi_weights = hf_get(moshi_weights)
 
     tokenizer = args.tokenizer
     if tokenizer is None:
-        tokenizer = hf_hub_download(args.hf_repo, raw_config["tokenizer_name"])
+        tokenizer = hf_get(raw_config["tokenizer_name"], args.hf_repo)
     tokenizer = hf_get(tokenizer)
 
     lm_config = models.LmConfig.from_config_dict(raw_config)
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
-    if moshi_weights.name.endswith(".q4.safetensors"):
-        nn.quantize(model, bits=4, group_size=32)
-    elif moshi_weights.name.endswith(".q8.safetensors"):
-        nn.quantize(model, bits=8, group_size=64)
 
     log("info", f"loading model weights from {moshi_weights}")
     moshi_weights = mx.load(str(moshi_weights))
     moshi_weights = convert_pth(moshi_weights, lm_config)
     model.load_weights(list(moshi_weights.items()), strict=True)
+
+    if args.quantize is not None:
+        log("info", f"quantizing model to {args.quantize} bits")
+        nn.quantize(model.depformer, bits=args.quantize)
+        for layer in model.transformer.layers:
+            nn.quantize(layer.self_attn, bits=args.quantize)
+            nn.quantize(layer.gating, bits=args.quantize)
 
     log("info", f"loading the text tokenizer from {tokenizer}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(str(tokenizer))  # type: ignore
