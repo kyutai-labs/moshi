@@ -27,9 +27,7 @@ class EuclideanCodebook(nn.Module):
 
     def update(self, parameters: dict) -> nn.Module:
         super().update(parameters)
-        cluster_usage = mx.maximum(self.cluster_usage, self._epsilon)[:, None]
-        self._embedding = self.embedding_sum / cluster_usage
-        self._c2 = self._embedding.square().sum(axis=-1) / 2
+        self.update_in_place()
         return self
 
     def encode(self, xs: mx.array) -> mx.array:
@@ -40,7 +38,8 @@ class EuclideanCodebook(nn.Module):
 
     def decode(self, xs: mx.array) -> mx.array:
         target_shape = list(xs.shape) + [self._dim]
-        return mx.take(self._embedding, xs.flatten(), axis=0).reshape(target_shape)
+        res = mx.take(self._embedding, xs.flatten(), axis=0).reshape(target_shape)
+        return res
 
 
 class VectorQuantization(nn.Module):

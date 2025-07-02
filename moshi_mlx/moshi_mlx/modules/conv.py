@@ -89,8 +89,7 @@ class ConvTranspose1d(nn.Module):
             self._expanded_weight = self.weight
             self._expanded_groups = groups
 
-    def update(self, parameters: dict) -> nn.Module:
-        super().update(parameters)
+    def update_in_place(self):
         groups = self._groups
         in_channels = self._in_channels
         out_channels = self._out_channels
@@ -105,6 +104,10 @@ class ConvTranspose1d(nn.Module):
         else:
             self._expanded_weight = self.weight
             self._expanded_groups = groups
+
+    def update(self, parameters: dict) -> nn.Module:
+        super().update(parameters)
+        self.update_in_place()
         return self
 
     def __call__(self, xs: mx.array) -> mx.array:
