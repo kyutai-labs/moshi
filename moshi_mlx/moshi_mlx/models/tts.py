@@ -360,8 +360,6 @@ class TTSModel:
         n_q: how many audio codebooks (e.g. RVQ levels) to generate. Trade off between quality and speed.
         max_gen_length: will stop generating after that many steps even if the text has not been fully consumed.
         padding_bonus: additive bonus for the padding logits, positive value will lead to slower speech.
-        kwargs: other arguments for `moshi.models.lm.LMGen`.
-
     """
 
     lm: Lm
@@ -448,7 +446,8 @@ class TTSModel:
                  prefixes: list[mx.array] | None = None,
                  cfg_is_no_prefix: bool = True,
                  cfg_is_no_text: bool = True,
-                 **kwargs
+                 on_audio_hook=None,
+                 on_text_hook=None,
                  ) -> TTSResult:
         """Synthesize text to audio. Returns a `TTSResult`.
 
@@ -533,6 +532,8 @@ class TTSModel:
                         audio_codes = audio_prefix.popleft()
                         mask = audio_codes != ungenerated
                         audio_tokens[b] = mx.where(mask, audio_codes, audio_tokens[b])
+            if on_audio_hook is not None:
+                on_audio_hook(audio_tokens)
 
         def _on_text_hook(text_tokens):
             tokens = text_tokens.tolist()
@@ -545,6 +546,8 @@ class TTSModel:
                 out_tokens.append(out_token)
                 logged.append((token, out_token))
             text_tokens[:] = mx.array(out_tokens, dtype=mx.int64)
+            if on_text_hook is not None:
+                on_text_hook(text_tokens)
 
         lm_gen = LmGen(
             self.lm,
