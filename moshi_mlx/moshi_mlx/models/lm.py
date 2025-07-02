@@ -323,6 +323,65 @@ class Lm(nn.Module):
         else:
             self.condition_provider = None
 
+    def load_pytorch_weights(
+        self,
+        file: str,
+        lm_config: LmConfig,
+        strict: bool = True,
+    ) -> nn.Module:
+        pth_t = mx.load(file)
+        depformer_chunks = lm_config.depformer.num_slices
+        if lm_config.depformer.weights_per_step_schedule is not None:
+            depformer_chunks = max(lm_config.depformer.weights_per_step_schedule) + 1
+
+        mlx_t = {}
+        mlx_t["out_norm.weight"] = pth_t["out_norm.alpha"][0, 0]
+        for name in ["text_emb.out1.weight", "text_emb.out2.weight", "text_emb.weight", "text_linear.weight"]:
+            mlx_t[name] = pth_t[name]
+        for cb_idx in range(lm_config.audio_codebooks):
+            mlx_t[f"audio_embs.{cb_idx}.weight"] = pth_t[f"emb.{cb_idx}.weight"]
+        for k, v in sorted(pth_t.items()):
+            if k.startswith("transformer"):
+                if k.endswith(".alpha"):
+                    v = v[0, 0]
+                k = k.replace(".alpha", ".weight")
+                k = k.replace(".in_proj_weight", ".in_proj.weight")
+                mlx_t[k] = v
+            if k.startswith("condition_provider."):
+                mlx_t[k] = v
+
+        for slice_idx in range(lm_config.depformer.num_slices):
+            pth_idx = slice_idx
+            if lm_config.depformer.weights_per_step_schedule is not None:
+                pth_idx = lm_config.depformer.weights_per_step_schedule[slice_idx]
+            slice_p = f"depformer.slices.{slice_idx}"
+            mlx_t[f"{slice_p}.linear_in.weight"] = pth_t[f"depformer_in.{pth_idx}.weight"]
+            mlx_t[f"{slice_p}.linear_out.weight"] = pth_t[f"linears.{slice_idx}.weight"]
+            if slice_idx == 0:
+                mlx_t[f"{slice_p}.emb.weight"] = pth_t["depformer_text_emb.weight"]
+                for _n in ["low_rank", "out1", "out2"]:
+                    if f"depformer_text_emb.{_n}.weight" in pth_t:
+                        mlx_t[f"{slice_p}.emb.{_n}.weight"] = pth_t[f"depformer_text_emb.{_n}.weight"]
+            else:
+                mlx_t[f"{slice_p}.emb.weight"] = pth_t[f"depformer_emb.{slice_idx - 1}.weight"]
+                if f"depformer_emb.{slice_idx - 1}.low_rank.weight" in pth_t:
+                    mlx_t[f"{slice_p}.emb.low_rank.weight"] = pth_t[f"depformer_emb.{slice_idx - 1}.low_rank.weight"]
+            for layer_idx in range(lm_config.depformer.transformer.num_layers):
+                p = f"{slice_p}.transformer.layers.{layer_idx}"
+                mlx_t[f"{p}.norm1.weight"] = pth_t[f"depformer.layers.{layer_idx}.norm1.alpha"][0, 0]
+                mlx_t[f"{p}.norm2.weight"] = pth_t[f"depformer.layers.{layer_idx}.norm2.alpha"][0, 0]
+                mlx_t[f"{p}.gating.linear_in.weight"] = (
+                    pth_t[f"depformer.layers.{layer_idx}.gating.{pth_idx}.linear_in.weight"])
+                mlx_t[f"{p}.gating.linear_out.weight"] = (
+                    pth_t[f"depformer.layers.{layer_idx}.gating.{pth_idx}.linear_out.weight"])
+                mlx_t[f"{p}.self_attn.in_proj.weight"] = mx.split(
+                    pth_t[f"depformer.layers.{layer_idx}.self_attn.in_proj_weight"], depformer_chunks
+                )[pth_idx]
+                mlx_t[f"{p}.self_attn.out_proj.weight"] = mx.split(
+                    pth_t[f"depformer.layers.{layer_idx}.self_attn.out_proj.weight"], depformer_chunks
+                )[pth_idx]
+        return self.load_weights(list(mlx_t.items()), strict=strict)
+
     @property
     def n_q(self) -> int:
         return self.cfg.audio_codebooks
