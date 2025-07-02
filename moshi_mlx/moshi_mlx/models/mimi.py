@@ -4,6 +4,7 @@
 
 from dataclasses import dataclass
 from ..modules import (
+    ConvTranspose1d,
     SeanetConfig,
     TransformerConfig,
     SeanetEncoder,
@@ -225,6 +226,8 @@ class Mimi(nn.Module):
 
         def _filter_fn(module, name, _):
             if isinstance(module, EuclideanCodebook) and name == "initialized":
+                module.update_in_place()
+            if isinstance(module, ConvTranspose1d) and name == "weight":
                 module.update_in_place()
             return True
 

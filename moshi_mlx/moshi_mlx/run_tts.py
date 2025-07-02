@@ -249,7 +249,8 @@ def main():
         wav_frames = []
         for frame in result.frames:
             # We are processing frames one by one, although we could group them to improve speed.
-            wav_frames.append(tts_model.mimi.decode_step(frame))
+            _pcm = tts_model.mimi.decode_step(frame)
+            wav_frames.append(_pcm)
         wavs = mx.concat(wav_frames, axis=-1)
         effective_duration = 0.
         for idx, request in enumerate(batch):
