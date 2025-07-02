@@ -160,4 +160,4 @@ class Sampler:
             else:
                 token = categorical_sampling(logits, self.temp)
 
-        return token, logprobs
+        return token.astype(mx.int32), logprobs
