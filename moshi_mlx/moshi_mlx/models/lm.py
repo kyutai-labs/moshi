@@ -13,8 +13,7 @@ from ..modules.conditioner import (
     ConditionProvider,
     ConditionTensor,
 )
-from ..modules.kv_cache import KVCache, RotatingKVCache
-from ..modules.transformer import Transformer, TransformerConfig
+from ..modules.transformer import Transformer, TransformerConfig, LayerCache
 from ..utils import sampling
 
 
@@ -252,7 +251,7 @@ class DepFormer(nn.Module):
         main_transformer_out: mx.array,
         sampler: sampling.Sampler,
         text_token: mx.array,
-        cache: list[KVCache] | list[RotatingKVCache],
+        cache: list[LayerCache],
         cfg_coef: float = 1.0,
     ) -> mx.array:
         tokens = []
@@ -306,12 +305,12 @@ class Lm(nn.Module):
         self.audio_embs = [
             ScaledEmbedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)
         ]
-        self.transformer_cache: list[RotatingKVCache] = (
+        self.transformer_cache: list[LayerCache] = (
             self.transformer.make_rot_cache()
         )
 
         if len(self.depformer.slices) > 0:
-            self.depformer_cache: list[KVCache] = self.depformer.slices[
+            self.depformer_cache: list[LayerCache] = self.depformer.slices[
                 0
             ].transformer.make_cache()
         else:
