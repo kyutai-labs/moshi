@@ -9,6 +9,7 @@ from ..modules import (
     SeanetEncoder,
     SeanetDecoder,
     SplitResidualVectorQuantizer,
+    EuclideanCodebook,
     ProjectedTransformer,
     ConvDownsample1d,
     ConvTrUpsample1d,
@@ -220,4 +221,12 @@ class Mimi(nn.Module):
             if k.endswith(".convtr.weight"):
                 v = v.transpose(1, 2, 0)
             weights.append((k, v))
-        return self.load_weights(weights, strict=strict)
+        m = self.load_weights(weights, strict=strict)
+
+        def _filter_fn(module, name, _):
+            if isinstance(module, EuclideanCodebook) and name == "initialized":
+                module.update_in_place()
+            return True
+
+        m.filter_and_map(_filter_fn)
+        return m
