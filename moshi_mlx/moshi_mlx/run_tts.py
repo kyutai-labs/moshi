@@ -141,7 +141,7 @@ def main():
 
     mx.random.seed(299792458)
 
-    print("retrieving checkpoint")
+    log("info", "retrieving checkpoints")
 
     raw_config = args.config
     if raw_config is None:
@@ -150,7 +150,6 @@ def main():
     log("info", f"loading config from {args.config}")
     with open(hf_get(raw_config), "r") as fobj:
         raw_config = json.load(fobj)
-    print(raw_config)
 
     mimi_weights = args.mimi_weights
     if mimi_weights is None:
@@ -236,7 +235,7 @@ def main():
                 prefix_path = hf_get(request.voices[0], args.voice_repo, check_local_file_exists=True)
                 prefixes.append(tts_model.get_prefix(prefix_path))
 
-        print(f"Starting batch of size {len(batch)}")
+        log("info", f"Starting batch of size {len(batch)}")
         result = tts_model.generate(
             all_entries, all_attributes, prefixes=prefixes,
             cfg_is_no_prefix=cfg_is_no_prefix, cfg_is_no_text=cfg_is_no_text)
@@ -244,8 +243,8 @@ def main():
         total_duration = frames.shape[0] * frames.shape[-1] / mimi.frame_rate
         time_taken = time.time() - begin
         total_speed = total_duration / time_taken
-        print(f"[LM] Batch of size {len(batch)} took {time_taken:.2f}s, "
-              f"total speed {total_speed:.2f}x")
+        log("info", f"[LM] Batch of size {len(batch)} took {time_taken:.2f}s, "
+            f"total speed {total_speed:.2f}x")
 
         wav_frames = []
         for frame in result.frames:
@@ -256,7 +255,7 @@ def main():
         for idx, request in enumerate(batch):
             end_step = result.end_steps[idx]
             if end_step is None:
-                print(f"Warning: end step is None, generation failed for {request.id}")
+                log("warning", f"end step is None, generation failed for {request.id}")
                 wav_length = wavs.shape[-1]
             else:
                 wav_length = int((mimi.sample_rate * (end_step + tts_model.final_padding) / mimi.frame_rate))
@@ -293,7 +292,7 @@ def main():
                 }
                 with open(filename.with_suffix('.json'), 'w') as f:
                     json.dump(debug_info, f)
-            print("Saved", filename)
+            log("info", f"saved {filename.absolute()}")
         time_taken = time.time() - begin
         total_speed = total_duration / time_taken
         effective_speed = effective_duration / time_taken
@@ -301,9 +300,9 @@ def main():
         # However, some items might have finished earlier, in which case the computation for those
         # was wasted. Effective speed accounts for that, and gives the speed up accounting for
         # the actual amount of usable audio generated.
-        print(f"[TOT] Batch of size {len(batch)} took {time_taken:.2f}s, "
-              f"total speed {total_speed:.2f}x, "
-              f"effective speed {effective_speed:.2f}x")
+        log("info", f"[TOT] Batch of size {len(batch)} took {time_taken:.2f}s, "
+            f"total speed {total_speed:.2f}x, "
+            f"effective speed {effective_speed:.2f}x")
         batch.clear()
 
     batch: list[TTSRequest] = []

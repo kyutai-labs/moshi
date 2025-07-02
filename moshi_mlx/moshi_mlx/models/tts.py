@@ -462,7 +462,8 @@ class TTSModel:
             **kwargs: passed to `moshi.models.lm.LMGen`.
         """
 
-        # TODO
+        # TODO(laurent):
+        # Re-enable the padding bonus.
         # def _main_wrapper(*args, **kwargs):
         #     transformer_out, text_logits = original(*args, **kwargs)
         #     if self.padding_bonus:
@@ -553,7 +554,7 @@ class TTSModel:
             cfg_coef=self.cfg_coef,
             on_text_hook=_on_text_hook,
             on_audio_hook=_on_audio_hook,
-            # TODO:
+            # TODO(laurent):
             # cfg_is_masked_until=cfg_is_masked_until,
             # cfg_is_no_text=cfg_is_no_text,
         )
