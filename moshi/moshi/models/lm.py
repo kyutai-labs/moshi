@@ -551,6 +551,7 @@ class LMGen(StreamingModule[_LMGenState]):
         check: bool = False,
         condition_tensors: ConditionTensors | None = None,
         on_text_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
+        on_text_logits_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         on_audio_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         support_out_of_sync: bool = False,
         cfg_is_masked_until: list[int] | None = None,
@@ -576,6 +577,7 @@ class LMGen(StreamingModule[_LMGenState]):
         )
         self.condition_tensors = condition_tensors
         self.on_text_hook = on_text_hook
+        self.on_text_logits_hook = on_text_logits_hook
         self.on_audio_hook = on_audio_hook
         self.support_out_of_sync = support_out_of_sync
         self.cfg_is_masked_until = cfg_is_masked_until
@@ -713,6 +715,8 @@ class LMGen(StreamingModule[_LMGenState]):
             else:
                 text_logits = logits_null + (logits - logits_null) * self.cfg_coef
         # Shape of text_logits should be [B, K_text=1, T=1, Card_text]
+        if self.on_text_logits_hook:
+            self.on_text_logits_hook(text_logits)
         text_token = sample_token(
             text_logits.float(),
             self.use_sampling,
