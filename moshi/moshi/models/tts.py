@@ -442,6 +442,7 @@ class TTSModel:
                  prefixes: list[torch.Tensor] | None = None,
                  cfg_is_no_prefix: bool = True,
                  cfg_is_no_text: bool = True,
+                 on_frame: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
                  **kwargs
                  ) -> TTSResult:
         """Synthesize text to audio. Returns a `TTSResult`.
@@ -453,6 +454,8 @@ class TTSModel:
             prefixes: this should be the list of the lengths up until when to mask for the CFG.
             cfg_is_no_prefix: if true, the null logits are computed with a masked prefix.
             cfg_is_no_text: if true, the null logits are computed without the text.
+            on_frame: a callback triggered when a frame of mimi codes is available, the frame
+                is a view on a pre-allocated tensor so has to be copied if you want to keep it.
             **kwargs: passed to `moshi.models.lm.LMGen`.
         """
 
@@ -549,6 +552,8 @@ class TTSModel:
                 frame = lm_gen.step(input_tokens)
                 if frame is not None:
                     frames.append(frame.clone())
+                    if on_frame is not None:
+                        on_frame(frame)
         return TTSResult(
             frames, logged_text_tokens,
             [state.end_step for state in states],
