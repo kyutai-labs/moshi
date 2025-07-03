@@ -278,8 +278,8 @@ wheels = [
 
 [[package]]
 name = "moshi"
-version = "0.2.7a1"
-source = { git = "https://github.com/kyutai-labs/moshi.git?subdirectory=moshi#e826a7034afbcfa8eb1d5250e4a9f8ecaac4e48d" }
+version = "0.2.7"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "bitsandbytes", marker = "sys_platform == 'linux'" },
@@ -292,6 +292,10 @@ dependencies = [
     { name = "sounddevice" },
     { name = "sphn" },
     { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8d/9a/877421c89ead8645d70392bcac7e14fcf312615a6cd04388822b351ea8f6/moshi-0.2.7.tar.gz", hash = "sha256:24631ec918c88baa7739f40143aa2ae822b1628c362e96639fb4ca2de34aae7b", size = 161898 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f3/ab/173eeb659bab12b36846cf49ffc7a7699c46e0e34c5b5f257bcad0468afd/moshi-0.2.7-py3-none-any.whl", hash = "sha256:5c64f2cb97db789f1bc6aa7dc4692a0ebf299e3475b7280dbdde613237e64ef5", size = 107089 },
 ]
 
 [[package]]
@@ -782,7 +786,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "julius" },
-    { name = "moshi", git = "https://github.com/kyutai-labs/moshi.git?subdirectory=moshi" },
+    { name = "moshi", specifier = "==0.2.7" },
     { name = "pydantic" },
     { name = "setuptools" },
     { name = "torchaudio" },
