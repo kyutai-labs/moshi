@@ -446,8 +446,9 @@ class TTSModel:
                  prefixes: list[mx.array] | None = None,
                  cfg_is_no_prefix: bool = True,
                  cfg_is_no_text: bool = True,
-                 on_audio_hook=None,
-                 on_text_hook=None,
+                 on_audio_hook: tp.Optional[tp.Callable[[mx.array], None]] = None,
+                 on_text_hook: tp.Optional[tp.Callable[[mx.array], None]] = None,
+                 on_frame: tp.Optional[tp.Callable[[mx.array], None]] = None,
                  ) -> TTSResult:
         """Synthesize text to audio. Returns a `TTSResult`.
 
@@ -576,6 +577,8 @@ class TTSModel:
             frame = lm_gen.last_audio_tokens()
             if frame is not None and (frame != self.machine.token_ids.zero).all():
                 frames.append(mx.array(frame)[:, :, None])
+                if on_frame is not None:
+                    on_frame(frame)
         return TTSResult(
             frames, logged_text_tokens,
             [state.end_step for state in states],
