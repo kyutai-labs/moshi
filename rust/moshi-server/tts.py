@@ -1,9 +1,9 @@
 # Copyright (c) Kyutai, all rights reserved.
 
 import argparse
-from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
+import huggingface_hub
 from pathlib import Path
 import random
 import time
@@ -14,8 +14,9 @@ from safetensors.torch import load_file
 import torch
 
 from moshi.conditioners import ConditionAttributes, dropout_all_conditions, TensorCondition
-from moshi.models import loaders, MimiModel, LMModel, LMGen
-from moshi.models.lm import _LMGenState
+from moshi.models import loaders
+from moshi.models.lm import _LMGenState, LMGen
+from moshi.models.tts import TTSModel, Entry, State, StateMachine, DEFAULT_DSM_TTS_REPO
 from moshi.modules.transformer import StreamingMultiheadAttention
 from pydantic import BaseModel
 
@@ -37,157 +38,46 @@ def flags_out_from_mask_(flags_out: np.ndarray, mask: torch.Tensor, value: int):
     flags_out[mask.numpy()] |= value
 
 
+def split_at_specific_separator(text: str, separator: str, index_of_separator: int) -> tuple[str, str]:
+    """ kyutai/tts-voices/unmute-prod-website/*.safetensors
+    becomes
+    ('kyutai/tts-voices', 'unmute-prod-website/*.safetensors)
+    with index_of_separator=1.
+    """
+    if text.count(separator) <= index_of_separator:
+        raise ValueError(f"Separator '{separator}' not found {index_of_separator + 1} times in `{text}`.")
+    parts = text.split(separator, index_of_separator + 1)
+    return separator.join(parts[:-1]), parts[-1]
+
+
 class Config(BaseModel):
     log_folder: Path = Path.home() / 'tmp/tts-service'
-    hf_repo: str = loaders.DEFAULT_REPO
+    hf_repo: str = DEFAULT_DSM_TTS_REPO
     mimi_weight: Path | None = None
-    moshi_weight: Path = Path.home() / 'models/moshi/moshi_b1d046da_445/checkpoint.safetensors'
-    config_path: Path = Path.home() / 'models/moshi/moshi_b1d046da_445/config.json'
-    tokenizer: Path = Path.home() / 'models/text-tokenizers/tokenizers/test_en_fr_audio_8000.model'
+    moshi_weight: Path | None = None
+    config_path: Path | None = None
+    tokenizer: Path | None = None
     device: str = 'cuda'
 
     n_q: int = 24
-    voice_folder: Path = Path.home() / 'models/tts-voices'
+    # This can have multiple formats:
+    # - A path to a folder with voices, e.g. `models/tts`
+    # - A huggingface snapshot, e.g. `hf-snapshot://kyutai/tts-voices`
+    # - A huggingface snapshot with a pattern,
+    #     e.g. `hf-snapshot://kyutai/tts-voices/unmute-prod-website/*.safetensors`
+    voice_folder: str = str(Path.home() / 'models/tts-voices')
     default_voice: str = "barack_demo.wav"
 
     temp: float = 0.6
-    cfg_coef: float = 1.5
-    cfg_is_no_text: bool = False
+    cfg_coef: float = 2.
 
-    max_padding: int = 6
+    max_padding: int = 8
     initial_padding: int = 2
     final_padding: int = 4
+    padding_between: int = 1
 
     interleaved_text_only: int = 2
     debug: bool = False
-
-
-@dataclass
-class TokenIds:
-    word = 0
-    pad = 3
-    main = 1
-    other = 2
-    zero = -1
-    # Text card for the text, embedding, e.g. including the special initial token.
-    card: int = 8001
-
-
-@dataclass
-class Entry:
-    tokens: list[int]
-    word: str
-    padding: int = 0
-
-
-@dataclass
-class State:
-    entries: deque[Entry]
-    lookahead: deque[int]
-    remaining_padding: int
-    forced_padding: int
-    queued: deque[int] = field(default_factory=deque)
-    end_step: int | None = None
-    consumption_times: list[int] = field(default_factory=list)
-    transcript: list[tuple[str, int]] = field(default_factory=list)
-
-    def get_tokens_ahead(self, lookahead: int) -> list[int]:
-        assert lookahead > 0
-        for entry in self.entries:
-            if entry.tokens:
-                lookahead -= 1
-                if lookahead == 0:
-                    return entry.tokens
-        return []
-
-
-@dataclass
-class StateMachine:
-    token_ids: TokenIds
-    max_paddings: int = 6
-    initial_padding: int = 2
-    second_stream_ahead: int = 0
-
-    def new_state(self, entries: tp.Sequence[Entry]) -> State:
-        return State(
-            entries=deque(entries),
-            lookahead=deque(),
-            remaining_padding=self.initial_padding,
-            forced_padding=self.initial_padding,
-        )
-
-    def process(self, step: int, state: State, token: int) -> tuple[int, bool]:
-        consumed_new_word = False
-        if token not in [self.token_ids.word, self.token_ids.pad]:
-            token = self.token_ids.pad
-
-        if state.queued:
-            # Some text tokens are yet to be fed, we must PAD.
-            token = self.token_ids.pad
-        elif state.forced_padding > 0:
-            # We are forced to pad, we must PAD.
-            token = self.token_ids.pad
-        elif state.remaining_padding <= 0:
-            # We are not allowed to pad, we must ask for a new WORD.
-            token = self.token_ids.word
-
-        if token == self.token_ids.word:
-            if state.entries:
-                entry = state.entries.popleft()
-                state.consumption_times.append(step)
-                if entry.tokens:
-                    consumed_new_word = True
-                    state.transcript.append((entry.word, step))
-                    # Entry contains a new word, we reset the max padding counter.
-                    state.queued.extend(entry.tokens)
-                    if self.second_stream_ahead:
-                        state.lookahead.extend(state.get_tokens_ahead(self.second_stream_ahead))
-                    state.remaining_padding = self.max_paddings
-                else:
-                    # Entry is only here to insert a break, pretend the token was a PAD.
-                    token = self.token_ids.pad
-                state.forced_padding = entry.padding
-            else:
-                token = self.token_ids.pad
-                if self.second_stream_ahead and state.end_step is None:
-                    # When using a second input text stream, the model will predict one last WORD token
-                    # to mark the end of the stream.
-                    token = self.token_ids.word
-                # Trying to consume past the last word, we reached the end.
-                if state.end_step is None:
-                    state.end_step = step
-
-        output: int | None = None
-        if token == self.token_ids.pad:
-            # Decrement the counters for remaining and forced pads.
-            if state.remaining_padding > 0:
-                state.remaining_padding -= 1
-            if state.forced_padding > 0:
-                state.forced_padding -= 1
-            if state.queued:
-                # We have some text tokens to feed to the model.
-                output = state.queued.popleft()
-            else:
-                output = self.token_ids.pad
-        elif token == self.token_ids.word:
-            output = self.token_ids.word
-        else:
-            raise RuntimeError(f"Invalid token {token}")
-        assert output is not None
-
-        if self.second_stream_ahead:
-            second = -1
-            if output == self.token_ids.word:
-                second = self.token_ids.word
-                if state.queued:
-                    output = state.queued.popleft()
-                else:
-                    output = self.token_ids.pad
-            elif state.lookahead:
-                second = state.lookahead.popleft()
-            output = (second + 1) * self.token_ids.card + output
-
-        return output, consumed_new_word
 
 
 def init(batch_size: int, config_override: dict) -> 'TTSService':
@@ -198,40 +88,65 @@ def init(batch_size: int, config_override: dict) -> 'TTSService':
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
         config.hf_repo, moshi_weights=config.moshi_weight, mimi_weights=config.mimi_weight,
         config_path=config.config_path, tokenizer=config.tokenizer)
-    assert checkpoint_info.model_id is not None
-    sig = checkpoint_info.model_id['sig']
-    epoch = checkpoint_info.model_id['epoch']
-    voice_suffix = f'.{sig}@{epoch}.safetensors'
 
-    print("loading voices")
+    cfg_condition = None
+    tts_model = TTSModel.from_checkpoint_info(
+        checkpoint_info, n_q=config.n_q, temp=config.temp, cfg_coef=config.cfg_coef,
+        max_padding=config.max_padding, initial_padding=config.initial_padding, final_padding=config.final_padding,
+        device=config.device)
+    if tts_model.valid_cfg_conditionings:
+        # Model was trained with CFG distillation.
+        cfg_condition = tts_model.cfg_coef
+        tts_model.cfg_coef = 1.
+        cfg_is_no_text = False
+    else:
+        cfg_is_no_text = True
+
+    voice_suffix = tts_model.voice_suffix
+    print(f"loading voices from {config.voice_folder}, with suffix {voice_suffix}.")
     all_attributes = {}
-    for file in config.voice_folder.glob(f'**/*{voice_suffix}'):
-        relative = file.relative_to(config.voice_folder)
+    voice_folder = config.voice_folder
+    if voice_folder.startswith("hf-snapshot://"):
+        voice_folder = voice_folder.removeprefix("hf-snapshot://")
+        # We detect if there is a pattern in the voice folder.
+        if voice_folder.count("/") > 1:
+            voice_folder, pattern = split_at_specific_separator(voice_folder, '/', 1)
+        else:
+            pattern = None
+        print(f"retrieving voices from {voice_folder}")
+        voice_folder = huggingface_hub.snapshot_download(voice_folder, allow_patterns=pattern)
+    voice_folder = Path(voice_folder)
+
+    for file in voice_folder.glob(f'**/*{voice_suffix}'):
+        relative = file.relative_to(voice_folder)
         name = str(relative.with_name(relative.name.removesuffix(voice_suffix)))
         try:
-            attributes = make_condition_attributes([file, file])
+            attributes = tts_model.make_condition_attributes([file, file], cfg_coef=cfg_condition)
         except Exception:
             print(f"[WARNING] failed to load voice {name}")
         else:
             all_attributes[name] = attributes
-    print("loading mimi")
-    mimi = checkpoint_info.get_mimi(device=config.device)
-    print("mimi loaded")
-    print("loading moshi")
-    lm = checkpoint_info.get_moshi(device=config.device, dtype=torch.bfloat16)
-    print("moshi loaded")
 
-    token_ids = TokenIds(card=lm.text_card + 1)
-    machine = StateMachine(
-        token_ids=token_ids, max_paddings=config.max_padding, initial_padding=config.initial_padding,
-        second_stream_ahead=checkpoint_info.tts_config.get('second_stream_ahead', 0))
-    delay_steps = int(checkpoint_info.tts_config['audio_delay'] * mimi.frame_rate)
+    if not all_attributes:
+        raise RuntimeError(
+            "No voices found, please check your voice folder. "
+            f"Searched for files matching {voice_folder}/**/*{voice_suffix}"
+        )
+
+    if config.default_voice not in all_attributes:
+        raise RuntimeError(
+            f"Default voice {config.default_voice}, please check your voice folder. "
+            f"Expected {voice_folder}/{config.default_voice}{voice_suffix} to exist"
+        )
+
     service = TTSService(
         batch_size=batch_size, default_attribute_name=config.default_voice,
         all_attributes=all_attributes,
-        lm=lm, mimi=mimi, machine=machine, delay_steps=delay_steps,
-        temp=config.temp, cfg_coef=config.cfg_coef, cfg_is_no_text=config.cfg_is_no_text,
-        final_padding=config.final_padding, n_q=config.n_q, debug=config.debug,
+        tts_model=tts_model,
+        cfg_condition=cfg_condition,
+        cfg_is_no_text=cfg_is_no_text,
+        padding_between=config.padding_between,
+        debug=config.debug,
         interleaved_text_only=config.interleaved_text_only)
 
     return service
@@ -255,18 +170,12 @@ class TTSService:
     default_attribute_name: str
     all_attributes: dict[str, ConditionAttributes]
 
-    lm: LMModel
-    mimi: MimiModel
+    tts_model: TTSModel
 
-    machine: StateMachine
-    delay_steps: int
-
-    temp: float = 0.6
-    cfg_coef: float = 1.0
-    cfg_is_no_text: bool = False
-    final_padding: int = 4
+    cfg_is_no_text: bool = True
+    cfg_condition: float | None = None
+    padding_between: int = 1
     n_q: int = 32
-    max_gen_length: int = 64000
     debug: bool = False
     interleaved_text_only: int = 0
 
@@ -276,9 +185,13 @@ class TTSService:
     cross_attentions: list[StreamingMultiheadAttention] = field(default_factory=list)
 
     def __post_init__(self):
-        self.device = self.lm.device
-        self.dtype = self.lm.dtype
-        self.lm.dep_q = self.n_q
+        lm = self.tts_model.lm
+        tts_model = self.tts_model
+        mimi = self.tts_model.mimi
+        machine = self.tts_model.machine
+
+        self.device = lm.device
+        self.dtype = lm.dtype
         self.remaining_text_only = self.interleaved_text_only
 
         for _ in range(self.batch_size):
@@ -289,47 +202,51 @@ class TTSService:
         for name, attributes in self.all_attributes.items():
             self.cross_attention_cache[name] = self._get_cross_attention_source([attributes])
 
-        assert self.lm.condition_provider is not None
+        assert lm.condition_provider is not None
+
         cas = [self.all_attributes[self.default_attribute_name]] * self.batch_size
-        if self.cfg_coef != 1.0:
+        if self.tts_model.cfg_coef != 1.0:
             nulled = make_null(cas)
             cas = cas + nulled
-        prepared = self.lm.condition_provider.prepare(cas)
-        condition_tensors = self.lm.condition_provider(prepared)
+        prepared = lm.condition_provider.prepare(cas)
+        condition_tensors = lm.condition_provider(prepared)
 
-        for module in self.lm.modules():
+        for module in lm.modules():
             if isinstance(module, StreamingMultiheadAttention) and module.cross_attention:
                 self.cross_attentions.append(module)
 
         self.lm_gen = LMGen(
-            self.lm, temp=self.temp, temp_text=self.temp, cfg_coef=self.cfg_coef,
+            lm, temp=tts_model.temp, temp_text=tts_model.temp, cfg_coef=tts_model.cfg_coef,
             condition_tensors=condition_tensors, on_text_hook=self._on_text_hook,
-            on_audio_hook=self._on_audio_hook, support_out_of_sync=True, cfg_is_no_text=self.cfg_is_no_text)
+            on_audio_hook=self._on_audio_hook, cfg_is_no_text=self.cfg_is_no_text,
+            support_out_of_sync=True)
         self.lm_gen.streaming_forever(self.batch_size)
-        self.mimi.streaming_forever(self.batch_size)
-        missing = self.lm.n_q - self.lm.dep_q
+        mimi.streaming_forever(self.batch_size)
+
+        missing = lm.n_q - lm.dep_q
         self.input_tokens = torch.full(
-            (self.batch_size, missing, 1), self.machine.token_ids.zero,
+            (self.batch_size, missing, 1), machine.token_ids.zero,
             dtype=torch.long, device=self.device)
         self.no_depformer_tokens = torch.full(
-            (self.batch_size, self.lm.dep_q, 1), self.machine.token_ids.zero,
+            (self.batch_size, lm.dep_q, 1), machine.token_ids.zero,
             dtype=torch.long, device=self.device)
         self.last_actives: list[bool] = [False] * self.batch_size
         print("warming up.")
         for _ in range(3):
-            self.mimi.set_exec_mask(torch.ones(self.batch_size, dtype=torch.bool))
+            mimi.set_exec_mask(torch.ones(self.batch_size, dtype=torch.bool))
             self.lm_gen.set_exec_mask(torch.ones(self.batch_size, dtype=torch.bool))
             frame = self.lm_gen.step(self.input_tokens)
             assert frame is not None
-            self.mimi.decode(frame[:, 1:].clamp(min=0))
+            mimi.decode(frame[:, 1:].clamp(min=0))
         print("ready to roll.")
 
     def _get_cross_attention_source(self, all_attributes: list[ConditionAttributes]) -> torch.Tensor:
-        assert self.lm.condition_provider is not None
-        assert self.lm.fuser is not None
-        prepared = self.lm.condition_provider.prepare(all_attributes)
-        condition_tensors = self.lm.condition_provider(prepared)
-        cross = self.lm.fuser.get_cross(condition_tensors)
+        lm = self.tts_model.lm
+        assert lm.condition_provider is not None
+        assert lm.fuser is not None
+        prepared = lm.condition_provider.prepare(all_attributes)
+        condition_tensors = lm.condition_provider(prepared)
+        cross = lm.fuser.get_cross(condition_tensors)
         assert cross is not None
         return cross.to(device=self.device, dtype=self.dtype)
 
@@ -339,9 +256,9 @@ class TTSService:
         return self.lm_gen._streaming_state
 
     def _on_audio_hook(self, audio_tokens: torch.Tensor) -> None:
-        delays = self.lm_gen.delays_cuda[1: 1 + self.lm.dep_q]
-        mask = self._lm_gen_state.offsets[:, None] < delays + self.delay_steps
-        audio_tokens.masked_fill_(mask, self.machine.token_ids.zero)
+        delays = self.lm_gen.delays_cuda[1: 1 + self.tts_model.lm.dep_q]
+        mask = self._lm_gen_state.offsets[:, None] < delays + self.tts_model.delay_steps
+        audio_tokens.masked_fill_(mask, self.tts_model.machine.token_ids.zero)
 
     def _on_text_hook(self, text_tokens) -> None:
         tokens = text_tokens.tolist()
@@ -351,7 +268,7 @@ class TTSService:
                 out_tokens.append(token)
                 continue
             assert client.state is not None
-            out_token, consumed_new_word = self.machine.process(client.offset, client.state, token)
+            out_token, consumed_new_word = self.tts_model.machine.process(client.offset, client.state, token)
 
             if self.flags_out is not None and consumed_new_word:
                 self.flags_out[b] |= MaskFlags.WORD_FINISHED.value
@@ -365,6 +282,10 @@ class TTSService:
     @torch.no_grad()
     def step(self, updates: list[tuple[int, list[int], np.ndarray | str | None]], pcm_out: np.ndarray,
              flags_out: np.ndarray, code_out: np.ndarray) -> None:
+        mimi = self.tts_model.mimi
+        machine = self.tts_model.machine
+        delay_steps = self.tts_model.delay_steps
+
         self.flags_out = flags_out
         flags_out[:] = 0
 
@@ -380,7 +301,7 @@ class TTSService:
             if not new_entry:
                 self._print(f"[{b}] NO TOKENS REALLY LAURENT.")
             if new_entry[0] == -1:
-                client.reset(self.machine)
+                client.reset(machine)
                 reset_mask[b] = True
                 new_entry = new_entry[1:]
                 if isinstance(voice, np.ndarray):
@@ -400,7 +321,10 @@ class TTSService:
                 client.is_complete = True
             else:
                 self._print(f"[{b}] Pushing {new_entry}.")
-                client.state.entries.append(Entry(new_entry, ''))
+                padding = 0
+                if self.padding_between > 0:
+                    padding = max(0, self.padding_between + len(new_entry) - 1)
+                client.state.entries.append(Entry(new_entry, '', padding=padding))
 
         actives = []
         mimi_actives = []
@@ -415,7 +339,7 @@ class TTSService:
             elif client.state.forced_padding > 0:
                 # We are sure we won't try to consume a word at this point.
                 active = True
-            elif len(client.state.entries) > self.machine.second_stream_ahead:
+            elif len(client.state.entries) > self.tts_model.machine.second_stream_ahead:
                 # We have some words ready to be consumed.
                 active = True
             else:
@@ -425,10 +349,10 @@ class TTSService:
 
             real_offset = client.offset - self.lm_gen.max_delay
 
-            mimi_active = active and (real_offset >= self.delay_steps)
+            mimi_active = active and (real_offset >= delay_steps)
             mimi_actives.append(mimi_active)
 
-            in_text_only = active and (client.offset < self.delay_steps)
+            in_text_only = active and (client.offset < delay_steps)
             in_text_onlys.append(in_text_only)
 
         in_text_only_mask = torch.tensor(in_text_onlys, dtype=torch.bool)
@@ -460,7 +384,7 @@ class TTSService:
         reset_mask = reset_mask.to(self.device)
 
         if new_voice_sources:
-            all_attributes = [make_condition_attributes([voice_source])
+            all_attributes = [make_condition_attributes([voice_source], cfg_condition=self.cfg_condition)
                               for voice_source in new_voice_sources]
             new_cross_sources += self._get_cross_attention_source(all_attributes).split(1)
             new_cross_indexes += new_voice_indexes
@@ -478,13 +402,13 @@ class TTSService:
 
         if need_reset:
             self.lm_gen.reset_streaming(reset_mask=reset_mask)
-            self.mimi.reset_streaming(reset_mask=reset_mask)
+            mimi.reset_streaming(reset_mask=reset_mask)
 
         if skip_exec:
             return
 
         self.lm_gen.set_exec_mask(exec_mask)
-        self.mimi.set_exec_mask(mimi_exec_mask)
+        mimi.set_exec_mask(mimi_exec_mask)
 
         depformer_replace_tokens = self.no_depformer_tokens if run_in_text_only else None
         frame = self.lm_gen.step(self.input_tokens, depformer_replace_tokens=depformer_replace_tokens)
@@ -495,7 +419,7 @@ class TTSService:
         if run_in_text_only:
             pcm = None
         else:
-            pcm = self.mimi.decode(audio_frame)
+            pcm = mimi.decode(audio_frame)
             pcm.clamp_(-0.99, 0.99)
 
         for b, client in enumerate(self.clients):
@@ -505,10 +429,11 @@ class TTSService:
                 self._print(f"[{b}] Offset {client.offset: 3d}, pendings={len(client.state.entries): 3d}.")
                 if client.is_complete and client.state.end_step is not None:
                     # We were waiting for the end of the generation.
-                    real_end = client.state.end_step + self.delay_steps + self.final_padding + self.lm_gen.max_delay
+                    real_end = (
+                        client.state.end_step + delay_steps + self.tts_model.final_padding + self.lm_gen.max_delay)
                     if client.offset >= real_end:
                         self._print(f"[{b}] Done.")
-                        client.reset(self.machine)
+                        client.reset(machine)
                         flags_out[b] |= MaskFlags.IS_EOS.value
         if pcm is not None:
             pcm_out[:] = pcm[:, 0].cpu().numpy()
@@ -545,7 +470,8 @@ class Profiler:
 
 
 def make_condition_attributes(voices: list[Path | torch.Tensor],
-                              max_speakers: int = 5) -> ConditionAttributes:
+                              max_speakers: int = 5,
+                              cfg_condition: float | None = None) -> ConditionAttributes:
     assert voices
     voice_tensor = None
     mask = None
@@ -570,7 +496,14 @@ def make_condition_attributes(voices: list[Path | torch.Tensor],
     tensors = {
         'speaker_wavs': TensorCondition(voice_tensor, mask)
     }
-    return ConditionAttributes(text={'control': 'ok'}, tensor=tensors)
+    text: dict[str, str | None] = {
+        'control': 'ok',
+    }
+    if cfg_condition is None:
+        text['cfg'] = None
+    else:
+        text['cfg'] = format(cfg_condition, '.1f')
+    return ConditionAttributes(text=dict(text), tensor=tensors)
 
 
 def make_null(all_attributes: tp.Sequence[ConditionAttributes]) -> list[ConditionAttributes]:

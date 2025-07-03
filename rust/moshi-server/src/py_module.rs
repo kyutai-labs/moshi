@@ -111,6 +111,7 @@ struct Channel {
     sent_init: bool,
     words: std::collections::VecDeque<String>,
     steps: usize,
+    prev_word_steps: usize,
 }
 
 impl Channel {
@@ -131,6 +132,7 @@ impl Channel {
             voice: voice.map(Voice::File),
             sent_init: false,
             steps: 0,
+            prev_word_steps: 0,
         }
     }
 }
@@ -305,9 +307,10 @@ impl Inner {
                                 if let Some(text) = c.words.pop_front() {
                                     let wwts = crate::tts::WordWithTimestamps {
                                         text,
-                                        start_s: c.steps as f64 / 12.5,
+                                        start_s: c.prev_word_steps as f64 / 12.5,
                                         stop_s: c.steps as f64 / 12.5,
                                     };
+                                    c.prev_word_steps = c.steps;
                                     match c.encoder.encode_word(wwts) {
                                         Ok(Some(msg)) => {
                                             let _ = c.out_tx.send(msg).is_err();
