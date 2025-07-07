@@ -779,6 +779,19 @@ class LMGen(StreamingModule[_LMGenState]):
             return None
         return out[0]
 
+    @torch.no_grad()
+    def step_with_extra_heads(
+        self,
+        input_tokens: torch.Tensor,
+        depformer_replace_tokens: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]] | None:
+        out = self._step(input_tokens, depformer_replace_tokens)
+        if out is None:
+            return None
+        out, transformer_out = out
+        extra_heads = [extra_head(transformer_out) for extra_head in self.lm_model.extra_heads]
+        return out, extra_heads
+
     def depformer_step(
         self,
         text_token: torch.Tensor,
