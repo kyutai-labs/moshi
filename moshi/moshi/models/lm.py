@@ -658,7 +658,7 @@ class LMGen(StreamingModule[_LMGenState]):
     @torch.no_grad()
     def _step(self, input_tokens: torch.Tensor,
               depformer_replace_tokens: torch.Tensor | None = None
-    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+              ) -> tuple[torch.Tensor, torch.Tensor] | None:
         state = self._streaming_state
         if state is None:
             raise RuntimeError(
