@@ -217,13 +217,14 @@ class LMModel(StreamingContainer):
             self.depformer_text_emb = None
             self.depformer = None
 
+        self.extra_heads = nn.ModuleList(
+            [nn.Linear(dim, extra_heads_dim, bias=False) for _ in range(extra_heads_num_heads)]
+        )
+
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
         self.linears = nn.ModuleList(
             [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
-        )
-        self.extra_heads = nn.ModuleList(
-            [nn.Linear(dim, extra_heads_dim, bias=False) for _ in range(extra_heads_num_heads)]
         )
         self.to(device=device, dtype=dtype)
         # We always keep the condition provider as float32.
