@@ -99,6 +99,8 @@ class LMModel(StreamingContainer):
         depformer_pos_emb: str = "sin",
         existing_text_padding_id: int = 3,
         existing_text_end_padding_id: int = 0,
+        extra_heads_num_heads: int = 0,
+        extra_heads_dim: int = 6,
         context: tp.Optional[int] = None,
         causal: bool = True,
         condition_provider: tp.Optional[ConditionProvider] = None,
@@ -219,6 +221,9 @@ class LMModel(StreamingContainer):
 
         self.linears = nn.ModuleList(
             [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
+        )
+        self.extra_heads = nn.ModuleList(
+            [nn.Linear(dim, extra_heads_dim, bias=False) for _ in range(extra_heads_num_heads)]
         )
         self.to(device=device, dtype=dtype)
         # We always keep the condition provider as float32.
@@ -651,8 +656,9 @@ class LMGen(StreamingModule[_LMGenState]):
         return state
 
     @torch.no_grad()
-    def step(self, input_tokens: torch.Tensor,
-             depformer_replace_tokens: torch.Tensor | None = None) -> torch.Tensor | None:
+    def _step(self, input_tokens: torch.Tensor,
+              depformer_replace_tokens: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
         state = self._streaming_state
         if state is None:
             raise RuntimeError(
@@ -763,7 +769,15 @@ class LMGen(StreamingModule[_LMGenState]):
         out = state.cache.gather(dim=2, index=index)
         mask = (state.offsets <= self.max_delay) | ~state.exec_mask
         out[mask, :, :] = lm_model.ungenerated_token_id
-        return out
+        return out, transformer_out
+
+    @torch.no_grad()
+    def step(self, input_tokens: torch.Tensor,
+             depformer_replace_tokens: torch.Tensor | None = None) -> torch.Tensor | None:
+        out = self._step(input_tokens, depformer_replace_tokens)
+        if out is None:
+            return None
+        return out[0]
 
     def depformer_step(
         self,
