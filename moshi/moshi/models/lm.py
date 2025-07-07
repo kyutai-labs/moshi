@@ -99,6 +99,8 @@ class LMModel(StreamingContainer):
         depformer_pos_emb: str = "sin",
         existing_text_padding_id: int = 3,
         existing_text_end_padding_id: int = 0,
+        extra_heads_num_heads: int = 0,
+        extra_heads_dim: int = 6,
         context: tp.Optional[int] = None,
         causal: bool = True,
         condition_provider: tp.Optional[ConditionProvider] = None,
@@ -214,6 +216,10 @@ class LMModel(StreamingContainer):
             self.depformer_emb = None
             self.depformer_text_emb = None
             self.depformer = None
+
+        self.extra_heads = nn.ModuleList(
+            [nn.Linear(dim, extra_heads_dim, bias=False) for _ in range(extra_heads_num_heads)]
+        )
 
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
@@ -651,8 +657,9 @@ class LMGen(StreamingModule[_LMGenState]):
         return state
 
     @torch.no_grad()
-    def step(self, input_tokens: torch.Tensor,
-             depformer_replace_tokens: torch.Tensor | None = None) -> torch.Tensor | None:
+    def _step(self, input_tokens: torch.Tensor,
+              depformer_replace_tokens: torch.Tensor | None = None
+              ) -> tuple[torch.Tensor, torch.Tensor] | None:
         state = self._streaming_state
         if state is None:
             raise RuntimeError(
@@ -763,7 +770,28 @@ class LMGen(StreamingModule[_LMGenState]):
         out = state.cache.gather(dim=2, index=index)
         mask = (state.offsets <= self.max_delay) | ~state.exec_mask
         out[mask, :, :] = lm_model.ungenerated_token_id
-        return out
+        return out, transformer_out
+
+    @torch.no_grad()
+    def step(self, input_tokens: torch.Tensor,
+             depformer_replace_tokens: torch.Tensor | None = None) -> torch.Tensor | None:
+        out = self._step(input_tokens, depformer_replace_tokens)
+        if out is None:
+            return None
+        return out[0]
+
+    @torch.no_grad()
+    def step_with_extra_heads(
+        self,
+        input_tokens: torch.Tensor,
+        depformer_replace_tokens: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]] | None:
+        out = self._step(input_tokens, depformer_replace_tokens)
+        if out is None:
+            return None
+        out, transformer_out = out
+        extra_heads = [extra_head(transformer_out) for extra_head in self.lm_model.extra_heads]
+        return out, extra_heads
 
     def depformer_step(
         self,
