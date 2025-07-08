@@ -198,7 +198,6 @@ def web_server(client_to_server, server_to_client, lm_config, args):
     input_queue = queue.Queue()
     output_queue = queue.Queue()
     text_queue = queue.Queue()
-    print(lm_config)
     if type(lm_config) is dict:
         nc = lm_config.get("dep_q", 8)
         max_delay = max(lm_config["delays"])
@@ -256,6 +255,7 @@ def web_server(client_to_server, server_to_client, lm_config, args):
 
         async def recv_loop():
             nonlocal close
+            all_pcm_data = None
             try:
                 async for message in ws:
                     if message.type == aiohttp.WSMsgType.ERROR:
@@ -276,47 +276,25 @@ def web_server(client_to_server, server_to_client, lm_config, args):
                     kind = message[0]
                     if kind == 1:  # audio
                         payload = message[1:]
-                        opus_reader.append_bytes(payload)
+                        pcm = opus_reader.append_bytes(payload)
+                        if pcm.shape[-1] == 0:
+                            continue
+                        if all_pcm_data is None:
+                            all_pcm_data = pcm
+                        else:
+                            all_pcm_data = np.concatenate((all_pcm_data, pcm))
+                        while all_pcm_data.shape[-1] >= FRAME_SIZE:
+                            chunk = all_pcm_data[:FRAME_SIZE]
+                            all_pcm_data = all_pcm_data[FRAME_SIZE:]
+                            input_queue.put_nowait(chunk)
+
                     else:
                         log("warning", f"unknown message kind {kind}")
             finally:
                 close = True
                 log("info", "connection closed")
 
-        async def opus_loop():
-            all_pcm_data = None
-
-            while True:
-                if close:
-                    return
-                await asyncio.sleep(0.001)
-                pcm = opus_reader.read_pcm()
-                if pcm.shape[-1] == 0:
-                    continue
-                if all_pcm_data is None:
-                    all_pcm_data = pcm
-                else:
-                    all_pcm_data = np.concatenate((all_pcm_data, pcm))
-                while all_pcm_data.shape[-1] >= FRAME_SIZE:
-                    chunk = all_pcm_data[:FRAME_SIZE]
-                    all_pcm_data = all_pcm_data[FRAME_SIZE:]
-                    input_queue.put_nowait(chunk)
-
         async def send_loop():
-            while True:
-                if close:
-                    return
-                await asyncio.sleep(0.001)
-                msg = opus_writer.read_bytes()
-                if len(msg) > 0:
-                    await ws.send_bytes(b"\x01" + msg)
-                try:
-                    _text = text_queue.get(block=False)
-                    await ws.send_bytes(b"\x02" + bytes(_text, encoding="utf8"))
-                except queue.Empty:
-                    continue
-
-        async def another_loop():
             while True:
                 if close:
                     return
@@ -324,7 +302,11 @@ def web_server(client_to_server, server_to_client, lm_config, args):
                 try:
                     pcm_data = output_queue.get(block=False)
                     assert pcm_data.shape == (1920,), pcm_data.shape
-                    opus_writer.append_pcm(pcm_data)
+                    msg = opus_writer.append_pcm(pcm_data)
+                    if len(msg) > 0:
+                        await ws.send_bytes(b"\x01" + msg)
+                    _text = text_queue.get(block=False)
+                    await ws.send_bytes(b"\x02" + bytes(_text, encoding="utf8"))
                 except queue.Empty:
                     continue
 
@@ -335,7 +317,7 @@ def web_server(client_to_server, server_to_client, lm_config, args):
             opus_reader = sphn.OpusStreamReader(SAMPLE_RATE)
             # Send the handshake.
             await ws.send_bytes(b"\x00")
-            await asyncio.gather(opus_loop(), recv_loop(), send_loop(), another_loop())
+            await asyncio.gather(recv_loop(), send_loop())
         log("info", "done with connection")
         return ws
 
