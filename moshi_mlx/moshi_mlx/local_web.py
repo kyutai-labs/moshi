@@ -313,6 +313,7 @@ def web_server(client_to_server, server_to_client, lm_config, args):
         log("info", "accepted connection")
         close = False
         async with lock:
+            log("info", "lock acquired")
             opus_writer = sphn.OpusStreamWriter(SAMPLE_RATE)
             opus_reader = sphn.OpusStreamReader(SAMPLE_RATE)
             # Send the handshake.

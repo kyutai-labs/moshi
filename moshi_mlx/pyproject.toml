@@ -1,4 +1,4 @@
-project]
+[project]
 name = "moshi_mlx"
 requires-python = ">= 3.10"
 description = "Moshi is moshi, but running on macOS"
