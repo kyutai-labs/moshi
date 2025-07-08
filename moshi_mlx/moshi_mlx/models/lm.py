@@ -36,6 +36,8 @@ class LmConfig:
     audio_delays: list[int]
     conditioners: dict[str, LutConditionerConfig | TensorConditionerConfig]
     demux_second_stream: bool = False
+    extra_heads_num_heads: int = 0
+    extra_heads_dim: int = 6
 
     @property
     def generated_codebooks(self):
@@ -131,6 +133,8 @@ class LmConfig:
             audio_codebooks=data["n_q"],
             demux_second_stream=data.get("demux_second_stream", False),
             conditioners=conditioners,
+            extra_heads_dim=data.get("extra_heads_dim", 6),
+            extra_heads_num_heads=data.get("extra_heads_num_heads", 0),
         )
 
     @property
@@ -305,6 +309,9 @@ class Lm(nn.Module):
         self.audio_embs = [
             ScaledEmbedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)
         ]
+        self.extra_heads = [
+            nn.Linear(dim, cfg.extra_heads_dim) for _ in range(cfg.extra_heads_num_heads)
+        ]
         self.transformer_cache: list[LayerCache] = (
             self.transformer.make_rot_cache()
         )
@@ -422,7 +429,7 @@ class Lm(nn.Module):
         text_logits = self.text_linear(transformer_out)
         return text_logits
 
-    def sample(
+    def _sample(
         self,
         text_token_ids: mx.array,
         audio_token_ids: list[mx.array],
@@ -433,7 +440,7 @@ class Lm(nn.Module):
         cfg_coef: float = 1.0,
         on_text_hook=None,
         on_audio_hook=None,
-    ) -> tuple[mx.array, mx.array | None]:
+    ) -> tuple[mx.array, mx.array | None, mx.array]:
         xs = self.text_emb(text_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             _emb = emb(token_ids)
@@ -469,7 +476,31 @@ class Lm(nn.Module):
                 on_audio_hook(audio_tokens)
         else:
             audio_tokens = None
-        return text_token, audio_tokens
+        return text_token, audio_tokens, transformer_out
+
+    def sample(
+        self,
+        text_token_ids: mx.array,
+        audio_token_ids: list[mx.array],
+        text_sampler: sampling.Sampler,
+        audio_sampler: sampling.Sampler,
+        ct: ConditionTensor | None = None,
+        cross_attention_src: None | mx.array = None,
+        cfg_coef: float = 1.0,
+        on_text_hook=None,
+        on_audio_hook=None,
+    ) -> tuple[mx.array, mx.array | None]:
+        text, audio, _ = self._sample(
+            text_token_ids,
+            audio_token_ids,
+            text_sampler,
+            audio_sampler,
+            ct,
+            cross_attention_src,
+            cfg_coef,
+            on_text_hook,
+            on_audio_hook)
+        return text, audio
 
     def warmup(self, ct: ConditionTensor | None = None):
         text, audio = self.sample(

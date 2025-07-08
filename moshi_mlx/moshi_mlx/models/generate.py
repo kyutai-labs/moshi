@@ -57,13 +57,12 @@ class LmGen:
         """
         return -2
 
-    # Runs one step of inference and return the generated text token.
-    def step(
+    def _step(
         self,
         other_audio_tokens: mx.array,
         ct: ConditionTensor | None = None,
         cross_attention_src: mx.array | None = None,
-    ) -> mx.array:
+    ) -> tuple[mx.array, mx.array]:
         if self.step_idx >= self.max_steps:
             raise ValueError(f"reached max-steps {self.max_steps}")
 
@@ -90,7 +89,7 @@ class LmGen:
         if (text_tokens == self.ungenerated_token).any():  # type: ignore
             raise ValueError(f"ungenerated value in text tokens {self.step_idx}")
         assert text_tokens.shape == (1, 1), "invalid text-tokens shape"
-        text_tokens, audio_tokens = self.model.sample(
+        text_tokens, audio_tokens, transformer_out = self.model._sample(
             text_tokens,
             audio_tokens,
             self.text_sampler,
@@ -112,7 +111,25 @@ class LmGen:
             if gen_idx >= 0:
                 self.gen_sequence[:, cb_idx + 1, gen_idx] = audio_tokens[cb_idx]
         self.step_idx += 1
-        return text_tokens
+        return text_tokens, transformer_out
+
+    def step(
+        self,
+        other_audio_tokens: mx.array,
+        ct: ConditionTensor | None = None,
+        cross_attention_src: mx.array | None = None,
+    ) -> mx.array:
+        return self._step(other_audio_tokens, ct, cross_attention_src)[0]
+
+    def step_with_extra_heads(
+        self,
+        other_audio_tokens: mx.array,
+        ct: ConditionTensor | None = None,
+        cross_attention_src: mx.array | None = None,
+    ) -> tuple[mx.array, list[mx.array]]:
+        text, transformer_out = self._step(other_audio_tokens, ct, cross_attention_src)
+        extra_heads = [eh(transformer_out) for eh in self.model.extra_heads]
+        return text, extra_heads
 
     def last_audio_tokens(self) -> Optional[mx.array]:
         gen_idx = self.step_idx - 1 - self.max_delay
