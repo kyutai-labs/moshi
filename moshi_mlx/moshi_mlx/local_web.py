@@ -115,7 +115,7 @@ def model_server(client_to_server, server_to_client, lm_config, args):
     model_file = args.moshi_weight
     tokenizer_file = args.tokenizer
     if model_file is None:
-        if "moshi_name" in lm_config:
+        if type(lm_config) == dict and "moshi_name" in lm_config:
             model_file = hf_hub_download(args.hf_repo, lm_config["moshi_name"])
         elif args.quantized == 8:
             model_file = hf_hub_download(args.hf_repo, "model.q8.safetensors")
@@ -127,7 +127,7 @@ def model_server(client_to_server, server_to_client, lm_config, args):
             model_file = hf_hub_download(args.hf_repo, "model.safetensors")
     model_file = hf_get(model_file)
     if tokenizer_file is None:
-        if "tokenizer_name" in lm_config:
+        if type(lm_config) == dict and "tokenizer_name" in lm_config:
             tokenizer_file = hf_hub_download(args.hf_repo, lm_config["tokenizer_name"])
         else:
             tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
@@ -137,7 +137,8 @@ def model_server(client_to_server, server_to_client, lm_config, args):
     log("info", f"[SERVER] loading text tokenizer {tokenizer_file}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)  # type: ignore
     mx.random.seed(299792458)
-    lm_config = models.LmConfig.from_config_dict(lm_config)
+    if type(lm_config) == dict:
+        lm_config = models.LmConfig.from_config_dict(lm_config)
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if args.quantized is not None:
@@ -187,7 +188,7 @@ def model_server(client_to_server, server_to_client, lm_config, args):
 def web_server(client_to_server, server_to_client, lm_config, args):
     mimi_file = args.mimi_weight
     if mimi_file is None:
-        if "mimi_name" in lm_config:
+        if type(lm_config) == dict and "mimi_name" in lm_config:
             mimi_file = hf_hub_download(args.hf_repo, lm_config["mimi_name"])
         else:
             mimi_file = hf_hub_download(
@@ -198,12 +199,16 @@ def web_server(client_to_server, server_to_client, lm_config, args):
     output_queue = queue.Queue()
     text_queue = queue.Queue()
     print(lm_config)
-    nc = lm_config.get("dep_q", 8)
+    if type(lm_config) == dict:
+        nc = lm_config.get("dep_q", 8)
+        max_delay = max(lm_config["delays"])
+    else:
+        nc = lm_config.depformer.num_slices
+        max_delay = max(lm_config.audio_delays)
     audio_tokenizer = rustymimi.StreamTokenizer(mimi_file, num_codebooks=nc)  # type: ignore
     start = server_to_client.get()
     log("info", f"[CLIENT] received '{start}' from server, starting...")
 
-    max_delay = max(lm_config["delays"])
     full_warmup(audio_tokenizer, client_to_server, server_to_client, max_delay)
 
     async def send_loop():
