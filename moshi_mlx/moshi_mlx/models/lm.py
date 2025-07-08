@@ -310,7 +310,7 @@ class Lm(nn.Module):
             ScaledEmbedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)
         ]
         self.extra_heads = [
-            nn.Linear(dim, cfg.extra_heads_dim) for _ in range(cfg.extra_heads_num_heads)
+            nn.Linear(dim, cfg.extra_heads_dim, bias=False) for _ in range(cfg.extra_heads_num_heads)
         ]
         self.transformer_cache: list[LayerCache] = (
             self.transformer.make_rot_cache()
@@ -344,7 +344,8 @@ class Lm(nn.Module):
         mlx_t = {}
         mlx_t["out_norm.weight"] = pth_t["out_norm.alpha"][0, 0]
         for name in ["text_emb.out1.weight", "text_emb.out2.weight", "text_emb.weight", "text_linear.weight"]:
-            mlx_t[name] = pth_t[name]
+            if name in pth_t:
+                mlx_t[name] = pth_t[name]
         for cb_idx in range(lm_config.audio_codebooks):
             mlx_t[f"audio_embs.{cb_idx}.weight"] = pth_t[f"emb.{cb_idx}.weight"]
         for k, v in sorted(pth_t.items()):
@@ -354,7 +355,7 @@ class Lm(nn.Module):
                 k = k.replace(".alpha", ".weight")
                 k = k.replace(".in_proj_weight", ".in_proj.weight")
                 mlx_t[k] = v
-            if k.startswith("condition_provider."):
+            if k.startswith("condition_provider.") or k.startswith("extra_heads."):
                 mlx_t[k] = v
 
         for slice_idx in range(lm_config.depformer.num_slices):
