@@ -44,6 +44,7 @@ log = "0.4.20"
 moshi = { path = "./moshi-core", version = "0.6.3" }
 native-tls = "0.2.11"
 numpy = "0.23.0"
+nvml-wrapper = "0.11.0"
 ogg = { version = "0.9.1", features = ["async"] }
 opus = "0.3.0"
 prometheus = "0.13.4"
@@ -63,6 +64,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.115"
 sha3 = "0.10.8"
 symphonia = { version = "0.5.3", features = ["all"] }
+sysinfo = "0.35.2"
 tokenizers = "0.15.2"
 tokio = { version = "1.35.1", features = ["full"] }
 tokio-rustls = "0.24.1"

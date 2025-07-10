@@ -25,6 +25,7 @@ lazy_static = { workspace = true }
 log = { workspace = true }
 moshi = { workspace = true }
 numpy = { workspace = true }
+nvml-wrapper = { workspace = true, optional = true }
 ogg = { workspace = true }
 opus = { workspace = true }
 prometheus = { workspace = true }
@@ -38,6 +39,7 @@ sentencepiece = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 symphonia = { workspace = true }
+sysinfo = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 tower = { workspace = true }
@@ -52,5 +54,5 @@ vergen = { workspace = true }
 
 [features]
 default = []
-cuda = ["moshi/cuda", "candle/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+cuda = ["moshi/cuda", "candle/cuda", "candle-nn/cuda", "candle-transformers/cuda", "dep:nvml-wrapper"]
 metal = ["moshi/metal", "candle/metal", "candle-nn/metal", "candle-transformers/metal"]

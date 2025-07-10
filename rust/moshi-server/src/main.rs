@@ -2,6 +2,7 @@
 // This source code is licensed under the license found in the
 // LICENSE file in the root directory of this source tree.
 
+use crate::metrics::system::update_system_metrics;
 use anyhow::Result;
 use axum::{http::StatusCode, response::IntoResponse, response::Response};
 use candle::Device;
@@ -520,6 +521,14 @@ async fn main_() -> Result<()> {
             for module in state.modules.iter() {
                 app = app.merge(module.router(&shared_state)?)
             }
+
+            // Starts updating system metrics
+            tokio::task::spawn(async {
+                loop {
+                    update_system_metrics().await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+            });
 
             let sock_addr = std::net::SocketAddr::from((
                 std::net::IpAddr::from_str(args.addr.as_str())
