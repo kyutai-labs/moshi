@@ -185,8 +185,8 @@ class StateMachine:
             if state.entries:
                 entry = state.entries.popleft()
                 state.consumption_times.append(step)
+                consumed_new_word = True
                 if entry.tokens:
-                    consumed_new_word = True
                     state.transcript.append((entry.text, step))
                     # We queue the tokens to be fed to the model.
                     state.queued.extend(entry.tokens)
