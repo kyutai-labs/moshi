@@ -11,7 +11,6 @@ use numpy::PyArrayMethods;
 use pyo3::prelude::*;
 use pyo3_ffi::c_str;
 use std::sync::{Arc, Mutex};
-use tokio::task;
 use tokio::time::{timeout, Duration};
 
 const FRAME_SIZE: usize = 1920;
@@ -135,6 +134,25 @@ impl Channel {
             prev_word_steps: 0,
         }
     }
+
+    fn on_end_of_word(&mut self) {
+        if let Some(text) = self.words.pop_front() {
+            let wwts = crate::tts::WordWithTimestamps {
+                text,
+                start_s: self.prev_word_steps as f64 / 12.5,
+                stop_s: self.steps as f64 / 12.5,
+            };
+            match self.encoder.encode_word(wwts) {
+                Ok(Some(msg)) => {
+                    let _ = self.out_tx.send(msg).is_err();
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    tracing::error!(?err, "encoder word error")
+                }
+            }
+        }
+    }
 }
 
 impl Drop for Channel {
@@ -249,7 +267,7 @@ impl Inner {
         use rayon::prelude::*;
         use std::ops::DerefMut;
 
-        let model_loop: task::JoinHandle<Result<()>> = task::spawn_blocking(move || {
+        crate::utils::spawn_blocking("model_loop", move || {
             // Maybe the model loop could just always hold the gil?
             tracing::info!("starting-up the py model loop");
             let pcm_data = numpy::ndarray::Array2::<f32>::zeros([batch_size, FRAME_SIZE]);
@@ -304,32 +322,19 @@ impl Inner {
                                 }
                             }
                             if (mask & MASK_WORD_FINISHED) > 0 {
-                                if let Some(text) = c.words.pop_front() {
-                                    let wwts = crate::tts::WordWithTimestamps {
-                                        text,
-                                        start_s: c.prev_word_steps as f64 / 12.5,
-                                        stop_s: c.steps as f64 / 12.5,
-                                    };
-                                    c.prev_word_steps = c.steps;
-                                    match c.encoder.encode_word(wwts) {
-                                        Ok(Some(msg)) => {
-                                            let _ = c.out_tx.send(msg).is_err();
-                                        }
-                                        Ok(None) => {}
-                                        Err(err) => {
-                                            tracing::error!(?err, ?batch_idx, "encoder word error")
-                                        }
-                                    }
+                                // MASK_WORD_FINISHED currently indicates the beggining of a new
+                                // word rather than the end of one.
+                                if c.prev_word_steps > 0 {
+                                    c.on_end_of_word();
                                 }
+                                c.prev_word_steps = c.steps;
                             }
                             if (mask & MASK_HAS_PCM) > 0 {
                                 let pcm = pcm[batch_idx * FRAME_SIZE..(batch_idx + 1) * FRAME_SIZE]
                                     .to_vec();
                                 match c.encoder.encode(pcm) {
                                     Ok(msg) => {
-                                        if c.out_tx.send(msg).is_err() {
-                                            *channel = None;
-                                        }
+                                        let _ = c.out_tx.send(msg).is_err();
                                     }
                                     Err(err) => {
                                         tracing::error!(?err, ?batch_idx, "encoder error")
@@ -339,6 +344,7 @@ impl Inner {
                             // The TTS has finished generating so we close the channel, this should
                             // drop out_tx and result in the websock closing.
                             if (mask & MASK_IS_EOS) > 0 {
+                                c.on_end_of_word();
                                 tracing::info!(?batch_idx, "tts finished");
                                 *channel = None;
                             }
@@ -348,13 +354,6 @@ impl Inner {
                 })?;
             }
             Ok(())
-        });
-        task::spawn(async {
-            match model_loop.await {
-                Err(err) => tracing::error!(?err, "model loop join err"),
-                Ok(Err(err)) => tracing::error!(?err, "model loop err"),
-                Ok(Ok(())) => tracing::info!("model loop exited"),
-            }
         });
         Ok(())
     }
@@ -392,10 +391,6 @@ pub(crate) fn toml_to_py<'a>(py: Python<'a>, value: &toml::Value) -> Result<Boun
         }
     };
     Ok(value)
-}
-
-fn text_pre_process(text: &str) -> String {
-    text.replace('’', "'").replace('–', "").replace(':', " ").replace(['(', ')'], "")
 }
 
 impl M {
@@ -472,11 +467,17 @@ impl M {
 
     // TODO: Add a proper batch variant that would enqueue the task so that it can be processed
     // when there is a free channel.
-    pub async fn handle_query(&self, query: &TtsQuery) -> Result<Vec<u8>> {
+    pub async fn handle_query(
+        &self,
+        query: &TtsQuery,
+    ) -> Result<tokio_stream::wrappers::ReceiverStream<Result<bytes::Bytes, std::io::Error>>> {
+        use bytes::Bytes;
+        use std::io;
+        use tokio::sync::mpsc;
+        use tokio_stream::wrappers::ReceiverStream;
+
         tracing::info!("py handle-query");
         metrics::CONNECT.inc();
-        let text_tokenizer = self.text_tokenizer.clone();
-        let text_bos_token = self.config().text_bos_token;
         let (batch_idx, in_tx, mut out_rx) = {
             let mut num_tries = 0;
             loop {
@@ -498,38 +499,40 @@ impl M {
             }
         };
         tracing::info!(batch_idx, "batched-py channel");
-        let mut inserted_bos = false;
-        let text = text_pre_process(&query.text);
-        for word in text.split_whitespace() {
-            if word.is_empty() {
-                continue;
-            }
-            let mut word_tokens: Vec<_> =
-                text_tokenizer.encode(word)?.into_iter().map(|v| v.id).collect();
-            if !inserted_bos {
-                inserted_bos = true;
-                word_tokens.insert(0, text_bos_token)
-            }
-            in_tx.send(Msg::Text(word.to_string(), word_tokens))?;
+        let mut text_tokenizer = crate::tts_preprocess::Tokenizer::new(
+            self.text_tokenizer.clone(),
+            self.config().text_bos_token,
+        );
+        let wwts = text_tokenizer.preprocess(&query.text)?;
+        for wwt in wwts.into_iter() {
+            in_tx.send(Msg::Text(wwt.word, wwt.tokens))?;
         }
         in_tx.send(Msg::Eos)?;
-        let mut pcm = vec![];
-        tracing::info!(batch_idx, "starting the receive loop");
-        while let Some(data) = out_rx.recv().await {
-            pcm.push(data)
-        }
-        let pcm = pcm.into_iter().flatten().collect::<Vec<_>>();
 
-        let pcm = {
-            use byteorder::ByteOrder;
-            let mut buf = vec![0f32; pcm.len() / std::mem::size_of::<f32>()];
-            byteorder::LittleEndian::read_f32_into(&pcm, &mut buf);
-            buf
-        };
+        let (tx, rx) = mpsc::channel::<Result<Bytes, io::Error>>(32);
 
-        let mut wav = vec![];
-        moshi::wav::write_pcm_as_wav(&mut wav, &pcm, 24_000)?;
-        Ok(wav)
+        crate::utils::spawn("send_loop", async move {
+            let mut wav_buffer = Vec::new();
+            moshi::wav::write_wav_header(&mut wav_buffer, 24_000, 0xFFFF_FFFFu32, 0xFFFF_FFFFu32)?;
+            tx.send(Ok(Bytes::from(wav_buffer.clone()))).await?;
+            while let Some(data) = out_rx.recv().await {
+                wav_buffer.clear();
+                let pcm = {
+                    use byteorder::ByteOrder;
+                    let mut buf = vec![0f32; data.len() / std::mem::size_of::<f32>()];
+                    byteorder::LittleEndian::read_f32_into(&data, &mut buf);
+                    buf
+                };
+
+                moshi::wav::write_pcm_in_wav(&mut wav_buffer, &pcm)?;
+                tx.send(Ok(Bytes::from(wav_buffer.clone()))).await?;
+            }
+
+            // We want in_tx to stay open while the send_loop is running, so we capture it
+            std::mem::drop(in_tx);
+            Ok::<_, anyhow::Error>(())
+        });
+        Ok(ReceiverStream::new(rx))
     }
 
     pub async fn handle_socket(&self, socket: ws::WebSocket, query: Query) -> Result<()> {
@@ -553,26 +556,18 @@ impl M {
             }
         };
         tracing::info!(?bidx, "batched-py channel");
-        let text_tokenizer = self.text_tokenizer.clone();
-        let text_bos_token = self.config().text_bos_token;
+        let mut text_tokenizer = crate::tts_preprocess::Tokenizer::new(
+            self.text_tokenizer.clone(),
+            self.config().text_bos_token,
+        );
 
-        let recv_loop = task::spawn(async move {
+        crate::utils::spawn("recv_loop", async move {
             let timeout_duration = SEND_PING_EVERY * 3;
             let mut receiver = receiver;
-            let mut inserted_bos = false;
             let mut send_text = |msg: &str| -> Result<()> {
-                let msg = text_pre_process(msg);
-                for word in msg.split_whitespace() {
-                    if word.is_empty() {
-                        continue;
-                    }
-                    let mut word_tokens: Vec<_> =
-                        text_tokenizer.encode(word)?.into_iter().map(|v| v.id).collect();
-                    if !inserted_bos {
-                        inserted_bos = true;
-                        word_tokens.insert(0, text_bos_token)
-                    }
-                    in_tx.send(Msg::Text(word.to_string(), word_tokens))?;
+                let wwts = text_tokenizer.preprocess(msg)?;
+                for wwt in wwts.into_iter() {
+                    in_tx.send(Msg::Text(wwt.word, wwt.tokens))?;
                 }
                 Ok(())
             };
@@ -611,7 +606,7 @@ impl M {
             }
             Ok::<_, anyhow::Error>(())
         });
-        let send_loop = task::spawn(async move {
+        crate::utils::spawn("send_loop", async move {
             let mut sender = sender;
             let mut last_ping_sent = std::time::Instant::now();
             loop {
@@ -636,23 +631,6 @@ impl M {
             drop(sender);
             Ok::<(), anyhow::Error>(())
         });
-
-        // Keep track of the outputs of the different threads.
-        task::spawn(async {
-            match send_loop.await {
-                Err(err) => tracing::error!(?err, "send loop join err"),
-                Ok(Err(err)) => tracing::error!(?err, "send loop err"),
-                Ok(Ok(())) => tracing::info!("send loop exited"),
-            }
-        });
-        task::spawn(async {
-            match recv_loop.await {
-                Err(err) => tracing::error!(?err, "recv loop join err"),
-                Ok(Err(err)) => tracing::error!(?err, "recv loop err"),
-                Ok(Ok(())) => tracing::info!("recv loop exited"),
-            }
-        });
-
         Ok(())
     }
 
