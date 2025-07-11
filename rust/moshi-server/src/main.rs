@@ -3,7 +3,11 @@
 // LICENSE file in the root directory of this source tree.
 
 use anyhow::Result;
-use axum::{http::StatusCode, response::IntoResponse, response::Response};
+use axum::{
+    body::Body,
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
+};
 use candle::Device;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -17,6 +21,7 @@ mod protocol;
 mod py_module;
 mod py_module_post;
 mod tts;
+mod tts_preprocess;
 mod utils;
 
 const ID_HEADER: &str = "kyutai-api-key";
@@ -888,9 +893,15 @@ fn py_router(s: Arc<py_module::M>, path: &str, ss: &SharedState) -> axum::Router
         if !valid_id {
             return Ok(StatusCode::UNAUTHORIZED.into_response());
         }
-        let wav = state.0 .0.handle_query(&req).await?;
-        tracing::info!("ok {}", wav.len());
-        Ok((StatusCode::OK, [(axum::http::header::CONTENT_TYPE, "audio/wav")], wav).into_response())
+        let wav_stream = state.0 .0.handle_query(&req).await?;
+        let body = Body::from_stream(wav_stream);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "audio/wav")
+            .body(body)
+            .unwrap();
+
+        Ok(response)
     }
 
     async fn streaming_t(
@@ -898,7 +909,7 @@ fn py_router(s: Arc<py_module::M>, path: &str, ss: &SharedState) -> axum::Router
         headers: axum::http::HeaderMap,
         state: axum::extract::State<(Arc<py_module::M>, SharedState)>,
         req: axum::extract::Query<PyStreamingQuery>,
-    ) -> utils::AxumResult<axum::response::Response> {
+    ) -> utils::AxumResult<Response> {
         let addr = headers.get("X-Real-IP").and_then(|v| v.to_str().ok().map(|v| v.to_string()));
         tracing::info!(addr, "handling py streaming query");
         // It's tricky to set the headers of a websocket in javascript so we pass the token via the
