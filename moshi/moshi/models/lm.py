@@ -790,7 +790,10 @@ class LMGen(StreamingModule[_LMGenState]):
         if out is None:
             return None
         out, transformer_out = out
-        extra_heads = [torch.nn.functional.softmax(extra_head(transformer_out), dim=-1) for extra_head in self.lm_model.extra_heads]
+        extra_heads = [
+            torch.nn.functional.softmax(extra_head(transformer_out), dim=-1)
+            for extra_head in self.lm_model.extra_heads
+        ]
         return out, extra_heads
 
     def depformer_step(
