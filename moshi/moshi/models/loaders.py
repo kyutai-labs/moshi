@@ -259,6 +259,8 @@ class CheckpointInfo:
             num_codebooks = 8
         else:
             num_codebooks = max(self.lm_config["dep_q"], self.lm_config["n_q"] - self.lm_config["dep_q"])
+        if self.tts_config.get('multistream'):
+            num_codebooks //= 2
         return get_mimi(self.mimi_weights, num_codebooks=num_codebooks, device=device)
 
     def get_moshi(

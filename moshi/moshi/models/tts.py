@@ -373,6 +373,7 @@ class TTSModel:
     machine: StateMachine
     delay_steps: int
     max_speakers: int = 5
+    multistream: bool = False
 
     # The following params can be overriden to customize generation.
     temp: float = 0.6
@@ -400,6 +401,7 @@ class TTSModel:
         token_ids = TokenIds(lm.text_card + 1)
         delay_steps = int(checkpoint_info.tts_config['audio_delay'] * mimi.frame_rate)
         second_stream_ahead = checkpoint_info.tts_config.get('second_stream_ahead', 0)
+        multistream = checkpoint_info.tts_config.get('multistream', False)
 
         machine = StateMachine(
             token_ids=token_ids, second_stream_ahead=second_stream_ahead,
@@ -407,9 +409,12 @@ class TTSModel:
         tts_model = TTSModel(
             lm=lm, mimi=mimi, tokenizer=tokenizer,
             voice_suffix=voice_suffix, voice_repo=voice_repo,
-            machine=machine, delay_steps=delay_steps,
+            machine=machine, delay_steps=delay_steps, multistream=multistream,
             **kwargs)
-        mimi.set_num_codebooks(tts_model.n_q)
+        mimi_n_q = tts_model.n_q
+        if tts_model.multistream:
+            mimi_n_q //= 2
+        mimi.set_num_codebooks(mimi_n_q)
         if not tts_model.multi_speaker:
             tts_model.voice_suffix = ''
         return tts_model
@@ -547,6 +552,8 @@ class TTSModel:
                     if offset >= max_end_step + self.delay_steps + self.final_padding:
                         break
                 missing = self.lm.n_q - self.lm.dep_q
+                if self.multistream:
+                    assert missing == 0, "Cannot generate a subset of the codebooks with a multistream model."
                 input_tokens = torch.full((len(states), missing, 1), self.machine.token_ids.zero,
                                           dtype=torch.long, device=self.lm.device)
                 frame = lm_gen.step(input_tokens)
