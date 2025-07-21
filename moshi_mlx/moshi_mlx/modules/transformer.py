@@ -4,10 +4,10 @@
 
 from dataclasses import dataclass
 
-from .kv_cache import KVCache, RotatingKVCache
-
 import mlx.core as mx
 import mlx.nn as nn
+
+from .kv_cache import KVCache, RotatingKVCache
 
 
 @dataclass
@@ -86,20 +86,20 @@ class CrossAttention(nn.Module):
     ) -> mx.array:
         # TODO: Add some cross-attention kv caching.
         assert self.cfg.kv_repeat == 1, "only kv_repeat==1 is supported"
-
         b, t, hd = xs.shape
         qkv_w = self.in_proj.weight
-        q = xs @ qkv_w[:self.cfg.d_model].T
+        q = xs @ qkv_w[: self.cfg.d_model].T
         q = q.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
 
         if cache.cross_attn is None:
             b_kv, t_kv, hd_kv = cross_attention_src.shape
+
             assert b == b_kv
             assert hd == hd_kv
             assert "bias" not in self.in_proj
-            k = cross_attention_src @ qkv_w[self.cfg.d_model:2 * self.cfg.d_model].T
+            k = cross_attention_src @ qkv_w[self.cfg.d_model : 2 * self.cfg.d_model].T
             k = k.reshape(b, t_kv, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
-            v = cross_attention_src @ qkv_w[2 * self.cfg.d_model:].T
+            v = cross_attention_src @ qkv_w[2 * self.cfg.d_model :].T
             v = v.reshape(b, t_kv, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
             cache.cross_attn = k, v
         else:
@@ -270,9 +270,7 @@ class Transformer(nn.Module):
     def make_cache(self) -> list[LayerCache]:
         num_kv_heads = self.cfg.num_heads // self.cfg.kv_repeat
         return [
-            LayerCache(
-                KVCache(head_dim=self.cfg.head_dim, n_kv_heads=num_kv_heads)
-            )
+            LayerCache(KVCache(head_dim=self.cfg.head_dim, n_kv_heads=num_kv_heads))
             for _ in self.layers
         ]
 

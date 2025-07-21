@@ -103,26 +103,44 @@ def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.arr
     Returns:
         token selected based on the top-p criterion.
     """
-    # referenced implementation from https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L449-L460  # noqa
+
+    # # referenced implementation from https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L449-L460  # noqa
+    # probs = mx.softmax(logits * (1 / temperature), axis=-1)
+
+    # # sort probs in ascending order
+    # sorted_indices = mx.argsort(probs, axis=-1)
+    # sorted_probs = probs[..., sorted_indices.squeeze(0)]
+
+    # cumulative_probs = mx.cumsum(sorted_probs, axis=-1)
+
+    # # select tokens with cumulative probs below threshold
+    # top_probs = mx.where(
+    #     cumulative_probs > 1 - top_p,
+    #     sorted_probs,
+    #     0,
+    # )
+
+    # sorted_token = mx.random.categorical(mx.log(top_probs))
+    # token = sorted_indices.squeeze(0)[sorted_token]
+
     probs = mx.softmax(logits * (1 / temperature), axis=-1)
 
-    # sort probs in ascending order
-    sorted_indices = mx.argsort(probs, axis=-1)
-    sorted_probs = probs[..., sorted_indices.squeeze(0)]
+    sorted_indices = mx.argsort(-probs, axis=-1)
+    sorted_probs = mx.take_along_axis(probs, sorted_indices, axis=-1)
 
     cumulative_probs = mx.cumsum(sorted_probs, axis=-1)
 
-    # select tokens with cumulative probs below threshold
-    top_probs = mx.where(
-        cumulative_probs > 1 - top_p,
-        sorted_probs,
-        0,
-    )
+    mask = cumulative_probs > (1 - top_p)
+    masked_probs = mx.where(mask, 0.0, sorted_probs)
 
-    sorted_token = mx.random.categorical(mx.log(top_probs))
-    token = sorted_indices.squeeze(0)[sorted_token]
+    masked_probs_sum = mx.sum(masked_probs, axis=-1, keepdims=True)
+    masked_probs = masked_probs / masked_probs_sum
 
-    return token
+    sampled_idx = mx.random.categorical(mx.log(masked_probs), axis=-1)
+
+    token = mx.take_along_axis(sorted_indices, sampled_idx[..., None], axis=-1)
+
+    return token.squeeze(-1).squeeze(-1)
 
 
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
@@ -147,7 +165,6 @@ class Sampler:
         logprobs = logits - mx.logsumexp(logits)
 
         if self.temp == 0:
-            # print(logits[0][0][3])
             token = mx.argmax(logits, axis=-1)
         else:
             if self.top_k is not None and self.top_k > 0:

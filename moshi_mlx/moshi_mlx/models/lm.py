@@ -270,7 +270,9 @@ class DepFormer(nn.Module):
             # The 2048 tokens should be teacher forced on the first slices. However as delays
             # are non-decreasing in the number of slices, this is actually not necessary as
             # the generated tokens will end up not being used.
-            last_token = last_token.reshape(1, 1)
+
+            batch_size = last_token.shape[0]
+            last_token = last_token.reshape(batch_size, 1)
 
             if cfg_coef != 1:
                 last_token = mx.tile(last_token, (2, 1))
@@ -281,9 +283,9 @@ class DepFormer(nn.Module):
                 l1, l2 = logits.split(2, axis=0)
                 logits = cfg_coef * l1 - (cfg_coef - 1) * l2
 
-            last_token, _ = sampler(logits[0])
+            last_token, _ = sampler(logits)
             tokens.append(last_token)
-        tokens = mx.concatenate(tokens)
+        tokens = mx.stack(tokens, axis=1)
         return tokens
 
 
@@ -491,6 +493,7 @@ class Lm(nn.Module):
         text_token, _ = text_sampler(text_logits)
         if on_text_hook is not None:
             on_text_hook(text_token)
+            print(text_token)
         if len(self.depformer.slices) > 0:
             audio_tokens = self.depformer.sample(
                 transformer_out,
