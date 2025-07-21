@@ -414,6 +414,14 @@ class TTSModel:
         mimi_n_q = tts_model.n_q
         if tts_model.multistream:
             mimi_n_q //= 2
+            if tts_model.n_q < tts_model.lm.n_q:
+                print("Skipping some codebooks")
+                for n in range(mimi_n_q, tts_model.lm.n_q // 2):
+                    for q in [n, n + tts_model.lm.n_q // 2]:
+                        tts_model.lm.emb[q].weight.data[:] = 0.
+                        if q < tts_model.lm.n_q - 1:
+                            tts_model.lm.depformer_emb[q].weight.data[:] = 0
+
         mimi.set_num_codebooks(mimi_n_q)
         if not tts_model.multi_speaker:
             tts_model.voice_suffix = ''
@@ -534,7 +542,8 @@ class TTSModel:
                 logged.append((token, out_token))
             text_tokens[:] = torch.tensor(out_tokens, dtype=torch.long, device=text_tokens.device)
 
-        self.lm.dep_q = self.n_q
+        if not self.multistream:
+            self.lm.dep_q = self.n_q
         lm_gen = LMGen(
             self.lm, temp=self.temp, temp_text=self.temp,
             cfg_coef=self.cfg_coef, condition_tensors=condition_tensors,
