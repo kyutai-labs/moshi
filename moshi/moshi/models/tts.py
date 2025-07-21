@@ -497,6 +497,10 @@ class TTSModel:
                 delayed = delayed.to(device)
                 audio_prefixes.append(deque(delayed.t()))
 
+        no_depformer_tokens = torch.full(
+            (len(all_entries), self.lm.dep_q, 1), self.machine.token_ids.zero,
+            dtype=torch.long, device=device)
+
         def _on_text_logits_hook(text_logits):
             if self.padding_bonus:
                 text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
@@ -549,7 +553,8 @@ class TTSModel:
                 missing = self.lm.n_q - self.lm.dep_q
                 input_tokens = torch.full((len(states), missing, 1), self.machine.token_ids.zero,
                                           dtype=torch.long, device=self.lm.device)
-                frame = lm_gen.step(input_tokens)
+                depformer_replace_tokens = no_depformer_tokens if offset < self.delay_steps else None
+                frame = lm_gen.step(input_tokens, depformer_replace_tokens=depformer_replace_tokens)
                 if frame is not None:
                     frames.append(frame.clone())
                     if on_frame is not None:
