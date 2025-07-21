@@ -107,21 +107,17 @@ class LmGen:
             on_text_hook=self.on_text_hook,
             on_audio_hook=self.on_audio_hook,
         )
-        if audio_tokens is not None:
-            print(audio_tokens.shape[-1])
-            print(audio_tokens.shape[-1] == self.model.cfg.generated_codebooks)
-        print(self.model.cfg.generated_codebooks)
-
-        assert (
-            audio_tokens is None
-            or audio_tokens.shape[-1] == self.model.cfg.generated_codebooks
+        assert audio_tokens is None or audio_tokens.shape[-2] == (
+            self.model.cfg.generated_codebooks
         ), "invalid output audio-token shape"
 
         self.gen_sequence[:, 0, self.step_idx] = text_tokens.squeeze(-1)
         for cb_idx, delay in enumerate(self.audio_delays[: self.main_codebooks]):
             gen_idx = self.step_idx - delay
             if gen_idx >= 0:
-                self.gen_sequence[:, cb_idx + 1, gen_idx] = audio_tokens[cb_idx]
+                self.gen_sequence[:, cb_idx + 1, gen_idx] = audio_tokens[
+                    :, cb_idx
+                ].squeeze(-1)
         self.step_idx += 1
         return text_tokens, transformer_out
 

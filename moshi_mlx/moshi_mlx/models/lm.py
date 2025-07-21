@@ -186,7 +186,6 @@ class ScaledEmbedding(nn.Embedding):
 
     def __call__(self, input: mx.array) -> mx.array:
         is_zero = input == self.zero_idx
-
         zero = mx.zeros(1, dtype=input.dtype)
         input = mx.maximum(input, 0)
         if self.demux_second_stream:
@@ -471,14 +470,17 @@ class Lm(nn.Module):
         on_audio_hook=None,
     ) -> tuple[mx.array, mx.array | None, mx.array]:
         xs = self.text_emb(text_token_ids)
+
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             _emb = emb(token_ids)
             _emb = _emb.transpose(1, 0, 2)
             xs = xs + _emb
+
         if ct is not None:
-            xs = xs + ct.tensor
+            xs = xs + mx.expand_dims(ct.tensor, axis=1)
         if cfg_coef != 1:
             xs = mx.tile(xs, (2, 1, 1))
+
         transformer_out = self.transformer(
             xs,
             cache=self.transformer_cache,
@@ -491,9 +493,9 @@ class Lm(nn.Module):
             l1, l2 = text_logits.split(2, axis=0)
             text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
         text_token, _ = text_sampler(text_logits)
+
         if on_text_hook is not None:
             on_text_hook(text_token)
-            print(text_token)
         if len(self.depformer.slices) > 0:
             audio_tokens = self.depformer.sample(
                 transformer_out,

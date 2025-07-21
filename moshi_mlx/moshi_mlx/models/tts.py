@@ -518,16 +518,20 @@ class TTSModel:
             attributes = list(attributes) + nulled
 
         assert self.lm.condition_provider is not None
-        ct = None
-        cross_attention_src_list = []
 
-        for _attr in attributes:
+        cross_attention_src_list = []
+        ct_list = []
+
+        for _attr in attributes:  # len(attributes) == batch_size
+            current = None
             for _key, _value in _attr.text.items():
                 _ct = self.lm.condition_provider.condition_tensor(_key, _value)
-                if ct is None:
-                    ct = _ct
+                tensor = _ct.tensor.squeeze(0)
+                if current is None:
+                    current = tensor
                 else:
-                    ct = ConditionTensor(ct.tensor + _ct.tensor)
+                    current = current + tensor
+            ct_list.append(current)
 
             for _key, _value in _attr.tensor.items():
                 _conditioner = self.lm.condition_provider.conditioners[_key]
@@ -538,9 +542,11 @@ class TTSModel:
                     )
                 cross_attention_src_list.append(_ca_src[0])
 
+        ct = ConditionTensor(mx.stack(ct_list, axis=0))
         cross_attention_src = mx.stack(cross_attention_src_list, axis=0)
 
         states = []
+
         for entries in all_entries:
             state = self.machine.new_state(entries)
             states.append(state)
@@ -574,7 +580,6 @@ class TTSModel:
 
         def _on_audio_hook(audio_tokens):
             delays = self.lm.delays
-            print(delays)
             ungenerated = self.machine.token_ids.ungenerated
             for q in range(audio_tokens.shape[0]):
                 delay = delays[q]
@@ -598,10 +603,10 @@ class TTSModel:
                 if text_prefixes is not None and text_prefixes[b]:
                     out_token = text_prefixes[b].popleft()
                 else:
-                    out_token, _ = self.machine.process(offset, state, token)
+                    out_token, _ = self.machine.process(offset, state, token[0])
                 out_tokens.append(out_token)
                 logged.append((token, out_token))
-            text_tokens[:] = mx.array(out_tokens, dtype=mx.int64)
+            text_tokens[:] = mx.array(out_tokens, dtype=mx.int64)[:, None]
             if on_text_hook is not None:
                 on_text_hook(text_tokens)
 
@@ -632,12 +637,16 @@ class TTSModel:
                 mx.ones((len(states), missing), dtype=mx.int64)
                 * self.machine.token_ids.zero
             )
+
             lm_gen.step(input_tokens, ct=ct, cross_attention_src=cross_attention_src)
             frame = lm_gen.last_audio_tokens()
+
             if frame is not None and (frame != self.machine.token_ids.zero).all():
                 frames.append(mx.array(frame)[:, :, None])
+
                 if on_frame is not None:
                     on_frame(frame)
+
         return TTSResult(
             frames,
             logged_text_tokens,
