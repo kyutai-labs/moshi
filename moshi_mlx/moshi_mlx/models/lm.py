@@ -186,8 +186,9 @@ class ScaledEmbedding(nn.Embedding):
 
     def __call__(self, input: mx.array) -> mx.array:
         is_zero = input == self.zero_idx
+
         zero = mx.zeros(1, dtype=input.dtype)
-        input = mx.max(input, 0)
+        input = mx.maximum(input, 0)
         if self.demux_second_stream:
             left = input % self.num_embeddings
             right = input // self.num_embeddings
@@ -481,7 +482,6 @@ class Lm(nn.Module):
             cache=self.transformer_cache,
             cross_attention_src=cross_attention_src,
         )
-
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
 

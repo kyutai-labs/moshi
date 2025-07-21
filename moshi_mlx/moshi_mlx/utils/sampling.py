@@ -147,6 +147,7 @@ class Sampler:
         logprobs = logits - mx.logsumexp(logits)
 
         if self.temp == 0:
+            # print(logits[0][0][3])
             token = mx.argmax(logits, axis=-1)
         else:
             if self.top_k is not None and self.top_k > 0:
