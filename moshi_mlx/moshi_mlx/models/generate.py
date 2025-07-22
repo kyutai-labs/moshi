@@ -83,8 +83,10 @@ class LmGen:
                     j - (1 + self.main_codebooks)
                 ][0]
         audio_tokens = []
+        print("audio delays", self.audio_delays)
         for cb_idx, delay in enumerate(self.audio_delays):
             gen_idx = self.step_idx - 1 - delay
+            print("geb idx", gen_idx)
             if gen_idx >= 0:
                 audio_token = self.gen_sequence[:, cb_idx + 1, gen_idx][None]
             else:
@@ -146,6 +148,8 @@ class LmGen:
         if gen_idx < 0:
             return None
         tokens = self.gen_sequence[:, 1 : 1 + self.main_codebooks, gen_idx]
+        print("gen idx", gen_idx, "tokens", tokens)
+
         if (tokens == self.audio_padding_token).any():  # type: ignore
             return None
         if (tokens == self.ungenerated_token).any():  # type: ignore

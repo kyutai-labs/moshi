@@ -140,7 +140,7 @@ def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.arr
 
     token = mx.take_along_axis(sorted_indices, sampled_idx[..., None], axis=-1)
 
-    return token.squeeze(-1).squeeze(-1)
+    return token.squeeze(-1)
 
 
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)

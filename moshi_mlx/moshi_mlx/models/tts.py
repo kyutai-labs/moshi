@@ -582,10 +582,10 @@ class TTSModel:
         def _on_audio_hook(audio_tokens):
             delays = self.lm.delays
             ungenerated = self.machine.token_ids.ungenerated
-            for q in range(audio_tokens.shape[0]):
+            for q in range(audio_tokens.shape[1]):
                 delay = delays[q]
                 if offset < delay + self.delay_steps:
-                    audio_tokens[q] = self.machine.token_ids.zero
+                    audio_tokens[:, q] = self.machine.token_ids.zero
             if audio_prefixes is not None:
                 for b, audio_prefix in enumerate(audio_prefixes):
                     if audio_prefix:

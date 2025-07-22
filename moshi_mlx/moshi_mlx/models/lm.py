@@ -123,6 +123,7 @@ class LmConfig:
                 else:
                     raise ValueError(f"unsupported conditioner type {_cfg['type']}")
                 conditioners[_name] = _cfg
+        print(data["delays"])
         return LmConfig(
             transformer=transformer,
             depformer=depformer,
@@ -265,25 +266,32 @@ class DepFormer(nn.Module):
         # The cache is shared between the depformer slices but not persisted between sample calls.
         for c in cache:
             c.reset()
-        for slice in self.slices:
+        for i, slice in enumerate(self.slices):
             # The 2048 tokens should be teacher forced on the first slices. However as delays
             # are non-decreasing in the number of slices, this is actually not necessary as
             # the generated tokens will end up not being used.
 
             batch_size = last_token.shape[0]
             last_token = last_token.reshape(batch_size, 1)
-
+            print("avant", last_token)
             if cfg_coef != 1:
                 last_token = mx.tile(last_token, (2, 1))
+            print("trans", main_transformer_out)
+            print("emb", slice.emb(last_token))
             xs = slice.linear_in(main_transformer_out) + slice.emb(last_token)
+            print("xs", xs)
             xs = slice.transformer(xs, cache=cache)
             logits = slice.linear_out(xs)
+            print("logits", logits)
             if cfg_coef != 1:
                 l1, l2 = logits.split(2, axis=0)
                 logits = cfg_coef * l1 - (cfg_coef - 1) * l2
 
             last_token, _ = sampler(logits)
             tokens.append(last_token)
+            print(last_token)
+            # if last_token[0] != last_token[1]:
+            #     hi
         tokens = mx.stack(tokens, axis=1)
         return tokens
 
@@ -470,25 +478,30 @@ class Lm(nn.Module):
         on_audio_hook=None,
     ) -> tuple[mx.array, mx.array | None, mx.array]:
         xs = self.text_emb(text_token_ids)
-
+        print("xs text emb sample", xs)
+        print("text_token in", text_token_ids)
+        print("audio emb in", self.audio_embs)
+        print("audio_token_ids", audio_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             _emb = emb(token_ids)
+
             _emb = _emb.transpose(1, 0, 2)
             xs = xs + _emb
-
+        print("xs text emb sample", xs)
         if ct is not None:
             xs = xs + mx.expand_dims(ct.tensor, axis=1)
         if cfg_coef != 1:
             xs = mx.tile(xs, (2, 1, 1))
-
+        print("xs sample", xs)
         transformer_out = self.transformer(
             xs,
             cache=self.transformer_cache,
             cross_attention_src=cross_attention_src,
         )
+        print("trans 1", transformer_out)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
-
+        print("trans 2", transformer_out)
         if cfg_coef != 1:
             l1, l2 = text_logits.split(2, axis=0)
             text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
