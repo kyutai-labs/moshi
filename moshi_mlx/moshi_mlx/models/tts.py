@@ -507,7 +507,8 @@ class TTSModel:
         #     if self.padding_bonus:
         #         text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
         #     return transformer_out, text_logits
-
+        for c in self.lm.transformer_cache:
+            c.reset()
         if self.cfg_coef != 1.0:
             if self.valid_cfg_conditionings:
                 raise ValueError(
