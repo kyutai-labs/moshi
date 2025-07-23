@@ -523,7 +523,9 @@ class TTSModel:
         cross_attention_src_list = []
         ct_list = []
 
-        for _attr in attributes:  # len(attributes) == batch_size
+        ct = None
+        cross_attention_src = None
+        for _attr in attributes:
             current = None
             for _key, _value in _attr.text.items():
                 _ct = self.lm.condition_provider.condition_tensor(_key, _value)
@@ -533,18 +535,17 @@ class TTSModel:
                 else:
                     current = current + tensor
             ct_list.append(current)
-
             for _key, _value in _attr.tensor.items():
                 _conditioner = self.lm.condition_provider.conditioners[_key]
                 _ca_src = _conditioner.condition(_value)
-                if _ca_src.shape[0] != 1:
-                    raise ValueError(
-                        f"Expected _ca_src with shape (1, t_kv, hd_kv), got {_ca_src.shape}"
-                    )
-                cross_attention_src_list.append(_ca_src[0])
-
+                if cross_attention_src is None:
+                    cross_attention_src = _ca_src
+                else:
+                    raise ValueError("multiple cross-attention conditioners")
+            cross_attention_src_list.append(cross_attention_src)
+            cross_attention_src = None
+        cross_attention_src = mx.stack([a[0] for a in cross_attention_src_list], axis=0)
         ct = ConditionTensor(mx.stack(ct_list, axis=0))
-        cross_attention_src = mx.stack(cross_attention_src_list, axis=0)
 
         states = []
 
@@ -598,6 +599,18 @@ class TTSModel:
         def _on_text_hook(text_tokens):
             tokens = text_tokens.tolist()
             out_tokens = []
+            # if offset > 1:
+            #     hi
+            print(
+                offset,
+                tokens[0],
+                states[0].remaining_padding,
+                states[0].queued,
+                states[0].lookahead_queued,
+                states[0].end_step,
+                states[0].consumption_times,
+                states[0].transcript,
+            )
             for b, (token, state, logged) in enumerate(
                 zip(tokens, states, logged_text_tokens)
             ):
@@ -638,7 +651,6 @@ class TTSModel:
                 mx.ones((len(states), missing), dtype=mx.int64)
                 * self.machine.token_ids.zero
             )
-
             lm_gen.step(input_tokens, ct=ct, cross_attention_src=cross_attention_src)
             frame = lm_gen.last_audio_tokens()
 
@@ -714,6 +726,7 @@ class TTSModel:
                 raise ValueError(
                     f"Unsupported value for cfg_coef, valid values are {valids}."
                 )
+
         return ConditionAttributes(text=text, tensor=tensors)
 
     def get_prefix(self, audio_path: Path | str) -> mx.array:

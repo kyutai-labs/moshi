@@ -141,14 +141,12 @@ class Attention(nn.Module):
         if self.rope is not None:
             q = self.rope(q, offset=cache.offset)
             k = self.rope(k, offset=cache.offset)
-
         k, v = cache.update_and_fetch(k, v)
         k_len = k.shape[2]
         k_target_len = t + min(self.cfg.context, k_len - t)
         if k_target_len < k_len:
             k = k[:, :, k_len - k_target_len :]
             v = v[:, :, k_len - k_target_len :]
-
         xs = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale, mask=mask)
         xs = xs.transpose(0, 2, 1, 3).reshape(b, t, hd)
         xs = self.out_proj(xs)
@@ -263,7 +261,7 @@ class Transformer(nn.Module):
         cache: list[LayerCache],
         cross_attention_src: None | mx.array = None,
     ) -> mx.array:
-        for layer, c in zip(self.layers, cache):
+        for i, (layer, c) in enumerate(zip(self.layers, cache)):
             xs = layer(xs, cache=c, cross_attention_src=cross_attention_src)
         return xs
 
