@@ -507,8 +507,12 @@ class TTSModel:
         #     if self.padding_bonus:
         #         text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
         #     return transformer_out, text_logits
+
         for c in self.lm.transformer_cache:
             c.reset()
+        for c in self.lm.depformer_cache:
+            c.reset()
+
         if self.cfg_coef != 1.0:
             if self.valid_cfg_conditionings:
                 raise ValueError(
@@ -599,13 +603,13 @@ class TTSModel:
         def _on_text_hook(text_tokens):
             tokens = text_tokens.tolist()
             out_tokens = []
-            # if offset > 1:
-            #     hi
+            print(offset, tokens)
             print(
-                offset,
-                tokens[0],
+                "remaining_padding",
                 states[0].remaining_padding,
+                "queued",
                 states[0].queued,
+                "lookahead_queued",
                 states[0].lookahead_queued,
                 states[0].end_step,
                 states[0].consumption_times,
@@ -623,6 +627,9 @@ class TTSModel:
             text_tokens[:] = mx.array(out_tokens, dtype=mx.int64)[:, None]
             if on_text_hook is not None:
                 on_text_hook(text_tokens)
+            print("text_tokens", text_tokens)
+            # if offset >= 6:
+            #     hi
 
         lm_gen = LmGen(
             self.batch_size,

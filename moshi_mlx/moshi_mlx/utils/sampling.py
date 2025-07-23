@@ -92,60 +92,88 @@ def top_k_sampling(
 
 
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
-def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.array:
-    """
-    Apply top-p (nucleus) sampling to logits.
+def categorical_sampling(logits, temp):
+    return mx.random.categorical(logits * (1 / temp))
 
-    Args:
-        logits: The logits from the model's output.
-        top_p: The cumulative probability threshold for top-p filtering.
-        temperature: Temperature parameter for softmax distribution reshaping.
-    Returns:
-        token selected based on the top-p criterion.
-    """
 
-    # # referenced implementation from https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L449-L460  # noqa
-    # probs = mx.softmax(logits * (1 / temperature), axis=-1)
+# @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
+# def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.array:
+#     """
+#     Apply top-p (nucleus) sampling for each row in a batch of logits.
 
-    # # sort probs in ascending order
-    # sorted_indices = mx.argsort(probs, axis=-1)
-    # sorted_probs = probs[..., sorted_indices.squeeze(0)]
+#     Args:
+#         logits: Logits of shape (B, T)
+#         top_p: cumulative probability threshold (e.g. 0.9)
+#         temperature: temperature parameter (e.g. 1.0)
+#     Returns:
+#         Tensor of shape (B,) containing selected token indices.
+#     """
+#     B, T = logits.shape
+#     probs = mx.softmax(logits / temperature, axis=-1)  # (B, T)
 
-    # cumulative_probs = mx.cumsum(sorted_probs, axis=-1)
+#     sorted_indices = mx.argsort(probs, axis=-1)  # (B, T)
+#     sorted_probs = mx.take_along_axis(probs, sorted_indices, axis=-1)  # (B, T)
+#     cumulative_probs = mx.cumsum(sorted_probs, axis=-1)  # (B, T)
+#     mask = cumulative_probs > (1.0 - top_p)  # (B, T)
 
-    # # select tokens with cumulative probs below threshold
-    # top_probs = mx.where(
-    #     cumulative_probs > 1 - top_p,
-    #     sorted_probs,
-    #     0,
-    # )
+#     # Zero out masked values
+#     filtered_probs = mx.where(mask, sorted_probs, 0.0)  # (B, T)
 
-    # sorted_token = mx.random.categorical(mx.log(top_probs))
-    # token = sorted_indices.squeeze(0)[sorted_token]
+#     # Sample from log of filtered probs (avoid log(0) by adding eps)
+#     eps = 1e-9
+#     logits_for_sampling = mx.log(filtered_probs + eps)  # (B, T)
 
-    probs = mx.softmax(logits * (1 / temperature), axis=-1)
+#     sampled = mx.random.categorical(logits_for_sampling, axis=-1)  # (B,)
 
-    sorted_indices = mx.argsort(-probs, axis=-1)
-    sorted_probs = mx.take_along_axis(probs, sorted_indices, axis=-1)
-
-    cumulative_probs = mx.cumsum(sorted_probs, axis=-1)
-
-    mask = cumulative_probs > (1 - top_p)
-    masked_probs = mx.where(mask, 0.0, sorted_probs)
-
-    masked_probs_sum = mx.sum(masked_probs, axis=-1, keepdims=True)
-    masked_probs = masked_probs / masked_probs_sum
-
-    sampled_idx = mx.random.categorical(mx.log(masked_probs), axis=-1)
-
-    token = mx.take_along_axis(sorted_indices, sampled_idx[..., None], axis=-1)
-
-    return token.squeeze(-1)
+#     # Recover token ids from sorted_indices
+#     token_ids = mx.take_along_axis(sorted_indices, sampled[:, None], axis=-1)  # (B, 1)
+#     print("probs", probs[0])
+#     print("sorted_indices", sorted_indices[0])
+#     print("sorted_probs", sorted_probs[0])
+#     print("cumulative_probs", cumulative_probs[0])
+#     print("mask", mask[0])
+#     print("filtered_probs", filtered_probs)
+#     print("logits_for_sampling", logits_for_sampling[0])
+#     print("sampled", sampled[0])
+#     return token_ids
 
 
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
-def categorical_sampling(logits, temp):
-    return mx.random.categorical(logits * (1 / temp))
+def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.array:
+    """
+    Apply top-p (nucleus) sampling for each (B, N) independently.
+
+    Args:
+        logits: array of shape (B, N, T)
+        top_p: top-p threshold
+        temperature: softmax temperature
+    Returns:
+        token_ids: array of shape (B, N)
+    """
+    B, N, T = logits.shape
+    tokens = []
+    eps = 1e-9
+
+    for b in range(B):
+        tokens_b = []
+        for n in range(N):
+            logit = logits[b, n]
+            probs = mx.softmax(logit / temperature, axis=-1)
+
+            sorted_indices = mx.argsort(probs, axis=-1)
+            sorted_probs = mx.take_along_axis(probs, sorted_indices, axis=-1)
+            cumulative_probs = mx.cumsum(sorted_probs, axis=-1)
+            mask = cumulative_probs > (1.0 - top_p)
+            filtered_probs = mx.where(mask, sorted_probs, 0.0)
+
+            logits_for_sampling = mx.log(filtered_probs + eps)
+            sampled = mx.random.categorical(logits_for_sampling, axis=-1)
+            token_id = mx.take_along_axis(sorted_indices, sampled[None], axis=-1)[0]
+
+            tokens_b.append(token_id)
+        tokens.append(mx.stack(tokens_b, axis=0))  # shape (N,)
+
+    return mx.stack(tokens, axis=0)  # shape (B, N)
 
 
 @dataclass
@@ -177,5 +205,4 @@ class Sampler:
                 )
             else:
                 token = categorical_sampling(logits, self.temp)
-
         return token.astype(mx.int32), logprobs
