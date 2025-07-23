@@ -189,27 +189,17 @@ class ScaledEmbedding(nn.Embedding):
         zero = mx.zeros(1, dtype=input.dtype)
         input = mx.maximum(input, 0)
         if self.demux_second_stream:
-            # print("input", input[0])
-            # print("self.num_embeddings", self.num_embeddings)
             left = input % self.num_embeddings
             right = input // self.num_embeddings
             # Right is itself between [-1, ..., card - 1], with -1 being the zero value.
             right = right - 1
-            # print("lef right", left, right)
             left = self.weight[left]
             right_zero = (right < 0)[..., None]
             right = mx.maximum(right, 0)
-            # print(right)
-            # print(left)
-            # print("weight", self.weight)
-            # print(self.weight.shape)
-            # print(right.shape)
+
             right = self.weight[right]
-            # print("right", right[0])
             y = self.out1(left) + mx.where(right_zero, zero, self.out2(right))
-            # print(y[0])
             y = mx.where(is_zero[..., None], zero, y)
-            # print(y[0])
         else:
             y = self.weight[input]
             y = mx.where(is_zero[..., None], zero, y)
@@ -481,34 +471,27 @@ class Lm(nn.Module):
         on_text_hook=None,
         on_audio_hook=None,
     ) -> tuple[mx.array, mx.array | None, mx.array]:
-        print("text_token_ids", text_token_ids[0])
         xs = self.text_emb(text_token_ids)
-        print("xs", xs[0])
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             _emb = emb(token_ids)
             _emb = _emb.transpose(1, 0, 2)
             xs = xs + _emb
-        print("xs", xs[0])
         if ct is not None:
             xs = xs + mx.expand_dims(ct.tensor, axis=1)
         if cfg_coef != 1:
             xs = mx.tile(xs, (2, 1, 1))
-        print("xs", xs[0])
         transformer_out = self.transformer(
             xs,
             cache=self.transformer_cache,
             cross_attention_src=cross_attention_src,
         )
-        print("transformer_out", transformer_out[0])
         transformer_out = self.out_norm(transformer_out)
-        print("transformer_out", transformer_out[0])
         text_logits = self.text_linear(transformer_out)
 
         if cfg_coef != 1:
             l1, l2 = text_logits.split(2, axis=0)
             text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
         text_token, _ = text_sampler(text_logits)
-        print("text_logits", text_logits[0][0][:5])
         if on_text_hook is not None:
             on_text_hook(text_token)
         if len(self.depformer.slices) > 0:

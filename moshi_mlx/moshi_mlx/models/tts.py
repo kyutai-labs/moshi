@@ -603,18 +603,7 @@ class TTSModel:
         def _on_text_hook(text_tokens):
             tokens = text_tokens.tolist()
             out_tokens = []
-            print(offset, tokens)
-            print(
-                "remaining_padding",
-                states[0].remaining_padding,
-                "queued",
-                states[0].queued,
-                "lookahead_queued",
-                states[0].lookahead_queued,
-                states[0].end_step,
-                states[0].consumption_times,
-                states[0].transcript,
-            )
+
             for b, (token, state, logged) in enumerate(
                 zip(tokens, states, logged_text_tokens)
             ):
@@ -627,9 +616,6 @@ class TTSModel:
             text_tokens[:] = mx.array(out_tokens, dtype=mx.int64)[:, None]
             if on_text_hook is not None:
                 on_text_hook(text_tokens)
-            print("text_tokens", text_tokens)
-            # if offset >= 6:
-            #     hi
 
         lm_gen = LmGen(
             self.batch_size,

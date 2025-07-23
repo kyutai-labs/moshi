@@ -96,48 +96,6 @@ def categorical_sampling(logits, temp):
     return mx.random.categorical(logits * (1 / temp))
 
 
-# @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
-# def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.array:
-#     """
-#     Apply top-p (nucleus) sampling for each row in a batch of logits.
-
-#     Args:
-#         logits: Logits of shape (B, T)
-#         top_p: cumulative probability threshold (e.g. 0.9)
-#         temperature: temperature parameter (e.g. 1.0)
-#     Returns:
-#         Tensor of shape (B,) containing selected token indices.
-#     """
-#     B, T = logits.shape
-#     probs = mx.softmax(logits / temperature, axis=-1)  # (B, T)
-
-#     sorted_indices = mx.argsort(probs, axis=-1)  # (B, T)
-#     sorted_probs = mx.take_along_axis(probs, sorted_indices, axis=-1)  # (B, T)
-#     cumulative_probs = mx.cumsum(sorted_probs, axis=-1)  # (B, T)
-#     mask = cumulative_probs > (1.0 - top_p)  # (B, T)
-
-#     # Zero out masked values
-#     filtered_probs = mx.where(mask, sorted_probs, 0.0)  # (B, T)
-
-#     # Sample from log of filtered probs (avoid log(0) by adding eps)
-#     eps = 1e-9
-#     logits_for_sampling = mx.log(filtered_probs + eps)  # (B, T)
-
-#     sampled = mx.random.categorical(logits_for_sampling, axis=-1)  # (B,)
-
-#     # Recover token ids from sorted_indices
-#     token_ids = mx.take_along_axis(sorted_indices, sampled[:, None], axis=-1)  # (B, 1)
-#     print("probs", probs[0])
-#     print("sorted_indices", sorted_indices[0])
-#     print("sorted_probs", sorted_probs[0])
-#     print("cumulative_probs", cumulative_probs[0])
-#     print("mask", mask[0])
-#     print("filtered_probs", filtered_probs)
-#     print("logits_for_sampling", logits_for_sampling[0])
-#     print("sampled", sampled[0])
-#     return token_ids
-
-
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
 def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.array:
     """
