@@ -524,21 +524,17 @@ class TTSModel:
 
         assert self.lm.condition_provider is not None
 
-        cross_attention_src_list = []
         ct_list = []
+        cross_attention_src_list = []
 
-        ct = None
-        cross_attention_src = None
         for _attr in attributes:
-            current = None
+            ct = None
+            cross_attention_src = None
             for _key, _value in _attr.text.items():
                 _ct = self.lm.condition_provider.condition_tensor(_key, _value)
                 tensor = _ct.tensor.squeeze(0)
-                if current is None:
-                    current = tensor
-                else:
-                    current = current + tensor
-            ct_list.append(current)
+                ct = tensor if ct is None else ct + tensor
+            ct_list.append(ct)
             for _key, _value in _attr.tensor.items():
                 _conditioner = self.lm.condition_provider.conditioners[_key]
                 _ca_src = _conditioner.condition(_value)
@@ -547,8 +543,7 @@ class TTSModel:
                 else:
                     raise ValueError("multiple cross-attention conditioners")
             cross_attention_src_list.append(cross_attention_src)
-            cross_attention_src = None
-        cross_attention_src = mx.stack([a[0] for a in cross_attention_src_list], axis=0)
+        cross_attention_src = mx.concatenate(cross_attention_src_list, axis=0)
         ct = ConditionTensor(mx.stack(ct_list, axis=0))
 
         states = []
@@ -557,6 +552,7 @@ class TTSModel:
             state = self.machine.new_state(entries)
             states.append(state)
 
+        # ATTENTION ICI
         cfg_is_masked_until = None
         text_prefixes = None
         audio_prefixes = None
@@ -603,7 +599,6 @@ class TTSModel:
         def _on_text_hook(text_tokens):
             tokens = text_tokens.tolist()
             out_tokens = []
-
             for b, (token, state, logged) in enumerate(
                 zip(tokens, states, logged_text_tokens)
             ):

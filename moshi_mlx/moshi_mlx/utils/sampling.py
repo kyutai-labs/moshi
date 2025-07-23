@@ -7,6 +7,7 @@ from functools import partial
 import mlx.core as mx
 
 
+# ATTENTION les autre sampler ne sont pas adaptés
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
 def min_p_sampling(
     logits: mx.array,

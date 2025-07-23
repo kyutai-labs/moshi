@@ -59,6 +59,7 @@ class LmGen:
         """
         return -2
 
+    #  ATTENTION le gen_sequence c'est nimporte quoi, virer tout ces unsqueeze
     def _step(
         self,
         other_audio_tokens: mx.array,
