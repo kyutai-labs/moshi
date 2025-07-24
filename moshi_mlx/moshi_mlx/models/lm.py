@@ -196,7 +196,6 @@ class ScaledEmbedding(nn.Embedding):
             left = self.weight[left]
             right_zero = (right < 0)[..., None]
             right = mx.maximum(right, 0)
-
             right = self.weight[right]
             y = self.out1(left) + mx.where(right_zero, zero, self.out2(right))
             y = mx.where(is_zero[..., None], zero, y)

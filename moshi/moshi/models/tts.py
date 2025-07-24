@@ -437,6 +437,35 @@ class TTSModel:
             multi_speaker=self.multi_speaker, padding_between=padding_between)
 
     @torch.no_grad()
+    def warmup(self,
+               attributes: tp.Sequence[ConditionAttributes],
+               iters: int = 3,
+               batch_size: int = 1
+               ):
+        if self.cfg_coef != 1.0:
+            if self.valid_cfg_conditionings:
+                raise ValueError(
+                    "This model does not support direct CFG, but was trained with "
+                    "CFG distillation. Pass instead `cfg_coef` to `make_condition_attributes`.")
+            nulled = _make_null(attributes)
+            attributes = list(attributes) + nulled
+
+        assert self.lm.condition_provider is not None
+        prepared = self.lm.condition_provider.prepare(attributes)
+        condition_tensors = self.lm.condition_provider(prepared)
+        missing = self.lm.n_q - self.lm.dep_q
+        input_tokens = torch.full((batch_size, missing, 1), self.machine.token_ids.zero,
+                                  dtype=torch.long, device=self.lm.device)
+        lm_gen = LMGen(
+            self.lm, temp=self.temp, temp_text=self.temp,
+            cfg_coef=self.cfg_coef, condition_tensors=condition_tensors)
+        with lm_gen.streaming(batch_size), self.mimi.streaming(batch_size):
+            for _ in range(iters):
+                frame = lm_gen.step(input_tokens)
+                if frame is not None:
+                    _ = self.mimi.decode(frame[:, 1:, :])
+
+    @torch.no_grad()
     def generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],
                  attributes: tp.Sequence[ConditionAttributes],
                  prefixes: list[torch.Tensor] | None = None,
