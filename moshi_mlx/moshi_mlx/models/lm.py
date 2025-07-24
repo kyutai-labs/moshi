@@ -471,34 +471,27 @@ class Lm(nn.Module):
         on_audio_hook=None,
     ) -> tuple[mx.array, mx.array | None, mx.array]:
         xs = self.text_emb(text_token_ids)
-        # print("xs", xs)
-        # print("audio token", audio_token_ids)
-        # print("audio_emb", self.audio_embs)
+
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             _emb = emb(token_ids)
             _emb = _emb.transpose(1, 0, 2)
             xs = xs + _emb
-        # print("xs", xs)
         if ct is not None:
             xs = xs + mx.expand_dims(ct.tensor, axis=1)
         if cfg_coef != 1:
             xs = mx.tile(xs, (2, 1, 1))
-        # print("xs", xs)
         transformer_out = self.transformer(
             xs,
             cache=self.transformer_cache,
             cross_attention_src=cross_attention_src,
         )
-        # print("trans", transformer_out)
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
 
         if cfg_coef != 1:
             l1, l2 = text_logits.split(2, axis=0)
             text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
-        # print("logits", text_logits)
         text_token, _ = text_sampler(text_logits)
-        # print("text_token", text_token)
         if on_text_hook is not None:
             on_text_hook(text_token)
         if len(self.depformer.slices) > 0:
@@ -513,7 +506,6 @@ class Lm(nn.Module):
                 on_audio_hook(audio_tokens)
         else:
             audio_tokens = None
-        # print("audi tok out", audio_tokens)
         return text_token, audio_tokens, transformer_out
 
     def sample(

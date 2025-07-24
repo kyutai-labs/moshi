@@ -14,11 +14,11 @@ from ..utils import sampling
 class LmGen:
     def __init__(
         self,
-        batch_size: int,
         model: Lm,
         max_steps: int,
         text_sampler: sampling.Sampler,
         audio_sampler: sampling.Sampler,
+        batch_size: int = 1,
         cfg_coef: float = 1.0,
         check: bool = False,
         on_text_hook=None,
@@ -103,6 +103,7 @@ class LmGen:
             on_text_hook=self.on_text_hook,
             on_audio_hook=self.on_audio_hook,
         )
+
         assert audio_tokens is None or audio_tokens.shape[-2] == (
             self.model.cfg.generated_codebooks
         ), "invalid output audio-token shape"
