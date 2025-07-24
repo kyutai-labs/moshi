@@ -15,46 +15,40 @@ def min_p_sampling(
     temperature=1.0,
 ) -> mx.array:
     """
-    Apply min-p sampling to a batch of logits with shape (B, N, T).
+    Vectorized min-p sampling over (B, N, T) logits.
 
     Args:
-        logits: Logits of shape (B, N, T)
-        min_p: Minimum probability threshold (relative to max prob)
-        min_tokens_to_keep: Always keep at least this many tokens
-        temperature: Softmax temperature
+        logits: (B, N, T)
+        min_p: threshold (relative to max prob)
+        min_tokens_to_keep: always keep at least this many tokens
+        temperature: softmax temperature
     Returns:
-        Sampled tokens of shape (B, N)
+        Sampled token ids of shape (B, N)
     """
-    # reference implementation: https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L531-L605  # noqa
-    B, N, T = logits.shape
     eps = 1e-9
-    tokens = []
+    B, N, T = logits.shape
 
-    for b in range(B):
-        row_tokens = []
-        for n in range(N):
-            logit = logits[b, n]
-            # Softmax probabilities
-            probs = mx.softmax(logit / temperature, axis=-1)
-            # Indices sorted in decreasing order
-            sorted_indices = mx.argsort(-logit)
-            sorted_probs = probs[sorted_indices]
-            # Top probability
-            top_prob = sorted_probs[0]
-            # Calculate the min_p threshold
-            scaled_min_p = min_p * top_prob
-            # Mask tokens that have a probability less than the scaled min_p
-            tokens_to_remove = sorted_probs < scaled_min_p
-            if min_tokens_to_keep > 0:
-                tokens_to_remove[:min_tokens_to_keep] = False
-            # Create pool of tokens with probability less than scaled min_p
-            selected_probs = mx.where(tokens_to_remove, 0.0, sorted_probs)
-            sampled = mx.random.categorical(mx.log(selected_probs + eps))
-            token = sorted_indices[sampled]
-            row_tokens.append(token)
-        tokens.append(mx.stack(row_tokens, axis=0))
+    logits_scaled = logits / temperature
+    probs = mx.softmax(logits_scaled, axis=-1)
 
-    return mx.stack(tokens, axis=0)
+    sorted_indices = mx.argsort(-logits_scaled, axis=-1)
+    sorted_probs = mx.take_along_axis(probs, sorted_indices, axis=-1)
+
+    top_probs = sorted_probs[..., 0:1]
+    scaled_min_p = min_p * top_probs
+
+    tokens_to_remove = sorted_probs < scaled_min_p
+    if min_tokens_to_keep > 0:
+        mask_keep = mx.arange(T) < min_tokens_to_keep
+        tokens_to_remove = mx.where(mask_keep[None, None, :], False, tokens_to_remove)
+
+    filtered_probs = mx.where(tokens_to_remove, 0.0, sorted_probs)
+    log_probs = mx.log(filtered_probs + eps)
+    sampled = mx.random.categorical(log_probs, axis=-1)
+    sampled = sampled[..., None]
+    selected = mx.take_along_axis(sorted_indices, sampled, axis=-1)
+
+    return selected.squeeze(-1)
 
 
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)

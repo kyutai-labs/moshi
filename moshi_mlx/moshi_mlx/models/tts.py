@@ -610,11 +610,11 @@ class TTSModel:
                 on_text_hook(text_tokens)
 
         lm_gen = LmGen(
-            batch_size,
             self.lm,
             max_steps=self.max_gen_length,
             text_sampler=Sampler(temp=self.temp),
             audio_sampler=Sampler(temp=self.temp),
+            batch_size=batch_size,
             cfg_coef=self.cfg_coef,
             on_text_hook=_on_text_hook,
             on_audio_hook=_on_audio_hook,
