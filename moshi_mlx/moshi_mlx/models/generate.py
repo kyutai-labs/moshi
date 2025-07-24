@@ -59,7 +59,6 @@ class LmGen:
         """
         return -2
 
-    #  ATTENTION le gen_sequence c'est nimporte quoi, virer tout ces unsqueeze
     def _step(
         self,
         other_audio_tokens: mx.array,
@@ -70,19 +69,15 @@ class LmGen:
             raise ValueError(f"reached max-steps {self.max_steps}")
         if self.step_idx == 0:
             text_tokens = mx.full(
-                shape=(self.batch_size),
+                shape=(self.batch_size, 1),
                 vals=self.model.cfg.text_out_vocab_size,
                 dtype=mx.int32,
             )
-            text_tokens = text_tokens[:, None]
         else:
-            text_tokens = self.gen_sequence[:, 0, self.step_idx - 1]
-            text_tokens = text_tokens[:, None]
-        for i in range(self.batch_size):
-            for j in range(1 + self.main_codebooks, self.num_codebooks):
-                self.gen_sequence[i, j, self.step_idx] = other_audio_tokens[i][
-                    j - (1 + self.main_codebooks)
-                ][0]
+            text_tokens = self.gen_sequence[:, 0, self.step_idx - 1 : self.step_idx]
+        self.gen_sequence[:, 1 + self.main_codebooks :, self.step_idx] = (
+            other_audio_tokens
+        )
         audio_tokens = []
         for cb_idx, delay in enumerate(self.audio_delays):
             gen_idx = self.step_idx - 1 - delay
@@ -111,14 +106,11 @@ class LmGen:
         assert audio_tokens is None or audio_tokens.shape[-2] == (
             self.model.cfg.generated_codebooks
         ), "invalid output audio-token shape"
-
         self.gen_sequence[:, 0, self.step_idx] = text_tokens.squeeze(-1)
         for cb_idx, delay in enumerate(self.audio_delays[: self.main_codebooks]):
             gen_idx = self.step_idx - delay
             if gen_idx >= 0:
-                self.gen_sequence[:, cb_idx + 1, gen_idx] = audio_tokens[
-                    :, cb_idx
-                ].squeeze(-1)
+                self.gen_sequence[:, cb_idx + 1, gen_idx] = audio_tokens[:, cb_idx, 0]
         self.step_idx += 1
         return text_tokens, transformer_out
 

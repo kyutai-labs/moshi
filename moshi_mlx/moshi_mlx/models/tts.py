@@ -389,7 +389,6 @@ class TTSModel:
 
     machine: StateMachine
     delay_steps: int
-    batch_size: int
     max_speakers: int = 5
 
     # The following params can be overriden to customize generation.
@@ -405,7 +404,6 @@ class TTSModel:
         lm: Lm,
         mimi: Mimi,
         tokenizer: SentencePieceProcessor,
-        batch_size: int,
         temp: float = 0.6,
         cfg_coef: float = 1.0,
         final_padding: int = 4,
@@ -419,7 +417,6 @@ class TTSModel:
     ):
         self.lm = lm
         self.mimi = mimi
-        self.batch_size = batch_size
         self.tokenizer = tokenizer
         self.temp = temp
         self.cfg_coef = cfg_coef
@@ -512,6 +509,7 @@ class TTSModel:
             c.reset()
         for c in self.lm.depformer_cache:
             c.reset()
+        self.mimi.reset_all()
 
         if self.cfg_coef != 1.0:
             if self.valid_cfg_conditionings:
@@ -523,7 +521,7 @@ class TTSModel:
             attributes = list(attributes) + nulled
 
         assert self.lm.condition_provider is not None
-
+        batch_size = len(all_entries)
         ct_list = []
         cross_attention_src_list = []
 
@@ -552,7 +550,6 @@ class TTSModel:
             state = self.machine.new_state(entries)
             states.append(state)
 
-        # ATTENTION ICI
         cfg_is_masked_until = None
         text_prefixes = None
         audio_prefixes = None
@@ -613,7 +610,7 @@ class TTSModel:
                 on_text_hook(text_tokens)
 
         lm_gen = LmGen(
-            self.batch_size,
+            batch_size,
             self.lm,
             max_steps=self.max_gen_length,
             text_sampler=Sampler(temp=self.temp),

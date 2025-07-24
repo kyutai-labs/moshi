@@ -25,6 +25,7 @@ def min_p_sampling(
     Returns:
         Sampled tokens of shape (B, N)
     """
+    # reference implementation: https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L531-L605  # noqa
     B, N, T = logits.shape
     eps = 1e-9
     tokens = []
@@ -33,16 +34,20 @@ def min_p_sampling(
         row_tokens = []
         for n in range(N):
             logit = logits[b, n]
+            # Softmax probabilities
             probs = mx.softmax(logit / temperature, axis=-1)
+            # Indices sorted in decreasing order
             sorted_indices = mx.argsort(-logit)
             sorted_probs = probs[sorted_indices]
+            # Top probability
             top_prob = sorted_probs[0]
+            # Calculate the min_p threshold
             scaled_min_p = min_p * top_prob
-
+            # Mask tokens that have a probability less than the scaled min_p
             tokens_to_remove = sorted_probs < scaled_min_p
             if min_tokens_to_keep > 0:
                 tokens_to_remove[:min_tokens_to_keep] = False
-
+            # Create pool of tokens with probability less than scaled min_p
             selected_probs = mx.where(tokens_to_remove, 0.0, sorted_probs)
             sampled = mx.random.categorical(mx.log(selected_probs + eps))
             token = sorted_indices[sampled]
