@@ -7,7 +7,6 @@ from functools import partial
 import mlx.core as mx
 
 
-# ATTENTION les autre sampler ne sont pas adaptés
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
 def min_p_sampling(
     logits: mx.array,
@@ -16,54 +15,41 @@ def min_p_sampling(
     temperature=1.0,
 ) -> mx.array:
     """
-    Apply min-p sampling to the logits.
-
-    Min-p keeps all tokens that are above a minimum probability, scaled by the
-    probability of the most likely token. As a result, the filter is more
-    aggressive given a very high-probability token.
+    Apply min-p sampling to a batch of logits with shape (B, N, T).
 
     Args:
-        logits: The logits from the model's output.
-        min_p (float): Minimum token probability. Typical values are in the
-            0.01-0.2 range, comparably selective as setting `top_p` in the
-            0.99-0.8 range.
-        min_tokens_to_keep (int, optional): Minimum number of tokens that cannot
-            be filtered. Default: ``1``.
-
+        logits: Logits of shape (B, N, T)
+        min_p: Minimum probability threshold (relative to max prob)
+        min_tokens_to_keep: Always keep at least this many tokens
+        temperature: Softmax temperature
+    Returns:
+        Sampled tokens of shape (B, N)
     """
-    if not (0 <= min_p <= 1.0):
-        raise ValueError(
-            f"`min_p` has to be a float in the [0, 1] interval, but is {min_p}"
-        )
-    if not isinstance(min_tokens_to_keep, int) or (min_tokens_to_keep < 1):
-        raise ValueError(
-            f"`min_tokens_to_keep` has to be a positive integer, but is {min_tokens_to_keep}"
-        )
-    # reference implementation: https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L531-L605  # noqa
+    B, N, T = logits.shape
+    eps = 1e-9
+    tokens = []
 
-    # Softmax probabilities
-    probs = mx.softmax(logits * (1 / temperature), axis=-1)
+    for b in range(B):
+        row_tokens = []
+        for n in range(N):
+            logit = logits[b, n]
+            probs = mx.softmax(logit / temperature, axis=-1)
+            sorted_indices = mx.argsort(-logit)
+            sorted_probs = probs[sorted_indices]
+            top_prob = sorted_probs[0]
+            scaled_min_p = min_p * top_prob
 
-    # Indices sorted in decreasing order
-    sorted_indices = mx.argsort(-logits).squeeze(0)
-    sorted_probs = probs[..., sorted_indices]
+            tokens_to_remove = sorted_probs < scaled_min_p
+            if min_tokens_to_keep > 0:
+                tokens_to_remove[:min_tokens_to_keep] = False
 
-    # Top probability
-    top_probs = probs[..., sorted_indices[0]]
+            selected_probs = mx.where(tokens_to_remove, 0.0, sorted_probs)
+            sampled = mx.random.categorical(mx.log(selected_probs + eps))
+            token = sorted_indices[sampled]
+            row_tokens.append(token)
+        tokens.append(mx.stack(row_tokens, axis=0))
 
-    # Calculate the min_p threshold
-    scaled_min_p = min_p * top_probs
-
-    # Mask tokens that have a probability less than the scaled min_p
-    tokens_to_remove = sorted_probs < scaled_min_p
-    tokens_to_remove[..., :min_tokens_to_keep] = False
-
-    # Create pool of tokens with probability less than scaled min_p
-    selected_probs = mx.where(tokens_to_remove, 0, sorted_probs)
-
-    # Return sampled token
-    sorted_token = mx.random.categorical(mx.log(selected_probs))
-    return sorted_indices[sorted_token]
+    return mx.stack(tokens, axis=0)
 
 
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
@@ -93,11 +79,6 @@ def top_k_sampling(
 
 
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
-def categorical_sampling(logits, temp):
-    return mx.random.categorical(logits * (1 / temp))
-
-
-@partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
 def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.array:
     """
     Apply top-p (nucleus) sampling for each (B, N) independently.
@@ -109,30 +90,38 @@ def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.arr
     Returns:
         token_ids: array of shape (B, N)
     """
+    # referenced implementation from https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L449-L460  # noqa
     B, N, T = logits.shape
-    tokens = []
     eps = 1e-9
 
-    for b in range(B):
-        tokens_b = []
-        for n in range(N):
-            logit = logits[b, n]
-            probs = mx.softmax(logit / temperature, axis=-1)
+    logits_flat = logits.reshape((B * N, T))
+    probs = mx.softmax(logits_flat / temperature, axis=-1)
 
-            sorted_indices = mx.argsort(probs, axis=-1)
-            sorted_probs = mx.take_along_axis(probs, sorted_indices, axis=-1)
-            cumulative_probs = mx.cumsum(sorted_probs, axis=-1)
-            mask = cumulative_probs > (1.0 - top_p)
-            filtered_probs = mx.where(mask, sorted_probs, 0.0)
+    # Sort probs and get sorted indices
+    sorted_indices = mx.argsort(probs, axis=-1)
+    sorted_probs = mx.take_along_axis(probs, sorted_indices, axis=-1)
 
-            logits_for_sampling = mx.log(filtered_probs + eps)
-            sampled = mx.random.categorical(logits_for_sampling, axis=-1)
-            token_id = mx.take_along_axis(sorted_indices, sampled[None], axis=-1)[0]
+    cumulative_probs = mx.cumsum(sorted_probs, axis=-1)
+    mask = cumulative_probs > (1.0 - top_p)
+    filtered_probs = mx.where(mask, sorted_probs, 0.0)
 
-            tokens_b.append(token_id)
-        tokens.append(mx.stack(tokens_b, axis=0))  # shape (N,)
+    # log(filtered + eps) for categorical
+    logits_for_sampling = mx.log(filtered_probs + eps)
 
-    return mx.stack(tokens, axis=0)  # shape (B, N)
+    # Sample index in sorted space
+    sampled = mx.random.categorical(logits_for_sampling, axis=-1)
+
+    # Convert back to original token id
+    token_ids = mx.take_along_axis(sorted_indices, sampled[:, None], axis=-1).squeeze(
+        -1
+    )
+
+    return token_ids.reshape((B, N))
+
+
+@partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
+def categorical_sampling(logits, temp):
+    return mx.random.categorical(logits * (1 / temp))
 
 
 @dataclass
