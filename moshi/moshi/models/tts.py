@@ -24,6 +24,7 @@ import torch
 
 from ..conditioners import ConditionAttributes, dropout_all_conditions, TensorCondition
 from ..conditioners.text import LUTConditioner
+from .lm_utils import ScaledEmbedding
 from . import loaders, MimiModel, LMModel, LMGen
 
 
@@ -415,12 +416,16 @@ class TTSModel:
         if tts_model.multistream:
             mimi_n_q //= 2
             if tts_model.n_q < tts_model.lm.n_q:
-                print("Skipping some codebooks")
+                assert tts_model.lm.depformer_emb is not None
                 for n in range(mimi_n_q, tts_model.lm.n_q // 2):
+                    # No proper support for multistream with reduced codebooks at the moment,
+                    # given that the skipped codebooks are not all located at the end.
+                    # For now we emulate it by setting the embeddings to 0, but we are not
+                    # skipping the computations.
                     for q in [n, n + tts_model.lm.n_q // 2]:
-                        tts_model.lm.emb[q].weight.data[:] = 0.
+                        tp.cast(ScaledEmbedding, tts_model.lm.emb[q]).weight.data[:] = 0.
                         if q < tts_model.lm.n_q - 1:
-                            tts_model.lm.depformer_emb[q].weight.data[:] = 0
+                            tp.cast(ScaledEmbedding, tts_model.lm.depformer_emb[q]).weight.data[:] = 0.
 
         mimi.set_num_codebooks(mimi_n_q)
         if not tts_model.multi_speaker:
@@ -543,6 +548,7 @@ class TTSModel:
             text_tokens[:] = torch.tensor(out_tokens, dtype=torch.long, device=text_tokens.device)
 
         if not self.multistream:
+            # No proper support for skipping some codebooks for multistream models.
             self.lm.dep_q = self.n_q
         lm_gen = LMGen(
             self.lm, temp=self.temp, temp_text=self.temp,
@@ -562,7 +568,8 @@ class TTSModel:
                         break
                 missing = self.lm.n_q - self.lm.dep_q
                 if self.multistream:
-                    assert missing == 0, "Cannot generate a subset of the codebooks with a multistream model."
+                    # See comment above about multistream being emulated.
+                    assert missing == 0
                 input_tokens = torch.full((len(states), missing, 1), self.machine.token_ids.zero,
                                           dtype=torch.long, device=self.lm.device)
                 frame = lm_gen.step(input_tokens)
