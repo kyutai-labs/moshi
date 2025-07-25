@@ -25,36 +25,51 @@ impl Sample for i16 {
         *self
     }
 }
+pub fn write_wav_header<W: Write>(
+    w: &mut W,
+    sample_rate: u32,
+    chunk_size: u32,
+    data_size: u32,
+) -> std::io::Result<()> {
+    let n_channels = 1u16;
+    let bits_per_sample = 16u16;
+    let byte_rate = sample_rate * n_channels as u32 * (bits_per_sample / 8) as u32;
+    let block_align = n_channels * (bits_per_sample / 8);
+
+    w.write_all(b"RIFF")?;
+    w.write_all(&chunk_size.to_le_bytes())?; // unknown chunk size
+    w.write_all(b"WAVE")?;
+
+    w.write_all(b"fmt ")?;
+    w.write_all(&16u32.to_le_bytes())?;
+    w.write_all(&1u16.to_le_bytes())?; // PCM format
+    w.write_all(&n_channels.to_le_bytes())?;
+    w.write_all(&sample_rate.to_le_bytes())?;
+    w.write_all(&byte_rate.to_le_bytes())?;
+    w.write_all(&block_align.to_le_bytes())?;
+    w.write_all(&bits_per_sample.to_le_bytes())?;
+
+    w.write_all(b"data")?;
+    w.write_all(&data_size.to_le_bytes())?; // unknown data size
+
+    Ok(())
+}
+
+pub fn write_pcm_in_wav<W: Write, S: Sample>(w: &mut W, samples: &[S]) -> std::io::Result<usize> {
+    for sample in samples {
+        w.write_all(&sample.to_i16().to_le_bytes())?
+    }
+    Ok(samples.len() * std::mem::size_of::<i16>())
+}
 
 pub fn write_pcm_as_wav<W: Write, S: Sample>(
     w: &mut W,
     samples: &[S],
     sample_rate: u32,
 ) -> std::io::Result<()> {
-    let len = 12u32; // header
-    let len = len + 24u32; // fmt
-    let len = len + samples.len() as u32 * 2 + 8; // data
-    let n_channels = 1u16;
-    let bytes_per_second = sample_rate * 2 * n_channels as u32;
-    w.write_all(b"RIFF")?;
-    w.write_all(&(len - 8).to_le_bytes())?; // total length minus 8 bytes
-    w.write_all(b"WAVE")?;
-
-    // Format block
-    w.write_all(b"fmt ")?;
-    w.write_all(&16u32.to_le_bytes())?; // block len minus 8 bytes
-    w.write_all(&1u16.to_le_bytes())?; // PCM
-    w.write_all(&n_channels.to_le_bytes())?; // one channel
-    w.write_all(&sample_rate.to_le_bytes())?;
-    w.write_all(&bytes_per_second.to_le_bytes())?;
-    w.write_all(&2u16.to_le_bytes())?; // 2 bytes of data per sample
-    w.write_all(&16u16.to_le_bytes())?; // bits per sample
-
-    // Data block
-    w.write_all(b"data")?;
-    w.write_all(&(samples.len() as u32 * 2).to_le_bytes())?;
-    for sample in samples.iter() {
-        w.write_all(&sample.to_i16().to_le_bytes())?
-    }
+    let chunk_size = 12u32 + 24u32 + samples.len() as u32 * 2;
+    let data_size = samples.len() as u32 * 2;
+    write_wav_header(w, sample_rate, chunk_size, data_size)?;
+    write_pcm_in_wav(w, samples)?;
     Ok(())
 }

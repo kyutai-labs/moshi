@@ -8,12 +8,12 @@ import mlx.core as mx
 import mlx.nn as nn
 
 from ..modules.conditioner import (
-    LutConditionerConfig,
-    TensorConditionerConfig,
     ConditionProvider,
     ConditionTensor,
+    LutConditionerConfig,
+    TensorConditionerConfig,
 )
-from ..modules.transformer import Transformer, TransformerConfig, LayerCache
+from ..modules.transformer import LayerCache, Transformer, TransformerConfig
 from ..utils import sampling
 
 
@@ -185,7 +185,7 @@ class ScaledEmbedding(nn.Embedding):
     def __call__(self, input: mx.array) -> mx.array:
         is_zero = input == self.zero_idx
         zero = mx.zeros(1, dtype=input.dtype)
-        input = mx.max(input, 0)
+        input = mx.maximum(input, 0)
         if self.demux_second_stream:
             left = input % self.num_embeddings
             right = input // self.num_embeddings
@@ -193,7 +193,7 @@ class ScaledEmbedding(nn.Embedding):
             right = right - 1
             left = self.weight[left]
             right_zero = (right < 0)[..., None]
-            right = mx.max(right, 0)
+            right = mx.maximum(right, 0)
             right = self.weight[right]
             y = self.out1(left) + mx.where(right_zero, zero, self.out2(right))
             y = mx.where(is_zero[..., None], zero, y)

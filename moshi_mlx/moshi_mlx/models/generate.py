@@ -128,7 +128,7 @@ class LmGen:
         cross_attention_src: mx.array | None = None,
     ) -> tuple[mx.array, list[mx.array]]:
         text, transformer_out = self._step(other_audio_tokens, ct, cross_attention_src)
-        extra_heads = [eh(transformer_out) for eh in self.model.extra_heads]
+        extra_heads = [mx.softmax(eh(transformer_out), axis=-1) for eh in self.model.extra_heads]
         return text, extra_heads
 
     def last_audio_tokens(self) -> Optional[mx.array]:
