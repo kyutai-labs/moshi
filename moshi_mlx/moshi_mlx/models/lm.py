@@ -265,13 +265,11 @@ class DepFormer(nn.Module):
         # The cache is shared between the depformer slices but not persisted between sample calls.
         for c in cache:
             c.reset()
-        for i, slice in enumerate(self.slices):
+        for slice in self.slices:
             # The 2048 tokens should be teacher forced on the first slices. However as delays
             # are non-decreasing in the number of slices, this is actually not necessary as
             # the generated tokens will end up not being used.
 
-            batch_size = last_token.shape[0]
-            last_token = last_token.reshape(batch_size, 1)
             if cfg_coef != 1:
                 last_token = mx.tile(last_token, (2, 1))
             xs = slice.linear_in(main_transformer_out) + slice.emb(last_token)
@@ -283,8 +281,6 @@ class DepFormer(nn.Module):
 
             last_token, _ = sampler(logits)
             tokens.append(last_token)
-            # if last_token[0] != last_token[1]:
-            #     hi
         tokens = mx.stack(tokens, axis=1)
         return tokens
 
@@ -471,7 +467,6 @@ class Lm(nn.Module):
         on_audio_hook=None,
     ) -> tuple[mx.array, mx.array | None, mx.array]:
         xs = self.text_emb(text_token_ids)
-
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             _emb = emb(token_ids)
             _emb = _emb.transpose(1, 0, 2)
@@ -487,7 +482,6 @@ class Lm(nn.Module):
         )
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
-
         if cfg_coef != 1:
             l1, l2 = text_logits.split(2, axis=0)
             text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
