@@ -71,6 +71,7 @@ def import_model(
         config['tts_config'] = {
             'audio_delay': cfg.interleaver.audio_delay,
             'second_stream_ahead': kw_interleaver.get('second_stream_ahead', 0),
+            'multistream': cfg.tokens.multistream,
         }
 
     config['model_id'] = {}
