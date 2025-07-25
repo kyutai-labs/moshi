@@ -231,9 +231,7 @@ class Mimi(nn.Module):
 
             # PyTorch layout for conv weights is outC, inC, kSize, for MLX it's outC, kSize, inC
             if (
-                k.endswith(".conv.weight")
-                or k.endswith(".output_proj.weight")
-                or k.endswith(".input_proj.weight")
+                k.endswith(".conv.weight") or k.endswith(".output_proj.weight") or k.endswith(".input_proj.weight")
             ):
                 v = v.swapaxes(-1, -2)
             # PyTorch layout for conv-transposed weights is inC, outC, kSize, for MLX it's outC, kSize, inC
