@@ -24,8 +24,7 @@ from .rope import RotaryEmbedding
 from .streaming import StreamingModule, StreamingContainer, State
 from .lora import LoRALinear
 from torch.utils.checkpoint import checkpoint as torch_checkpoint
-import torch._dynamo
-torch._dynamo.config.suppress_errors = True
+
 
 class LayerNormF32(nn.LayerNorm):
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -219,7 +218,7 @@ class RingKVCache:
             self.end_offset = torch.zeros(1, device=device, dtype=torch.long)
         self.attention_sink_size = attention_sink_size
         self.sink_fill_level = torch.zeros(batch_size, device=device, dtype=torch.long)
-        self.size_vector = torch.full_like(self.end_offset,attention_sink_size)
+        self.size_vector = torch.full_like(self.end_offset, attention_sink_size)
 
     def reset(self, reset_mask: torch.Tensor) -> None:
         self.end_offset[:] = torch.where(
@@ -242,14 +241,14 @@ class RingKVCache:
         indexes = torch.where(
             (self.sink_fill_level < self.attention_sink_size).bool() | (self.end_offset < self.capacity).bool(),
             indexes % self.capacity,
-            (indexes -self.attention_sink_size) % (self.capacity - self.attention_sink_size) + self.attention_sink_size
-            )
+            (indexes - self.attention_sink_size) % (
+                self.capacity - self.attention_sink_size) + self.attention_sink_size)
         if self.respect_exec_mask:
             # indexes is [B, T]
             # k is [B, H, T, D]
             # cache is [B, H, T', D]
             this_indexes = indexes.view(B, 1, T, 1)
-            this_indexes = this_indexes.expand(-1, H, T, D)            
+            this_indexes = this_indexes.expand(-1, H, T, D)
             self.cache[0].scatter_(2, this_indexes, k)
             self.cache[1].scatter_(2, this_indexes, v)
         else:
@@ -263,20 +262,21 @@ class RingKVCache:
 
         # end_index corresponds to the actual index where the last value was written.
         last_offset = self.end_offset.view(-1, 1) + T - 1
-        #end_index = last_offset % (self.capacity - self.attention_sink_size) + self.attention_sink_size
+        # end_index = last_offset % (self.capacity - self.attention_sink_size) + self.attention_sink_size
         end_index = torch.where(
             (self.end_offset < self.capacity).bool(),
             last_offset % self.capacity,
-            (last_offset - self.attention_sink_size) % (self.capacity - self.attention_sink_size) + self.attention_sink_size
+            (last_offset - self.attention_sink_size) % (
+                self.capacity - self.attention_sink_size) + self.attention_sink_size
         )
         delta = indexes - end_index
-        
+
         base_positions = torch.where(
             delta <= 0,
             last_offset + delta,
             last_offset + delta - self.capacity + self.attention_sink_size,
         )
-        
+
         if self.respect_exec_mask:
             self.end_offset[:] = torch.where(
                 exec_mask,
@@ -286,21 +286,20 @@ class RingKVCache:
             self.end_offset.add_(T)
 
         sink_mask = indexes < self.attention_sink_size  # [total_size]
-        
+
         positions = torch.where(
-            sink_mask.unsqueeze(0), 
-            torch.maximum(indexes.expand(B,-1) - self.capacity  + self.end_offset, indexes.expand(B,-1)),
-            base_positions 
+            sink_mask.unsqueeze(0),
+            torch.maximum(indexes.expand(B, -1) - self.capacity + self.end_offset, indexes.expand(B, -1)),
+            base_positions
         )
         self.sink_fill_level[:] = torch.minimum(self.end_offset, self.size_vector)
         invalid = indexes >= self.end_offset.view(-1, 1)
 
         positions = torch.where(invalid, torch.full_like(positions, -1), positions)
-        
+
         return KVCacheResult(keys, values, positions)
 
 
-    
 def apply_weights_per_step(modules: nn.ModuleList, schedule: list[int] | None,
                            x: torch.Tensor, offset: int | None) -> torch.Tensor:
     """Utility to apply a multi linear layer to the given input. A multi linear layer
@@ -316,7 +315,7 @@ def apply_weights_per_step(modules: nn.ModuleList, schedule: list[int] | None,
 
     if len(modules) == 1:
         return modules[0](x)
-    
+
     assert offset is not None, "Out of sync execution with weights per step."
     ys: list[torch.Tensor] = []
     B, T, C = x.shape
@@ -481,10 +480,11 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                     )
             else:
                 capacity = self.context
-            
+
             kv_cache = RingKVCache(
                 batch_size, self.num_heads, dim_per_head, capacity,
-                respect_exec_mask=not self.weights_per_step, device=device, dtype=dtype, attention_sink_size=self.attention_sink_size
+                respect_exec_mask=not self.weights_per_step, device=device, dtype=dtype,
+                attention_sink_size=self.attention_sink_size
             )
         return _MHAState(
             batch_size,
@@ -566,42 +566,39 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             q, k, v = rearrange(
                 projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
             )
-        
+
         if self.attention_sink_size == 0:
             if self.rope:
                 q, k = self.rope(q, k, offset, time_before_heads=False)
 
             k, v, pos_k = self._complete_kv(k, v)
             pos_k = pos_k[:, None]
-            #q,_ = self.rope(q, q, offset, time_before_heads=False)
-            #k, v, pos_k = self._complete_kv(k,v)
-            
-            #k,_ = self.rope(k,k,offset,time_before_heads=False,positions=pos_k[:,None])
+            # q,_ = self.rope(q, q, offset, time_before_heads=False)
+            # k, v, pos_k = self._complete_kv(k,v)
+
+            # k,_ = self.rope(k,k,offset,time_before_heads=False,positions=pos_k[:,None])
             if self.causal:
-                
+
                 pos_q = offset.view(-1, 1, 1) + torch.arange(T, device=q.device, dtype=torch.long).view(
                     -1, 1)
                 delta = pos_q - pos_k
-                attn_bias =  (pos_k >= 0) & (delta >= 0)
+                attn_bias = (pos_k >= 0) & (delta >= 0)
 
                 if self.context is not None:
-                    attn_bias = attn_bias & (delta < self.context) 
+                    attn_bias = attn_bias & (delta < self.context)
                 attn_bias = attn_bias[:, None]
-                
+
             else:
                 attn_bias = None
         else:
-            
-            
-            q,_ = self.rope(q, q, offset, time_before_heads=False)
-            k, v, pos_k = self._complete_kv(k,v)
-            #if offset <=751 and offset >= 749:
-            #    print(pos_k)
-            k, _ = self.rope(k, k ,offset,time_before_heads=False,positions=pos_k[:,None])
+            assert self.rope is not None
+            q, _ = self.rope(q, q, offset, time_before_heads=False)
+            k, v, pos_k = self._complete_kv(k, v)
+            # if offset <=751 and offset >= 749:
+            #     print(pos_k)
+            k, _ = self.rope(k, k , offset, time_before_heads=False, positions=pos_k[:, None])
             attn_bias = (pos_k != -1)[:, None, None, :]  # shape [B, 1, 1, seq_len]
 
-            
-        
         x = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_bias, dropout_p=0.0)
 
         x = rearrange(x, "b h t d -> b t (h d)")
