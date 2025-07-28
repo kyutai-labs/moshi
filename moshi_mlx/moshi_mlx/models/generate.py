@@ -20,6 +20,8 @@ class LmGen:
         audio_sampler: sampling.Sampler,
         cfg_coef: float = 1.0,
         check: bool = False,
+        on_text_hook=None,
+        on_audio_hook=None,
     ):
         self.model: Lm = model
         self.text_sampler = text_sampler
@@ -38,6 +40,8 @@ class LmGen:
         self.max_delay = max(self.audio_delays)
         self.main_codebooks = self.model.cfg.depformer.num_slices
         self.cfg_coef = cfg_coef
+        self.on_text_hook = on_text_hook
+        self.on_audio_hook = on_audio_hook
 
     @property
     def zero_token(self) -> int:
@@ -53,10 +57,12 @@ class LmGen:
         """
         return -2
 
-    # Runs one step of inference and return the generated text token.
-    def step(
-        self, other_audio_tokens: mx.array, ct: ConditionTensor | None = None
-    ) -> mx.array:
+    def _step(
+        self,
+        other_audio_tokens: mx.array,
+        ct: ConditionTensor | None = None,
+        cross_attention_src: mx.array | None = None,
+    ) -> tuple[mx.array, mx.array]:
         if self.step_idx >= self.max_steps:
             raise ValueError(f"reached max-steps {self.max_steps}")
 
@@ -83,13 +89,16 @@ class LmGen:
         if (text_tokens == self.ungenerated_token).any():  # type: ignore
             raise ValueError(f"ungenerated value in text tokens {self.step_idx}")
         assert text_tokens.shape == (1, 1), "invalid text-tokens shape"
-        text_tokens, audio_tokens = self.model.sample(
+        text_tokens, audio_tokens, transformer_out = self.model._sample(
             text_tokens,
             audio_tokens,
             self.text_sampler,
             self.audio_sampler,
             ct=ct,
+            cross_attention_src=cross_attention_src,
             cfg_coef=self.cfg_coef,
+            on_text_hook=self.on_text_hook,
+            on_audio_hook=self.on_audio_hook,
         )
         assert text_tokens.shape == (1,), "invalid output text-token shape"
         assert audio_tokens is None or audio_tokens.shape == (
@@ -102,7 +111,25 @@ class LmGen:
             if gen_idx >= 0:
                 self.gen_sequence[:, cb_idx + 1, gen_idx] = audio_tokens[cb_idx]
         self.step_idx += 1
-        return text_tokens
+        return text_tokens, transformer_out
+
+    def step(
+        self,
+        other_audio_tokens: mx.array,
+        ct: ConditionTensor | None = None,
+        cross_attention_src: mx.array | None = None,
+    ) -> mx.array:
+        return self._step(other_audio_tokens, ct, cross_attention_src)[0]
+
+    def step_with_extra_heads(
+        self,
+        other_audio_tokens: mx.array,
+        ct: ConditionTensor | None = None,
+        cross_attention_src: mx.array | None = None,
+    ) -> tuple[mx.array, list[mx.array]]:
+        text, transformer_out = self._step(other_audio_tokens, ct, cross_attention_src)
+        extra_heads = [mx.softmax(eh(transformer_out), axis=-1) for eh in self.model.extra_heads]
+        return text, extra_heads
 
     def last_audio_tokens(self) -> Optional[mx.array]:
         gen_idx = self.step_idx - 1 - self.max_delay

@@ -3,6 +3,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import json
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -29,6 +30,10 @@ def main():
         lm_config = moshi_mlx.models.config1b_202412_16rvq()
     elif args.config == "helium-2b":
         lm_config = moshi_mlx.models.config_helium_1_preview_2b()
+    elif args.config.endswith(".json"):
+        with open(args.config, "r") as fobj:
+            lm_config = json.load(fobj)
+        lm_config = moshi_mlx.models.LmConfig.from_config_dict(lm_config)
     else:
         raise ValueError(f"unknown config name '{args.config}'")
     print(f"model config:\n{lm_config}")

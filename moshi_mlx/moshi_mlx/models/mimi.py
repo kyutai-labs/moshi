@@ -4,11 +4,13 @@
 
 from dataclasses import dataclass
 from ..modules import (
+    ConvTranspose1d,
     SeanetConfig,
     TransformerConfig,
     SeanetEncoder,
     SeanetDecoder,
     SplitResidualVectorQuantizer,
+    EuclideanCodebook,
     ProjectedTransformer,
     ConvDownsample1d,
     ConvTrUpsample1d,
@@ -169,6 +171,14 @@ class Mimi(nn.Module):
         pcm_out = self.decode(codes)
         mx.eval(pcm_out)
 
+    @property
+    def frame_rate(self) -> float:
+        return self.cfg.frame_rate
+
+    @property
+    def sample_rate(self) -> float:
+        return self.cfg.sample_rate
+
     def load_pytorch_weights(
         self,
         file: str,
@@ -212,4 +222,14 @@ class Mimi(nn.Module):
             if k.endswith(".convtr.weight"):
                 v = v.transpose(1, 2, 0)
             weights.append((k, v))
-        return self.load_weights(weights, strict=strict)
+        m = self.load_weights(weights, strict=strict)
+
+        def _filter_fn(module, name, _):
+            if isinstance(module, EuclideanCodebook) and name == "initialized":
+                module.update_in_place()
+            if isinstance(module, ConvTranspose1d) and name == "weight":
+                module.update_in_place()
+            return True
+
+        m.filter_and_map(_filter_fn)
+        return m

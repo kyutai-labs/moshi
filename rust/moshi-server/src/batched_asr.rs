@@ -122,7 +122,7 @@ impl Logger {
     ) -> Result<Self> {
         let since_epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
         let (secs, us) = (since_epoch.as_secs(), since_epoch.subsec_micros());
-        let base_path = log_dir.as_ref().join(format!("{}-asr-{secs}-{us}", instance_name));
+        let base_path = log_dir.as_ref().join(format!("{instance_name}-asr-{secs}-{us}"));
         let (log_tx, log_rx) = std::sync::mpsc::channel::<(Tensor, Tensor)>();
         Ok(Self { base_path, log_tx, log_rx, log_frequency_s })
     }
@@ -222,7 +222,7 @@ impl BatchedAsrInner {
         )?;
         let log_tx = logger.map(|v| v.log_tx.clone());
         let dev = state.device().clone();
-        let model_loop: task::JoinHandle<Result<()>> = task::spawn_blocking(move || {
+        crate::utils::spawn_blocking("model_loop", move || {
             tracing::info!("warming-up the asr");
             warmup(&mut state, conditions.as_ref())?;
             tracing::info!("starting asr loop {batch_size}");
@@ -271,13 +271,6 @@ impl BatchedAsrInner {
                 } else {
                     std::thread::sleep(std::time::Duration::from_millis(2));
                 }
-            }
-        });
-        task::spawn(async {
-            match model_loop.await {
-                Err(err) => tracing::error!(?err, "model loop join err"),
-                Ok(Err(err)) => tracing::error!(?err, "model loop err"),
-                Ok(Ok(())) => tracing::info!("model loop exited"),
             }
         });
         Ok(())
@@ -596,7 +589,7 @@ impl BatchedAsr {
         tracing::info!(batch_idx, "batched-asr channel");
         in_tx.send(InMsg::Init)?;
 
-        let recv_loop = task::spawn(async move {
+        crate::utils::spawn("recv_loop", async move {
             let mut receiver = receiver;
             // There are two timeouts here:
             // - The short timeout handles the case where the client does not answer the regular pings.
@@ -632,7 +625,7 @@ impl BatchedAsr {
             }
             Ok::<_, anyhow::Error>(())
         });
-        let send_loop = task::spawn(async move {
+        crate::utils::spawn("send_loop", async move {
             let mut sender = sender;
             loop {
                 // The recv method is cancel-safe so can be wrapped in a timeout.
@@ -654,23 +647,6 @@ impl BatchedAsr {
             }
             Ok::<(), anyhow::Error>(())
         });
-
-        // Keep track of the outputs of the different threads.
-        task::spawn(async {
-            match send_loop.await {
-                Err(err) => tracing::error!(?err, "send loop join err"),
-                Ok(Err(err)) => tracing::error!(?err, "send loop err"),
-                Ok(Ok(())) => tracing::info!("send loop exited"),
-            }
-        });
-        task::spawn(async {
-            match recv_loop.await {
-                Err(err) => tracing::error!(?err, "recv loop join err"),
-                Ok(Err(err)) => tracing::error!(?err, "recv loop err"),
-                Ok(Ok(())) => tracing::info!("recv loop exited"),
-            }
-        });
-
         Ok(())
     }
 

@@ -5,13 +5,13 @@ description = "Moshi is moshi"
 dependencies = [
     "numpy >= 1.26, < 2.3",
     "safetensors >= 0.4.0, < 0.6",
-    "huggingface-hub >= 0.24, < 0.29",
+    "huggingface-hub >= 0.24, < 0.34",
     "bitsandbytes >= 0.45, < 0.46; sys_platform == 'linux'",
     "einops >= 0.7, < 0.9",
     "sentencepiece == 0.2",
     "sounddevice == 0.5",
     "sphn >= 0.1.4, < 0.2.0",
-    "torch >= 2.2.0, < 2.7",
+    "torch >= 2.2.0, < 2.8",
     "aiohttp>=3.10.5, <3.12",
     "pytest >= 8.3.3",
 ]
@@ -22,8 +22,10 @@ dynamic = ["version"]
 readme = "README.md"
 
 [project.scripts]
-moshi-server = "moshi.server:main"
-moshi-client = "moshi.client:main"
+moshi-server-py = "moshi.server:main"
+moshi-client-py = "moshi.client:main"
+moshi-inference = "moshi.run_inference:main"
+moshi-tts = "moshi.run_tts:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "moshi.__version__"}

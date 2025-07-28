@@ -177,3 +177,25 @@ pub fn pcm_decode(bytes: axum::body::Bytes) -> anyhow::Result<(Vec<f32>, u32)> {
     }
     Ok((pcm_data, sample_rate))
 }
+
+pub fn spawn<F>(name: &'static str, future: F) -> tokio::task::JoinHandle<()>
+where
+    F: std::future::Future<Output = Result<()>> + Send + 'static,
+{
+    tokio::task::spawn(async move {
+        match future.await {
+            Ok(_) => tracing::info!(?name, "task completed successfully"),
+            Err(err) => tracing::error!(?name, ?err, "task failed"),
+        }
+    })
+}
+
+pub fn spawn_blocking<F>(name: &'static str, f: F) -> tokio::task::JoinHandle<()>
+where
+    F: FnOnce() -> Result<()> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || match f() {
+        Ok(_) => tracing::info!(?name, "task completed successfully"),
+        Err(err) => tracing::error!(?name, ?err, "task failed"),
+    })
+}

@@ -8,7 +8,6 @@ use axum::extract::ws;
 use candle::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use std::collections::VecDeque;
-use tokio::task;
 use tokio::time::{timeout, Duration};
 
 const FRAME_SIZE: usize = 1920;
@@ -130,7 +129,7 @@ impl Asr {
         let asr_delay_in_tokens = self.asr_delay_in_tokens;
         let conditions = self.conditions.clone();
         let mut ogg_opus_decoder = kaudio::ogg_opus::Decoder::new(24000, 1920)?;
-        let recv_loop = task::spawn(async move {
+        let recv_loop = crate::utils::spawn("recv_loop", async move {
             let dev = state.device().clone();
             // Store the markers in a double ended queue
             let mut markers = VecDeque::new();
@@ -208,7 +207,7 @@ impl Asr {
             }
             Ok::<(), anyhow::Error>(())
         });
-        let send_loop = task::spawn(async move {
+        let send_loop = crate::utils::spawn("send_loop", async move {
             loop {
                 // The recv method is cancel-safe so can be wrapped in a timeout.
                 let msg = timeout(Duration::from_secs(10), rx.recv()).await;
@@ -241,19 +240,9 @@ impl Asr {
             _ = &mut sleep => {
                 tracing::error!("reached timeout");
             }
-            res = recv_loop => {
-                match res {
-                    Err(err) => tracing::error!(?err, "recv loop ended"),
-                    Ok(Err(err)) => tracing::error!(?err, "recv loop err"),
-                    Ok(Ok(())) => tracing::info!("recv loop ended"),
-                }
+            _ = recv_loop => {
             }
-            res = send_loop => {
-                match res {
-                    Err(err) => tracing::error!(?err, "send loop ended"),
-                    Ok(Err(err)) => tracing::error!(?err, "send loop err"),
-                    Ok(Ok(())) => tracing::info!("send loop ended"),
-                }
+            _ = send_loop => {
             }
         }
         let (text_tokens, audio_tokens): (Vec<_>, Vec<_>) = log_rx.try_iter().unzip();

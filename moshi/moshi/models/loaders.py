@@ -111,15 +111,23 @@ _lm_kwargs = {
 }
 
 
-def hf_get(filename: str | Path, hf_repo: str | None = None) -> Path:
+def hf_get(filename: str | Path, hf_repo: str | None = None,
+           check_local_file_exists: bool = False) -> Path:
     if isinstance(filename, Path):
         return filename
     if filename.startswith("hf://"):
-        parts = filename[5:].split("/")
+        parts = filename.removeprefix("hf://").split("/")
         repo_name = parts[0] + "/" + parts[1]
         filename = "/".join(parts[2:])
         return Path(hf_hub_download(repo_name, filename))
+    elif filename.startswith("file://"):
+        # Provide a way to force the read of a local file.
+        filename = filename.removeprefix("file://")
+        return Path(filename)
     elif hf_repo is not None:
+        if check_local_file_exists:
+            if Path(filename).exists():
+                return Path(filename)
         return Path(hf_hub_download(hf_repo, filename))
     else:
         return Path(filename)
@@ -251,6 +259,8 @@ class CheckpointInfo:
             num_codebooks = 8
         else:
             num_codebooks = max(self.lm_config["dep_q"], self.lm_config["n_q"] - self.lm_config["dep_q"])
+        if self.tts_config.get('multistream'):
+            num_codebooks //= 2
         return get_mimi(self.mimi_weights, num_codebooks=num_codebooks, device=device)
 
     def get_moshi(
