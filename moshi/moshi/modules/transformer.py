@@ -238,8 +238,11 @@ class RingKVCache:
         assert T > 0
         indexes = torch.arange(T, device=self.end_offset.device, dtype=self.end_offset.dtype)
         indexes = indexes + self.end_offset.view(-1, 1)
+        sink_mask = (
+            self.sink_fill_level.view(-1, 1) < self.attention_sink_size) | (
+            self.end_offset.view(-1, 1) < self.capacity)
         indexes = torch.where(
-            (self.sink_fill_level < self.attention_sink_size).bool() | (self.end_offset < self.capacity).bool(),
+            sink_mask,
             indexes % self.capacity,
             (indexes - self.attention_sink_size) % (
                 self.capacity - self.attention_sink_size) + self.attention_sink_size)
@@ -264,7 +267,7 @@ class RingKVCache:
         last_offset = self.end_offset.view(-1, 1) + T - 1
         # end_index = last_offset % (self.capacity - self.attention_sink_size) + self.attention_sink_size
         end_index = torch.where(
-            (self.end_offset < self.capacity).bool(),
+            (self.end_offset.view(-1, 1) < self.capacity).bool(),
             last_offset % self.capacity,
             (last_offset - self.attention_sink_size) % (
                 self.capacity - self.attention_sink_size) + self.attention_sink_size
@@ -289,7 +292,7 @@ class RingKVCache:
 
         positions = torch.where(
             sink_mask.unsqueeze(0),
-            torch.maximum(indexes.expand(B, -1) - self.capacity + self.end_offset, indexes.expand(B, -1)),
+            torch.maximum(indexes.expand(B, -1) - self.capacity + self.end_offset.view(-1, 1), indexes.expand(B, -1)),
             base_positions
         )
         self.sink_fill_level[:] = torch.minimum(self.end_offset, self.size_vector)
@@ -591,7 +594,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             else:
                 attn_bias = None
         else:
-            assert self.rope is not None
+            assert self.rope is not None, self.cross_attention
             q, _ = self.rope(q, q, offset, time_before_heads=False)
             k, v, pos_k = self._complete_kv(k, v)
             # if offset <=751 and offset >= 749:
@@ -674,7 +677,6 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         attn_kwargs: tp.Dict[str, tp.Any] = {
             "embed_dim": d_model,
             "num_heads": num_heads,
-            "attention_sink_size": attention_sink_size,
         }
         if not skip_self_attn:
             self.self_attn: StreamingMultiheadAttention = StreamingMultiheadAttention(
@@ -683,6 +685,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
                 rope=rope,
                 weights_per_step=weights_per_step,
                 weights_per_step_schedule=weights_per_step_schedule,
+                attention_sink_size=attention_sink_size,
                 **attn_kwargs,  # type: ignore
                 **factory_kwargs,  # type: ignore
             )  # type: ignore

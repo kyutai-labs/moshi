@@ -109,6 +109,7 @@ class LMModel(StreamingContainer):
         device=None,
         dtype=None,
         gradient_checkpointing: bool = False,
+        attention_sink_size: int = 0,
         **kwargs,
     ):
         super().__init__()
@@ -155,6 +156,7 @@ class LMModel(StreamingContainer):
             context=context,
             causal=causal,
             checkpointing=gradient_checkpointing,
+            attention_sink_size=attention_sink_size,
             **main_kwargs,
         )
         self.out_norm = create_norm_fn(norm, dim)
