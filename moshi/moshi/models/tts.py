@@ -544,10 +544,6 @@ class TTSModel:
                 delayed = delayed.to(device)
                 audio_prefixes.append(deque(delayed.t()))
 
-        no_depformer_tokens = torch.full(
-            (len(all_entries), self.lm.dep_q, 1), self.machine.token_ids.zero,
-            dtype=torch.long, device=device)
-
         def _on_text_logits_hook(text_logits):
             if self.padding_bonus:
                 text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
@@ -589,6 +585,9 @@ class TTSModel:
             on_text_logits_hook=_on_text_logits_hook, on_text_hook=_on_text_hook, on_audio_hook=_on_audio_hook,
             cfg_is_masked_until=cfg_is_masked_until, cfg_is_no_text=cfg_is_no_text,
             **kwargs)
+        no_depformer_tokens = torch.full(
+            (len(all_entries), self.lm.dep_q, 1), self.machine.token_ids.zero,
+            dtype=torch.long, device=device)
 
         logged_text_tokens = [[] for _ in states]
         frames: list[torch.Tensor] = []
