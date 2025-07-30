@@ -351,7 +351,7 @@ def get_moshi_lm(
             lm_kwargs["dim"], device, lm_kwargs
         )
         del lm_kwargs["conditioners"]
-    if "fuser" in lm_kwargs:
+    if lm_kwargs.get("fuser", None) is not None:
         lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
 
     lm_kwargs = lm_kwargs | lm_kwargs_overrides

@@ -1,0 +1,51 @@
+{
+    "lm_gen_config": {
+        "temp": 0.0,
+        "temp_text": 0.0,
+        "top_k": 250,
+        "top_k_text": 50
+  },
+  "model_type": "stt",
+  "stt_config": {
+    "audio_delay_seconds": 0.5,
+    "audio_silence_prefix_seconds": 0.0
+  },
+  "mimi_name": "mimi-pytorch-e351c8d8@125.safetensors",
+  "tokenizer_name": "tokenizer_en_fr_audio_8000.model",
+  "delays": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ]
+ "fuser": null
+}
