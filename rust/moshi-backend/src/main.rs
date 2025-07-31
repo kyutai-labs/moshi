@@ -127,8 +127,8 @@ async fn main() -> Result<()> {
                 standalone::download_from_hub(&mut config.stream).await?;
             }
             if !std::path::PathBuf::from(&config.static_dir).exists() {
-                use hf_hub::api::tokio::Api;
-                let api = Api::new()?;
+                use hf_hub::api::tokio::ApiBuilder;
+                let api = ApiBuilder::from_env().build().unwrap();
                 let repo = api.model("kyutai/moshi-artifacts".to_string());
                 let dist_tgz = repo.get("dist.tgz").await?;
                 if let Some(parent) = dist_tgz.parent() {
