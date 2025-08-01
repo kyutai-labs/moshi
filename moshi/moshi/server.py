@@ -168,7 +168,20 @@ class ServerState:
             self.lm_gen.reset_streaming()
             # Send the handshake.
             await ws.send_bytes(b"\x00")
-            await asyncio.gather(opus_loop(), recv_loop(), send_loop())
+            tasks = [
+                asyncio.create_task(opus_loop()),
+                asyncio.create_task(recv_loop()),
+                asyncio.create_task(send_loop())
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+            # Cancel any remaining tasks
+            for task in pending:
+                task.cancel()
+
+            # Wait for cancelled tasks to complete
+            if pending:
+                await asyncio.wait(pending, return_when=asyncio.ALL_COMPLETED)
         log("info", "done with connection")
         return ws
 
@@ -284,7 +297,7 @@ def main():
         tunnel = setup_tunnel('localhost', args.port, tunnel_token, None, **tunnel_kwargs)
         log("info", f"Tunnel started, if executing on a remote GPU, you can use {tunnel}.")
         log("info", "Note that this tunnel goes through the US and you might experience high latency in Europe.")
-    web.run_app(app, host=args.host , port=args.port, ssl_context=ssl_context)
+    web.run_app(app, host=args.host, port=args.port, ssl_context=ssl_context)
 
 
 with torch.no_grad():
