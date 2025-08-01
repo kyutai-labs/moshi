@@ -517,7 +517,11 @@ if __name__ == '__main__':
     parser.add_argument('-b', '--batch_size', default=32, type=int)
     args = parser.parse_args()
     bs = args.batch_size
-    service = init(batch_size=bs, config_override={})
+    config_override = {
+        "voice_folder": "hf-snapshot://kyutai/tts-voices/unmute-prod-website/*.safetensors",
+        "default_voice": "unmute-prod-website/default_voice.wav",
+    }
+    service = init(batch_size=bs, config_override=config_override)
     print("Service initialized")
     pcm_out = np.zeros((bs, 1920))
     flags_out = np.zeros(bs, dtype=np.int32)
