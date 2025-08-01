@@ -2,23 +2,24 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from dataclasses import dataclass
-from ..modules import (
-    ConvTranspose1d,
-    SeanetConfig,
-    TransformerConfig,
-    SeanetEncoder,
-    SeanetDecoder,
-    SplitResidualVectorQuantizer,
-    EuclideanCodebook,
-    ProjectedTransformer,
-    ConvDownsample1d,
-    ConvTrUpsample1d,
-)
 import math
+from dataclasses import dataclass
 
 import mlx.core as mx
 import mlx.nn as nn
+
+from ..modules import (
+    ConvDownsample1d,
+    ConvTranspose1d,
+    ConvTrUpsample1d,
+    EuclideanCodebook,
+    ProjectedTransformer,
+    SeanetConfig,
+    SeanetDecoder,
+    SeanetEncoder,
+    SplitResidualVectorQuantizer,
+    TransformerConfig,
+)
 
 
 @dataclass
@@ -133,6 +134,11 @@ class Mimi(nn.Module):
         for c in self.encoder_cache:
             c.reset()
 
+    def reset_all(self):
+        self.reset_state()
+        self.upsample.reset_state()
+        self.downsample.reset_state()
+
     def encode(self, xs: mx.array) -> mx.array:
         self.encoder.reset_state()
         for c in self.encoder_cache:
@@ -187,7 +193,7 @@ class Mimi(nn.Module):
         weights = []
         for k, v in mx.load(file).items():
             v: mx.array = v
-            k: str = '.'.join([s.removeprefix('_') for s in k.split('.')])
+            k: str = ".".join([s.removeprefix("_") for s in k.split(".")])
             if k.startswith("encoder.model."):
                 k = k.replace("encoder.model.", "encoder.")
             if k.startswith("decoder.model."):
@@ -200,13 +206,21 @@ class Mimi(nn.Module):
                 k = k.replace(".linear2.weight", ".gating.linear2.weight")
             # Awfully hardcoded matching between the pytorch layers and their mlx equivalent :(
             for layerIdx, decoderIdx in enumerate([2, 5, 8, 11]):
-                k = k.replace(f"decoder.{decoderIdx}.", f"decoder.layers.{layerIdx}.upsample.")
                 k = k.replace(
-                    f"decoder.{decoderIdx + 1}.", f"decoder.layers.{layerIdx}.residuals.0.")
-            for (layerIdx, encoderIdx) in enumerate([1, 4, 7, 10]):
-                k = k.replace(f"encoder.{encoderIdx}.", f"encoder.layers.{layerIdx}.residuals.0.")
+                    f"decoder.{decoderIdx}.", f"decoder.layers.{layerIdx}.upsample."
+                )
                 k = k.replace(
-                    f"encoder.{encoderIdx + 2}.", f"encoder.layers.{layerIdx}.downsample.")
+                    f"decoder.{decoderIdx + 1}.",
+                    f"decoder.layers.{layerIdx}.residuals.0.",
+                )
+            for layerIdx, encoderIdx in enumerate([1, 4, 7, 10]):
+                k = k.replace(
+                    f"encoder.{encoderIdx}.", f"encoder.layers.{layerIdx}.residuals.0."
+                )
+                k = k.replace(
+                    f"encoder.{encoderIdx + 2}.",
+                    f"encoder.layers.{layerIdx}.downsample.",
+                )
 
             k = k.replace("decoder.0.", "decoder.init_conv1d.")
             k = k.replace("decoder.14.", "decoder.final_conv1d.")
@@ -216,7 +230,9 @@ class Mimi(nn.Module):
             k = k.replace(".block.3.", ".block.1.")
 
             # PyTorch layout for conv weights is outC, inC, kSize, for MLX it's outC, kSize, inC
-            if k.endswith(".conv.weight") or k.endswith(".output_proj.weight") or k.endswith(".input_proj.weight"):
+            if (
+                k.endswith(".conv.weight") or k.endswith(".output_proj.weight") or k.endswith(".input_proj.weight")
+            ):
                 v = v.swapaxes(-1, -2)
             # PyTorch layout for conv-transposed weights is inC, outC, kSize, for MLX it's outC, kSize, inC
             if k.endswith(".convtr.weight"):
