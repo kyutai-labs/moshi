@@ -110,8 +110,7 @@ pub async fn stream_handler(
 }
 
 pub async fn download_from_hub(config: &mut stream_both::Config) -> Result<()> {
-    use hf_hub::api::tokio::ApiBuilder;
-    let api = ApiBuilder::from_env().build().unwrap();
+    let api = hf_hub::api::tokio::ApiBuilder::from_env().build()?;
     let repo = api.model(config.hf_repo.clone());
     let extract_filename = |path: &str| -> Result<String> {
         Path::new(path)

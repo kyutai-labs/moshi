@@ -54,7 +54,7 @@ pub fn resolve_or_download(input: &str) -> Result<String> {
             }
             let repo = format!("{}/{}", s[0], s[1]);
             let file = s[2..].join("/");
-            let api = hf_hub::api::sync::ApiBuilder::from_env().build().unwrap().model(repo);
+            let api = hf_hub::api::sync::ApiBuilder::from_env().build()?.model(repo);
             api.get(&file)?.to_string_lossy().to_string()
         }
     };
