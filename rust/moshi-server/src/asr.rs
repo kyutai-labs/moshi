@@ -46,7 +46,7 @@ pub struct Asr {
 
 impl Asr {
     pub fn new(asr: &crate::AsrConfig, config: &crate::Config, dev: &Device) -> Result<Self> {
-        let dtype = dev.bf16_default_to_f32();
+        let dtype = crate::utils::model_dtype(asr.dtype_override.as_deref(), dev)?;
         let vb_lm =
             unsafe { VarBuilder::from_mmaped_safetensors(&[&asr.lm_model_file], dtype, dev)? };
         let lm =

@@ -65,7 +65,7 @@ enum LogEvent {
 
 impl Lm {
     pub fn new(lm: &crate::LmConfig, config: &crate::Config, dev: &Device) -> Result<Self> {
-        let dtype = dev.bf16_default_to_f32();
+        let dtype = crate::utils::model_dtype(lm.dtype_override.as_deref(), dev)?;
         let model_config = &lm.model;
         let gen_config = lm.gen.clone();
         let audio_tokenizer = moshi::mimi::load(&lm.audio_tokenizer_file, Some(8), dev)?;

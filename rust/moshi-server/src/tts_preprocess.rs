@@ -12,7 +12,7 @@ fn normalize(text: &str) -> String {
     text.replace('’', "'").replace('–', "").replace(':', " ").replace(['(', ')'], "")
 }
 
-fn parse_segments(input: &str) -> Vec<Segment> {
+fn parse_segments(input: &str) -> Vec<Segment<'_>> {
     let mut segments = Vec::new();
     let mut last = 0;
 
