@@ -78,6 +78,8 @@ pub struct TtsConfig {
     pub voice_dir: String,
     pub model: moshi::lm::Config,
     pub generation: moshi::tts_streaming::Config,
+    #[serde(default)]
+    pub dtype_override: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -96,6 +98,8 @@ pub struct AsrConfig {
     pub conditioning_learnt_padding: bool,
     #[serde(default)]
     pub temperature: Option<f64>,
+    #[serde(default)]
+    pub dtype_override: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -123,6 +127,8 @@ pub struct LmConfig {
     pub audio_tokenizer_file: String,
     pub model: moshi::lm::Config,
     pub gen: moshi::lm_generate_multistream::Config,
+    #[serde(default)]
+    pub dtype_override: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

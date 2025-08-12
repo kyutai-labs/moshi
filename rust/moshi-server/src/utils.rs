@@ -3,6 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use anyhow::Result;
+use candle::{DType, Device};
 
 #[derive(Debug, PartialEq, Clone, serde::Deserialize, serde::Serialize)]
 pub struct BuildInfo {
@@ -198,4 +199,15 @@ where
         Ok(_) => tracing::info!(?name, "task completed successfully"),
         Err(err) => tracing::error!(?name, ?err, "task failed"),
     })
+}
+
+pub fn model_dtype(over: Option<&str>, dev: &Device) -> Result<DType> {
+    let dtype = match over {
+        None => dev.bf16_default_to_f32(),
+        Some(s) => {
+            use std::str::FromStr;
+            DType::from_str(s)?
+        }
+    };
+    Ok(dtype)
 }
