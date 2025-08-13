@@ -5,34 +5,58 @@
 
 [[Read the paper]][moshi] [[Demo]](https://moshi.chat) [[Hugging Face]](https://huggingface.co/collections/kyutai/moshi-v01-release-66eaeaf3302bef6bd9ad7acd)
 
- [Moshi][moshi] is a speech-text foundation model and **full-duplex** spoken dialogue framework.
- It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi processes 24 kHz audio, down to a 12.5 Hz representation
- with a bandwidth of 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size),
- yet performs better than existing, non-streaming, codecs like
- [SpeechTokenizer](https://github.com/ZhangXInFD/SpeechTokenizer) (50 Hz, 4kbps), or [SemantiCodec](https://github.com/haoheliu/SemantiCodec-inference) (50 Hz, 1.3kbps).
+[Moshi][moshi] is a speech-text foundation model and **full-duplex** spoken dialogue framework.
+It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec.
+[Talk to Moshi](https://moshi.chat) now in our live demo.
 
- Moshi models **two streams of audio**: one corresponds to Moshi, and the other one to the user.
- At inference, the stream from the user is taken from the audio input,
-and the one for Moshi is sampled from the model's output. Along these two audio streams, Moshi predicts text tokens corresponding to its own speech, its **inner monologue**,
-which greatly improves the quality of its generation. A small Depth Transformer models inter codebook dependencies for a given time step,
-while a large, 7B parameter Temporal Transformer models the temporal dependencies. Moshi achieves a theoretical latency
+## Organisation of the repository
+
+There are three separate versions of the Moshi inference stack in this repo.
+
+
+- **[PyTorch](#pytorch-implementation): for research and tinkering.** The code is in the [`moshi/`](moshi/) directory.
+- **[MLX](#mlx-implementation-for-local-inference-on-macos): for on-device inference on iPhone and Mac.** The code is in the [`moshi_mlx/`](moshi_mlx/) directory.
+- **[Rust](#rust-implementation): for production.** The code is in the [`rust/`](rust/) directory.
+    This contains in particular a Mimi implementation in Rust, with Python bindings available
+    as `rustymimi`.
+
+Finally, the code for the web UI client used in the [Moshi demo](https://moshi.chat) is provided in the [`client/`](client/) directory.
+
+If you want to fine tune Moshi, head out to [kyutai-labs/moshi-finetune](https://github.com/kyutai-labs/moshi-finetune).
+
+### Other Kyutai models
+
+The Moshi codebase is also used to run related models from Kyutai that use a multi-stream architecture similar to Moshi:
+- **Hibiki: simultaneous speech translation.** Check out the [Hibiki repo](https://github.com/kyutai-labs/hibiki) for more info.
+- **Kyutai Text-To-Speech and Speech-To-Text.** Check out the [Delayed Streams Modeling repo](https://github.com/kyutai-labs/delayed-streams-modeling) for more info.
+
+## Model architecture
+
+Moshi models **two streams of audio**: one corresponds to Moshi speaking, and the other one to the user speaking.
+Along with these two audio streams, Moshi predicts text tokens corresponding to its own speech, its **inner monologue**,
+which greatly improves the quality of its generation.
+A small Depth Transformer models inter-codebook dependencies for a given time step,
+while a large, 7B-parameter Temporal Transformer models the temporal dependencies. Moshi achieves a theoretical latency
 of 160ms (80ms for the frame size of Mimi + 80ms of acoustic delay), with a practical overall latency as low as 200ms on an L4 GPU.
-
-[Talk to Moshi](https://moshi.chat) now on our live demo.
-
 
 <p align="center">
 <img src="./moshi.png" alt="Schema representing the structure of Moshi. Moshi models two streams of audio:
     one corresponds to Moshi, and the other one to the user. At inference, the audio stream of the user is taken from the audio input, and the audio stream for Moshi is sampled from the model's output. Along that, Moshi predicts text tokens corresponding to its own speech for improved accuracy. A small Depth Transformer models inter codebook dependencies for a given step."
 width="650px"></p>
 
+### Mimi
+
+Mimi is a neural audio codec that processes 24 kHz audio, down to a 12.5 Hz representation
+with a bandwidth of 1.1 kbps, in a fully streaming manner (latency of 80ms, the frame size),
+yet performs better than existing, non-streaming, codecs like
+[SpeechTokenizer](https://github.com/ZhangXInFD/SpeechTokenizer) (50 Hz, 4kbps), or [SemantiCodec](https://github.com/haoheliu/SemantiCodec-inference) (50 Hz, 1.3kbps).
+
 Mimi builds on previous neural audio codecs such as [SoundStream](https://arxiv.org/abs/2107.03312)
 and [EnCodec](https://github.com/facebookresearch/encodec), adding a Transformer both in the encoder and decoder,
 and adapting the strides to match an overall frame rate of 12.5 Hz. This allows Mimi to get closer to the
 average frame rate of text tokens (~3-4 Hz), and limit the number of autoregressive steps in Moshi.
 Similarly to SpeechTokenizer, Mimi uses a distillation loss so that the first codebook tokens match
-a self-supervised representation from [WavLM](https://arxiv.org/abs/2110.13900), which allows modeling semantic and acoustic information with a single model. Interestingly, while Mimi is fully causal and streaming, it learns to match sufficiently well the non-causal
-representation from WavLM, without introducing any delays. Finally, and similarly to [EBEN](https://arxiv.org/pdf/2210.14090),
+a self-supervised representation from [WavLM](https://arxiv.org/abs/2110.13900), which allows modeling semantic and acoustic information with a single model. Finally, and similarly to [EBEN](https://arxiv.org/pdf/2210.14090),
 Mimi uses **only an adversarial training loss**, along with feature matching, showing strong improvements in terms of
 subjective quality despite its low bitrate.
 
@@ -42,30 +66,12 @@ in both its encoder and decoder, and achieves a frame rate closer to that of tex
 the number of auto-regressive steps taken by Moshi, thus reducing the latency of the model."
 width="800px"></p>
 
-
-
-## Organisation of the repository
-
-There are three separate versions of the moshi inference stack in this repo.
-- The Python version using PyTorch is in the [`moshi/`](moshi/) directory.
-- The Python version using MLX for M series Macs is in the [`moshi_mlx/`](moshi_mlx/) directory.
-- The Rust version used in production is in the [`rust/`](rust/) directory.
-    This contains in particular a Mimi implementation in Rust, with Python bindings available
-    as `rustymimi`.
-
-Finally, the code for the live demo is provided in the [`client/`](client/) directory.
-
-If you want to fine tune Moshi, head out to [kyutai-labs/moshi-finetune](https://github.com/kyutai-labs/moshi-finetune).
-
-
 ## Models
 
 We release three models:
-- our speech codec Mimi,
 - Moshi fine-tuned on a male synthetic voice (Moshiko),
-- Moshi fine-tuned on a female synthetic voice (Moshika).
-
-Note that this codebase also supports [Hibiki](https://github.com/kyutai-labs/hibiki), check out the dedicated repo for more information.
+- Moshi fine-tuned on a female synthetic voice (Moshika),
+- Mimi, our speech codec.
 
 Depending on the backend, the file format and quantization available will vary. Here is the list
 of the HuggingFace repo with each model. Mimi is bundled in each of those, and always use the same checkpoint format.
@@ -104,7 +110,7 @@ for the PyTorch version, so you will need a GPU with a significant amount of mem
 For using the Rust backend, you will need a recent version of the [Rust toolchain](https://rustup.rs/).
 To compile GPU support, you will also need the [CUDA](https://developer.nvidia.com/cuda-toolkit) properly installed for your GPU, in particular with `nvcc`.
 
-## Python (PyTorch)
+## PyTorch implementation
 
 The PyTorch based API can be found in the `moshi` directory. It provides a streaming
 version of the audio tokenizer (mimi) and the language model (moshi).
@@ -118,12 +124,11 @@ python -m moshi.server [--gradio-tunnel] [--hf-repo kyutai/moshika-pytorch-bf16]
 ```
 
 And then access the web UI on [localhost:8998](http://localhost:8998).
-If your GPU is on a distant machine this will not work as websites using http
-are not allowed to use the audio worklet api. There are two ways to get around
-this:
+If your GPU is on a distant machine this will not work because for security reasons, websites using HTTP
+are not allowed to use the microphone. There are two ways to get around this:
 - Forward the remote 8998 port to your localhost using ssh `-L` flag. Then
-  connects to [localhost:8998](http://localhost:8998) as mentionned previously.
-- Use the `--gradio-tunnel` argument, this sets up a tunnel with a URL accessible from anywhere.
+  connects to [localhost:8998](http://localhost:8998) as mentioned previously.
+- Use the `--gradio-tunnel` argument, setting up a tunnel with a URL accessible from anywhere.
   Keep in mind that this tunnel goes through the US and can add significant
   latency (up to 500ms from Europe). You can use `--gradio-tunnel-token` to set a
   fixed secret token and reuse the same address over time.
@@ -134,17 +139,17 @@ Accessing a server that is not localhost via http may cause issues with using
 the microphone in the web UI (in some browsers this is only allowed using
 https).
 
-A local client is also available, as
+A command-line client is also available, as
 ```bash
 python -m moshi.client [--url URL_TO_GRADIO]
 ```
-However note that, unlike the web browser, this client is barebone: it does not perform any echo cancellation,
+However note that, unlike the web browser, this client is barebones: it does not perform any echo cancellation,
 nor does it try to compensate for a growing lag by skipping frames.
 
 For more information, in particular on how to use the API directly, please
 checkout [moshi/README.md](moshi/README.md).
 
-## Python (MLX) for local inference on macOS
+## MLX implementation for local inference on macOS
 
 Once you have installed `moshi_mlx`, you can run
 ```bash
@@ -163,7 +168,7 @@ Alternatively you can run `python -m moshi_mlx.local_web` to use
 the web UI, the connection is via http and will be at [localhost:8998](http://localhost:8998).
 
 
-## Rust
+## Rust implementation
 
 In order to run the Rust inference server, use the following command from within
 the `rust` directory:
@@ -198,6 +203,18 @@ there is nothing to change on the server side.
 
 For reference, here is the list of clients for Moshi.
 
+### Web UI
+
+The web UI can be built from this repo via the
+following steps (these will require `npm` being installed).
+```bash
+cd client
+npm install
+npm run build
+```
+
+The web UI can then be found in the `client/dist` directory.
+
 ### Rust Command Line
 
 From within the `rust` directory, run the following:
@@ -228,18 +245,6 @@ docker compose up
 ```
 
 * Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-
-### WebUI
-
-The web UI can be built from this repo via the
-following steps (these will require `npm` being installed).
-```bash
-cd client
-npm install
-npm run build
-```
-
-The web UI can then be found in the `client/dist` directory.
 
 ## Development
 
