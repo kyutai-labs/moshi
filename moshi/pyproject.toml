@@ -3,16 +3,16 @@ name = "moshi"
 requires-python = ">= 3.10"
 description = "Moshi is moshi"
 dependencies = [
-    "numpy >= 1.26, < 2.3",
-    "safetensors >= 0.4.0, < 0.6",
-    "huggingface-hub >= 0.24, < 0.34",
-    "bitsandbytes >= 0.45, < 0.46; sys_platform == 'linux'",
-    "einops >= 0.7, < 0.9",
-    "sentencepiece == 0.2",
-    "sounddevice == 0.5",
-    "sphn >= 0.1.4, < 0.2.0",
-    "torch >= 2.2.0, < 2.8",
-    "aiohttp>=3.10.5, <3.12",
+    "numpy >= 1.26",
+    "safetensors >= 0.4.0",
+    "huggingface-hub >= 0.24",
+    "bitsandbytes >= 0.45; sys_platform == 'linux'",
+    "einops >= 0.7",
+    "sentencepiece >= 0.2",
+    "sounddevice >= 0.5",
+    "sphn >= 0.1.4",
+    "torch >= 2.2.0",
+    "aiohttp >= 3.10.5",
     "pytest >= 8.3.3",
 ]
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
