@@ -246,7 +246,7 @@ impl Encoder {
 
 impl Model {
     pub fn new(tts: &crate::TtsConfig, config: &crate::Config, dev: &Device) -> Result<Self> {
-        let dtype = dev.bf16_default_to_f32();
+        let dtype = crate::utils::model_dtype(tts.dtype_override.as_deref(), dev)?;
         let model_config = &tts.model;
         let audio_codebooks = model_config.audio_codebooks;
         let audio_tokenizer =

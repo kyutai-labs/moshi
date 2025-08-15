@@ -309,7 +309,7 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         return self.rvq_rest
 
     def set_num_codebooks(self, n: int):
-        assert n >= self.n_q_semantic and n <= self.total_codebooks
+        assert n >= self.n_q_semantic and n <= self.total_codebooks, (n, self.n_q_semantic, self.total_codebooks)
         self.rvq_rest.set_num_codebooks(n - self.n_q_semantic)
 
     @property

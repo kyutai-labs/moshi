@@ -145,6 +145,8 @@ class Attention(nn.Module):
         k, v = cache.update_and_fetch(k, v)
         k_len = k.shape[2]
         k_target_len = t + min(self.cfg.context, k_len - t)
+        # TODO(laurent): the trimming below is incorrect for RotatingKVCache.
+        # https://github.com/kyutai-labs/delayed-streams-modeling/issues/106
         if k_target_len < k_len:
             k = k[:, :, k_len - k_target_len :]
             v = v[:, :, k_len - k_target_len :]

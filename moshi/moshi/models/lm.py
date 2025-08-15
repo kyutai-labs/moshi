@@ -738,13 +738,14 @@ class LMGen(StreamingModule[_LMGenState]):
             self.on_text_hook(text_token)
         if state.graphed_depth is None:
             audio_tokens = None
-        elif depformer_replace_tokens is None:
-            audio_tokens = state.graphed_depth(text_token, transformer_out)
+        else:
+            if depformer_replace_tokens is None:
+                audio_tokens = state.graphed_depth(text_token, transformer_out)
+            else:
+                assert depformer_replace_tokens.dim() == 3
+                audio_tokens = depformer_replace_tokens.squeeze(-1)
             if self.on_audio_hook is not None:
                 self.on_audio_hook(audio_tokens)
-        else:
-            assert depformer_replace_tokens.dim() == 3
-            audio_tokens = depformer_replace_tokens.squeeze(-1)
 
         state.offsets = torch.where(state.exec_mask, state.offsets + 1, state.offsets)
         state.offset_cpu += 1

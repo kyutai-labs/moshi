@@ -3,6 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use anyhow::Result;
+use candle::{DType, Device};
 
 #[derive(Debug, PartialEq, Clone, serde::Deserialize, serde::Serialize)]
 pub struct BuildInfo {
@@ -54,7 +55,7 @@ pub fn resolve_or_download(input: &str) -> Result<String> {
             }
             let repo = format!("{}/{}", s[0], s[1]);
             let file = s[2..].join("/");
-            let api = hf_hub::api::sync::Api::new()?.model(repo);
+            let api = hf_hub::api::sync::ApiBuilder::from_env().build()?.model(repo);
             api.get(&file)?.to_string_lossy().to_string()
         }
     };
@@ -198,4 +199,15 @@ where
         Ok(_) => tracing::info!(?name, "task completed successfully"),
         Err(err) => tracing::error!(?name, ?err, "task failed"),
     })
+}
+
+pub fn model_dtype(over: Option<&str>, dev: &Device) -> Result<DType> {
+    let dtype = match over {
+        None => dev.bf16_default_to_f32(),
+        Some(s) => {
+            use std::str::FromStr;
+            DType::from_str(s)?
+        }
+    };
+    Ok(dtype)
 }

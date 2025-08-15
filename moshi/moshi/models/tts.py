@@ -24,6 +24,7 @@ import torch
 
 from ..conditioners import ConditionAttributes, dropout_all_conditions, TensorCondition
 from ..conditioners.text import LUTConditioner
+from .lm_utils import ScaledEmbedding
 from . import loaders, MimiModel, LMModel, LMGen
 
 
@@ -373,6 +374,7 @@ class TTSModel:
     machine: StateMachine
     delay_steps: int
     max_speakers: int = 5
+    multistream: bool = False
 
     # The following params can be overriden to customize generation.
     temp: float = 0.6
@@ -400,6 +402,7 @@ class TTSModel:
         token_ids = TokenIds(lm.text_card + 1)
         delay_steps = int(checkpoint_info.tts_config['audio_delay'] * mimi.frame_rate)
         second_stream_ahead = checkpoint_info.tts_config.get('second_stream_ahead', 0)
+        multistream = checkpoint_info.tts_config.get('multistream', False)
 
         machine = StateMachine(
             token_ids=token_ids, second_stream_ahead=second_stream_ahead,
@@ -407,9 +410,24 @@ class TTSModel:
         tts_model = TTSModel(
             lm=lm, mimi=mimi, tokenizer=tokenizer,
             voice_suffix=voice_suffix, voice_repo=voice_repo,
-            machine=machine, delay_steps=delay_steps,
+            machine=machine, delay_steps=delay_steps, multistream=multistream,
             **kwargs)
-        mimi.set_num_codebooks(tts_model.n_q)
+        mimi_n_q = tts_model.n_q
+        if tts_model.multistream:
+            mimi_n_q //= 2
+            if tts_model.n_q < tts_model.lm.n_q:
+                assert tts_model.lm.depformer_emb is not None
+                for n in range(mimi_n_q, tts_model.lm.n_q // 2):
+                    # No proper support for multistream with reduced codebooks at the moment,
+                    # given that the skipped codebooks are not all located at the end.
+                    # For now we emulate it by setting the embeddings to 0, but we are not
+                    # skipping the computations.
+                    for q in [n, n + tts_model.lm.n_q // 2]:
+                        tp.cast(ScaledEmbedding, tts_model.lm.emb[q]).weight.data[:] = 0.
+                        if q < tts_model.lm.n_q - 1:
+                            tp.cast(ScaledEmbedding, tts_model.lm.depformer_emb[q]).weight.data[:] = 0.
+
+        mimi.set_num_codebooks(mimi_n_q)
         if not tts_model.multi_speaker:
             tts_model.voice_suffix = ''
         return tts_model
@@ -435,6 +453,35 @@ class TTSModel:
         return script_to_entries(
             self.tokenizer, self.machine.token_ids, self.mimi.frame_rate, script,
             multi_speaker=self.multi_speaker, padding_between=padding_between)
+
+    @torch.no_grad()
+    def warmup(self,
+               attributes: tp.Sequence[ConditionAttributes],
+               iters: int = 3,
+               batch_size: int = 1
+               ):
+        if self.cfg_coef != 1.0:
+            if self.valid_cfg_conditionings:
+                raise ValueError(
+                    "This model does not support direct CFG, but was trained with "
+                    "CFG distillation. Pass instead `cfg_coef` to `make_condition_attributes`.")
+            nulled = _make_null(attributes)
+            attributes = list(attributes) + nulled
+
+        assert self.lm.condition_provider is not None
+        prepared = self.lm.condition_provider.prepare(attributes)
+        condition_tensors = self.lm.condition_provider(prepared)
+        missing = self.lm.n_q - self.lm.dep_q
+        input_tokens = torch.full((batch_size, missing, 1), self.machine.token_ids.zero,
+                                  dtype=torch.long, device=self.lm.device)
+        lm_gen = LMGen(
+            self.lm, temp=self.temp, temp_text=self.temp,
+            cfg_coef=self.cfg_coef, condition_tensors=condition_tensors)
+        with lm_gen.streaming(batch_size), self.mimi.streaming(batch_size):
+            for _ in range(iters):
+                frame = lm_gen.step(input_tokens)
+                if frame is not None:
+                    _ = self.mimi.decode(frame[:, 1:, :])
 
     @torch.no_grad()
     def generate(self, all_entries: tp.Sequence[tp.Sequence[Entry]],
@@ -529,13 +576,18 @@ class TTSModel:
                 logged.append((token, out_token))
             text_tokens[:] = torch.tensor(out_tokens, dtype=torch.long, device=text_tokens.device)
 
-        self.lm.dep_q = self.n_q
+        if not self.multistream:
+            # No proper support for skipping some codebooks for multistream models.
+            self.lm.dep_q = self.n_q
         lm_gen = LMGen(
             self.lm, temp=self.temp, temp_text=self.temp,
             cfg_coef=self.cfg_coef, condition_tensors=condition_tensors,
             on_text_logits_hook=_on_text_logits_hook, on_text_hook=_on_text_hook, on_audio_hook=_on_audio_hook,
             cfg_is_masked_until=cfg_is_masked_until, cfg_is_no_text=cfg_is_no_text,
             **kwargs)
+        no_depformer_tokens = torch.full(
+            (len(all_entries), self.lm.dep_q, 1), self.machine.token_ids.zero,
+            dtype=torch.long, device=device)
 
         logged_text_tokens = [[] for _ in states]
         frames: list[torch.Tensor] = []
@@ -547,9 +599,13 @@ class TTSModel:
                     if offset >= max_end_step + self.delay_steps + self.final_padding:
                         break
                 missing = self.lm.n_q - self.lm.dep_q
+                if self.multistream:
+                    # See comment above about multistream being emulated.
+                    assert missing == 0
                 input_tokens = torch.full((len(states), missing, 1), self.machine.token_ids.zero,
                                           dtype=torch.long, device=self.lm.device)
-                frame = lm_gen.step(input_tokens)
+                depformer_replace_tokens = no_depformer_tokens if offset < self.delay_steps else None
+                frame = lm_gen.step(input_tokens, depformer_replace_tokens=depformer_replace_tokens)
                 if frame is not None:
                     frames.append(frame.clone())
                     if on_frame is not None:
