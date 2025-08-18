@@ -177,7 +177,9 @@ class ScaledEmbedding(nn.Embedding):
             self.low_rank = nn.Linear(low_rank, embedding_dim, bias=False)
 
         self.demux_second_stream = demux_second_stream
-        assert self.zero_idx == -1, "When demuxing a second stream, zero_idx must be -1."
+        assert self.zero_idx == -1, (
+            "When demuxing a second stream, zero_idx must be -1."
+        )
         if self.demux_second_stream:
             self.out1 = nn.Linear(low_rank or embedding_dim, embedding_dim, bias=False)
             self.out2 = nn.Linear(low_rank or embedding_dim, embedding_dim, bias=False)
@@ -221,7 +223,7 @@ class DepFormerSlice(nn.Module):
             in_vocab_size,
             dim,
             low_rank=cfg.low_rank_embeddings,
-            demux_second_stream=demux_second_stream
+            demux_second_stream=demux_second_stream,
         )
         self.linear_in = nn.Linear(main_transformer_dim, dim, bias=False)
         self.linear_out = nn.Linear(dim, out_vocab_size, bias=False)
@@ -267,7 +269,6 @@ class DepFormer(nn.Module):
             # The 2048 tokens should be teacher forced on the first slices. However as delays
             # are non-decreasing in the number of slices, this is actually not necessary as
             # the generated tokens will end up not being used.
-            last_token = last_token.reshape(1, 1)
 
             if cfg_coef != 1:
                 last_token = mx.tile(last_token, (2, 1))
@@ -278,9 +279,9 @@ class DepFormer(nn.Module):
                 l1, l2 = logits.split(2, axis=0)
                 logits = cfg_coef * l1 - (cfg_coef - 1) * l2
 
-            last_token, _ = sampler(logits[0])
+            last_token, _ = sampler(logits)
             tokens.append(last_token)
-        tokens = mx.concatenate(tokens)
+        tokens = mx.stack(tokens, axis=1)
         return tokens
 
 
@@ -292,9 +293,7 @@ class Lm(nn.Module):
         self.transformer: Transformer = Transformer(cfg.transformer)
         self.depformer: DepFormer = DepFormer(cfg)
         self.text_emb = ScaledEmbedding(
-            cfg.text_in_vocab_size,
-            dim,
-            demux_second_stream=cfg.demux_second_stream
+            cfg.text_in_vocab_size, dim, demux_second_stream=cfg.demux_second_stream
         )
         self.cfg: LmConfig = cfg
 
@@ -307,14 +306,14 @@ class Lm(nn.Module):
 
         self.text_linear = nn.Linear(dim, cfg.text_out_vocab_size, bias=False)
         self.audio_embs = [
-            ScaledEmbedding(cfg.audio_vocab_size, dim) for _ in range(cfg.audio_codebooks)
+            ScaledEmbedding(cfg.audio_vocab_size, dim)
+            for _ in range(cfg.audio_codebooks)
         ]
         self.extra_heads = [
-            nn.Linear(dim, cfg.extra_heads_dim, bias=False) for _ in range(cfg.extra_heads_num_heads)
+            nn.Linear(dim, cfg.extra_heads_dim, bias=False)
+            for _ in range(cfg.extra_heads_num_heads)
         ]
-        self.transformer_cache: list[LayerCache] = (
-            self.transformer.make_rot_cache()
-        )
+        self.transformer_cache: list[LayerCache] = self.transformer.make_rot_cache()
 
         if len(self.depformer.slices) > 0:
             self.depformer_cache: list[LayerCache] = self.depformer.slices[
@@ -343,7 +342,12 @@ class Lm(nn.Module):
 
         mlx_t = {}
         mlx_t["out_norm.weight"] = pth_t["out_norm.alpha"][0, 0]
-        for name in ["text_emb.out1.weight", "text_emb.out2.weight", "text_emb.weight", "text_linear.weight"]:
+        for name in [
+            "text_emb.out1.weight",
+            "text_emb.out2.weight",
+            "text_emb.weight",
+            "text_linear.weight",
+        ]:
             if name in pth_t:
                 mlx_t[name] = pth_t[name]
         for cb_idx in range(lm_config.audio_codebooks):
@@ -363,30 +367,46 @@ class Lm(nn.Module):
             if lm_config.depformer.weights_per_step_schedule is not None:
                 pth_idx = lm_config.depformer.weights_per_step_schedule[slice_idx]
             slice_p = f"depformer.slices.{slice_idx}"
-            mlx_t[f"{slice_p}.linear_in.weight"] = pth_t[f"depformer_in.{pth_idx}.weight"]
+            mlx_t[f"{slice_p}.linear_in.weight"] = pth_t[
+                f"depformer_in.{pth_idx}.weight"
+            ]
             mlx_t[f"{slice_p}.linear_out.weight"] = pth_t[f"linears.{slice_idx}.weight"]
             if slice_idx == 0:
                 mlx_t[f"{slice_p}.emb.weight"] = pth_t["depformer_text_emb.weight"]
                 for _n in ["low_rank", "out1", "out2"]:
                     if f"depformer_text_emb.{_n}.weight" in pth_t:
-                        mlx_t[f"{slice_p}.emb.{_n}.weight"] = pth_t[f"depformer_text_emb.{_n}.weight"]
+                        mlx_t[f"{slice_p}.emb.{_n}.weight"] = pth_t[
+                            f"depformer_text_emb.{_n}.weight"
+                        ]
             else:
-                mlx_t[f"{slice_p}.emb.weight"] = pth_t[f"depformer_emb.{slice_idx - 1}.weight"]
+                mlx_t[f"{slice_p}.emb.weight"] = pth_t[
+                    f"depformer_emb.{slice_idx - 1}.weight"
+                ]
                 if f"depformer_emb.{slice_idx - 1}.low_rank.weight" in pth_t:
-                    mlx_t[f"{slice_p}.emb.low_rank.weight"] = pth_t[f"depformer_emb.{slice_idx - 1}.low_rank.weight"]
+                    mlx_t[f"{slice_p}.emb.low_rank.weight"] = pth_t[
+                        f"depformer_emb.{slice_idx - 1}.low_rank.weight"
+                    ]
             for layer_idx in range(lm_config.depformer.transformer.num_layers):
                 p = f"{slice_p}.transformer.layers.{layer_idx}"
-                mlx_t[f"{p}.norm1.weight"] = pth_t[f"depformer.layers.{layer_idx}.norm1.alpha"][0, 0]
-                mlx_t[f"{p}.norm2.weight"] = pth_t[f"depformer.layers.{layer_idx}.norm2.alpha"][0, 0]
-                mlx_t[f"{p}.gating.linear_in.weight"] = (
-                    pth_t[f"depformer.layers.{layer_idx}.gating.{pth_idx}.linear_in.weight"])
-                mlx_t[f"{p}.gating.linear_out.weight"] = (
-                    pth_t[f"depformer.layers.{layer_idx}.gating.{pth_idx}.linear_out.weight"])
+                mlx_t[f"{p}.norm1.weight"] = pth_t[
+                    f"depformer.layers.{layer_idx}.norm1.alpha"
+                ][0, 0]
+                mlx_t[f"{p}.norm2.weight"] = pth_t[
+                    f"depformer.layers.{layer_idx}.norm2.alpha"
+                ][0, 0]
+                mlx_t[f"{p}.gating.linear_in.weight"] = pth_t[
+                    f"depformer.layers.{layer_idx}.gating.{pth_idx}.linear_in.weight"
+                ]
+                mlx_t[f"{p}.gating.linear_out.weight"] = pth_t[
+                    f"depformer.layers.{layer_idx}.gating.{pth_idx}.linear_out.weight"
+                ]
                 mlx_t[f"{p}.self_attn.in_proj.weight"] = mx.split(
-                    pth_t[f"depformer.layers.{layer_idx}.self_attn.in_proj_weight"], depformer_chunks
+                    pth_t[f"depformer.layers.{layer_idx}.self_attn.in_proj_weight"],
+                    depformer_chunks,
                 )[pth_idx]
                 mlx_t[f"{p}.self_attn.out_proj.weight"] = mx.split(
-                    pth_t[f"depformer.layers.{layer_idx}.self_attn.out_proj.weight"], depformer_chunks
+                    pth_t[f"depformer.layers.{layer_idx}.self_attn.out_proj.weight"],
+                    depformer_chunks,
                 )[pth_idx]
         return self.load_weights(list(mlx_t.items()), strict=strict)
 
@@ -413,7 +433,9 @@ class Lm(nn.Module):
     ) -> tuple[mx.array, mx.array]:
         # Note that this does not apply the depformer.
         xs = self.text_emb(token_ids)
-        transformer_out = self.transformer(xs, cache=self.transformer_cache, cross_attention_src=cross_attention_src)
+        transformer_out = self.transformer(
+            xs, cache=self.transformer_cache, cross_attention_src=cross_attention_src
+        )
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
         return (transformer_out, text_logits)
@@ -425,7 +447,9 @@ class Lm(nn.Module):
     ) -> mx.array:
         # Note that this does not apply the depformer.
         xs = self.text_emb(token_ids)
-        transformer_out = self.transformer(xs, cache=self.transformer_cache, cross_attention_src=cross_attention_src)
+        transformer_out = self.transformer(
+            xs, cache=self.transformer_cache, cross_attention_src=cross_attention_src
+        )
         transformer_out = self.out_norm(transformer_out)
         text_logits = self.text_linear(transformer_out)
         return text_logits
@@ -445,10 +469,10 @@ class Lm(nn.Module):
         xs = self.text_emb(text_token_ids)
         for token_ids, emb in zip(audio_token_ids, self.audio_embs):
             _emb = emb(token_ids)
+            _emb = _emb.transpose(1, 0, 2)
             xs = xs + _emb
         if ct is not None:
-            xs = xs + ct.tensor
-
+            xs = xs + mx.expand_dims(ct.tensor, axis=1)
         if cfg_coef != 1:
             xs = mx.tile(xs, (2, 1, 1))
         transformer_out = self.transformer(
@@ -461,8 +485,7 @@ class Lm(nn.Module):
         if cfg_coef != 1:
             l1, l2 = text_logits.split(2, axis=0)
             text_logits = cfg_coef * l1 - (cfg_coef - 1) * l2
-
-        text_token, _ = text_sampler(text_logits[:, 0])
+        text_token, _ = text_sampler(text_logits)
         if on_text_hook is not None:
             on_text_hook(text_token)
         if len(self.depformer.slices) > 0:
@@ -500,7 +523,8 @@ class Lm(nn.Module):
             cross_attention_src,
             cfg_coef,
             on_text_hook,
-            on_audio_hook)
+            on_audio_hook,
+        )
         return text, audio
 
     def warmup(self, ct: ConditionTensor | None = None):
