@@ -75,6 +75,7 @@ class Config(BaseModel):
     initial_padding: int = 2
     final_padding: int = 4
     padding_between: int = 1
+    padding_bonus: float = 0.
 
     interleaved_text_only: int = 2
     debug: bool = False
@@ -93,7 +94,7 @@ def init(batch_size: int, config_override: dict) -> 'TTSService':
     tts_model = TTSModel.from_checkpoint_info(
         checkpoint_info, n_q=config.n_q, temp=config.temp, cfg_coef=config.cfg_coef,
         max_padding=config.max_padding, initial_padding=config.initial_padding, final_padding=config.final_padding,
-        device=config.device)
+        device=config.device, padding_bonus=config.padding_bonus)
     if tts_model.valid_cfg_conditionings:
         # Model was trained with CFG distillation.
         cfg_condition = tts_model.cfg_coef
@@ -117,27 +118,28 @@ def init(batch_size: int, config_override: dict) -> 'TTSService':
         voice_folder = huggingface_hub.snapshot_download(voice_folder, allow_patterns=pattern)
     voice_folder = Path(voice_folder)
 
-    for file in voice_folder.glob(f'**/*{voice_suffix}'):
-        relative = file.relative_to(voice_folder)
-        name = str(relative.with_name(relative.name.removesuffix(voice_suffix)))
-        try:
-            attributes = tts_model.make_condition_attributes([file, file], cfg_coef=cfg_condition)
-        except Exception:
-            print(f"[WARNING] failed to load voice {name}")
-        else:
-            all_attributes[name] = attributes
+    if tts_model.multi_speaker:
+        for file in voice_folder.glob(f'**/*{voice_suffix}'):
+            relative = file.relative_to(voice_folder)
+            name = str(relative.with_name(relative.name.removesuffix(voice_suffix)))
+            try:
+                attributes = tts_model.make_condition_attributes([file, file], cfg_coef=cfg_condition)
+            except Exception:
+                print(f"[WARNING] failed to load voice {name}")
+            else:
+                all_attributes[name] = attributes
 
-    if not all_attributes:
-        raise RuntimeError(
-            "No voices found, please check your voice folder. "
-            f"Searched for files matching {voice_folder}/**/*{voice_suffix}"
-        )
+        if not all_attributes:
+            raise RuntimeError(
+                "No voices found, please check your voice folder. "
+                f"Searched for files matching {voice_folder}/**/*{voice_suffix}"
+            )
 
-    if config.default_voice not in all_attributes:
-        raise RuntimeError(
-            f"Default voice {config.default_voice}, please check your voice folder. "
-            f"Expected {voice_folder}/{config.default_voice}{voice_suffix} to exist"
-        )
+        if config.default_voice not in all_attributes:
+            raise RuntimeError(
+                f"Default voice {config.default_voice}, please check your voice folder. "
+                f"Expected {voice_folder}/{config.default_voice}{voice_suffix} to exist"
+            )
 
     service = TTSService(
         batch_size=batch_size, default_attribute_name=config.default_voice,
@@ -146,6 +148,7 @@ def init(batch_size: int, config_override: dict) -> 'TTSService':
         cfg_condition=cfg_condition,
         cfg_is_no_text=cfg_is_no_text,
         padding_between=config.padding_between,
+        padding_bonus=config.padding_bonus,
         debug=config.debug,
         interleaved_text_only=config.interleaved_text_only)
 
@@ -163,6 +166,31 @@ class ClientState:
         self.offset = 0
         self.state = state_machine.new_state([])
 
+    def is_active(self, lookahead: int) -> bool:
+        state = self.state
+        if state is None:
+            return False
+        if self.is_complete:
+            return True
+        if not state.entries:
+            # No entries, not safe to run as we might need to pop a new one.
+            return False
+        if lookahead == 0:
+            # If no lookahead, having at least one entry means we can run.
+            return True
+        if not state.entries[0].tokens:
+            # Next entry is just padding, we don't need a lookahead here.
+            return True
+        # now we need at least lookahead words on top of the current one.
+        remaining = lookahead + 1
+        # iterating from the start of entries, as it is a deque so harder to skip the first item.
+        for entry in state.entries:
+            if entry.tokens:
+                remaining -= 1
+            if remaining <= 0:
+                return True
+        return False
+
 
 @dataclass
 class TTSService:
@@ -175,6 +203,7 @@ class TTSService:
     cfg_is_no_text: bool = True
     cfg_condition: float | None = None
     padding_between: int = 1
+    padding_bonus: float = 0.0
     n_q: int = 32
     debug: bool = False
     interleaved_text_only: int = 0
@@ -198,18 +227,20 @@ class TTSService:
             client = ClientState()
             self.clients.append(client)
 
-        print("Filling cross attention cache.")
-        for name, attributes in self.all_attributes.items():
-            self.cross_attention_cache[name] = self._get_cross_attention_source([attributes])
+        if tts_model.multi_speaker:
+            print("Filling cross attention cache.")
+            for name, attributes in self.all_attributes.items():
+                self.cross_attention_cache[name] = self._get_cross_attention_source([attributes])
+            assert lm.condition_provider is not None
 
-        assert lm.condition_provider is not None
-
-        cas = [self.all_attributes[self.default_attribute_name]] * self.batch_size
-        if self.tts_model.cfg_coef != 1.0:
-            nulled = make_null(cas)
-            cas = cas + nulled
-        prepared = lm.condition_provider.prepare(cas)
-        condition_tensors = lm.condition_provider(prepared)
+            cas = [self.all_attributes[self.default_attribute_name]] * self.batch_size
+            if self.tts_model.cfg_coef != 1.0:
+                nulled = make_null(cas)
+                cas = cas + nulled
+            prepared = lm.condition_provider.prepare(cas)
+            condition_tensors = lm.condition_provider(prepared)
+        else:
+            condition_tensors = {}
 
         for module in lm.modules():
             if isinstance(module, StreamingMultiheadAttention) and module.cross_attention:
@@ -219,7 +250,7 @@ class TTSService:
             lm, temp=tts_model.temp, temp_text=tts_model.temp, cfg_coef=tts_model.cfg_coef,
             condition_tensors=condition_tensors, on_text_hook=self._on_text_hook,
             on_audio_hook=self._on_audio_hook, cfg_is_no_text=self.cfg_is_no_text,
-            support_out_of_sync=True)
+            support_out_of_sync=True, on_text_logits_hook=self._on_text_logits_hook)
         self.lm_gen.streaming_forever(self.batch_size)
         mimi.streaming_forever(self.batch_size)
 
@@ -260,6 +291,11 @@ class TTSService:
         mask = self._lm_gen_state.offsets[:, None] < delays + self.tts_model.delay_steps
         audio_tokens.masked_fill_(mask, self.tts_model.machine.token_ids.zero)
 
+    def _on_text_logits_hook(self, text_logits):
+        if self.padding_bonus:
+            text_logits[..., self.tts_model.machine.token_ids.pad] += self.padding_bonus
+        return text_logits
+
     def _on_text_hook(self, text_tokens) -> None:
         tokens = text_tokens.tolist()
         out_tokens = []
@@ -285,6 +321,9 @@ class TTSService:
         mimi = self.tts_model.mimi
         machine = self.tts_model.machine
         delay_steps = self.tts_model.delay_steps
+        lookahead = self.tts_model.machine.second_stream_ahead
+        pad = self.tts_model.machine.token_ids.pad
+        multi_speaker = self.tts_model.multi_speaker
 
         self.flags_out = flags_out
         flags_out[:] = 0
@@ -304,21 +343,26 @@ class TTSService:
                 client.reset(machine)
                 reset_mask[b] = True
                 new_entry = new_entry[1:]
-                if isinstance(voice, np.ndarray):
-                    new_voice_indexes.append(b)
-                    new_voice_sources.append(torch.from_numpy(voice))
-                else:
-                    cross_source = self.cross_attention_cache.get(voice or '', None)
-                    if cross_source is None:
-                        cross_source = self.cross_attention_cache[self.default_attribute_name]
-                    new_cross_sources.append(cross_source)
-                    new_cross_indexes.append(b)
+                if multi_speaker:
+                    if isinstance(voice, np.ndarray):
+                        new_voice_indexes.append(b)
+                        new_voice_sources.append(torch.from_numpy(voice))
+                    else:
+                        cross_source = self.cross_attention_cache.get(voice or '', None)
+                        if cross_source is None:
+                            cross_source = self.cross_attention_cache[self.default_attribute_name]
+                        new_cross_sources.append(cross_source)
+                        new_cross_indexes.append(b)
                 self._print(f"[{b}] Reset, voice is {voice}.")
             if client.state is None:
                 self._print(f"[{b}] Trying to push {new_entry}, but not assigned.")
             elif new_entry == [-2]:
                 self._print(f"[{b}] Done.")
                 client.is_complete = True
+            elif new_entry[0] == pad:
+                self._print(f"[{b}] Pushing pause {new_entry}.")
+                padding = len(new_entry)
+                client.state.entries.append(Entry([], '', padding=padding))
             else:
                 self._print(f"[{b}] Pushing {new_entry}.")
                 padding = 0
@@ -330,21 +374,9 @@ class TTSService:
         mimi_actives = []
         in_text_onlys = []
         for b, client in enumerate(self.clients):
-            if client.state is None:
-                # client is not currently assigned.
-                active = False
-            elif client.is_complete:
-                # We got all the words from the client and are wrapping up.
-                active = True
-            elif client.state.forced_padding > 0:
-                # We are sure we won't try to consume a word at this point.
-                active = True
-            elif len(client.state.entries) > self.tts_model.machine.second_stream_ahead:
-                # We have some words ready to be consumed.
-                active = True
-            else:
+            active = client.is_active(lookahead)
+            if not active and client.state is not None:
                 flags_out[b] |= MaskFlags.MISSING_WORDS.value
-                active = False
             actives.append(active)
 
             real_offset = client.offset - self.lm_gen.max_delay
@@ -405,6 +437,7 @@ class TTSService:
             mimi.reset_streaming(reset_mask=reset_mask)
 
         if skip_exec:
+            time.sleep(0.001)  # Sleep a bit to avoid busy waiting.
             return
 
         self.lm_gen.set_exec_mask(exec_mask)
@@ -515,18 +548,22 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--profile', action='store_true')
     parser.add_argument('-b', '--batch_size', default=32, type=int)
+    parser.add_argument('-c', '--cfg_coef', default=2., type=float)
+    parser.add_argument('-r', '--hf-repo', default=DEFAULT_DSM_TTS_REPO)
     args = parser.parse_args()
     bs = args.batch_size
     config_override = {
-        "voice_folder": "hf-snapshot://kyutai/tts-voices/unmute-prod-website/*.safetensors",
-        "default_voice": "unmute-prod-website/default_voice.wav",
+        'hf_repo': args.hf_repo,
+        'cfg_coef': args.cfg_coef,
+        'voice_folder': 'hf-snapshot://kyutai/tts-voices/unmute-prod-website/*.safetensors',
+        'default_voice': 'unmute-prod-website/default_voice.wav',
     }
     service = init(batch_size=bs, config_override=config_override)
     print("Service initialized")
     pcm_out = np.zeros((bs, 1920))
     flags_out = np.zeros(bs, dtype=np.int32)
     code_out = np.zeros((bs, 33), dtype=np.int32)
-    service.step([(0, [-1], '')], pcm_out=pcm_out, flags_out=flags_out, code_out=code_out)
+    service.step([(0, [-1, 32, 21], '')], pcm_out=pcm_out, flags_out=flags_out, code_out=code_out)
     profiler = Profiler(enabled=args.profile)
     with profiler:
         for _ in range(100):
