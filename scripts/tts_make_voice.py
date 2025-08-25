@@ -5,22 +5,23 @@
 # Ideally I would use the --script thing of uv, but I can't get it to work with the ./moshi...
 #
 # It's also possible to pass in a directory containing audio files.
+# Used for cleaning up audio conditioning for TTS models.
 import argparse
 import json
 import math
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 
 import julius
+import sphn
+import torch
+import torchaudio.transforms
 from huggingface_hub import hf_hub_download
 from safetensors import safe_open
 from safetensors.torch import save_file
-import sphn
-import torch
 from torch import nn
 from torch.nn import functional as F
-import torchaudio.transforms
 
 from moshi.models import loaders
 
@@ -52,36 +53,62 @@ def main():
         type=Path,
         help="The config as a json file.",
     )
-    parser.add_argument("--model-root", type=Path,
-                        help="Shorthand for giving only once the root of the folder with the config and checkpoints.")
+    parser.add_argument(
+        "--model-root",
+        type=Path,
+        help="Shorthand for giving only once the root of the folder with the config and checkpoints.",
+    )
 
-    parser.add_argument("--duration", type=float, default=10.0, help="Duration of the audio conditioning.")
-    parser.add_argument("--clean", action="store_true",
-                        help="Apply noise suppresion to cleanup the audio, along with volume normalization.")
-    parser.add_argument("--save-clean", action="store_true",
-                        help="Save the file once cleaned that was used to make the audio conditioning.")
-    parser.add_argument("-o", "--out", type=Path, help="Out path if not same as original file.")
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=10.0,
+        help="Duration of the audio conditioning.",
+    )
+    parser.add_argument(
+        "--loudness-headroom",
+        type=float,
+        help="Normalize the loudness of the audio conditioning to this value -dBFS. 22 is a good value. "
+        "Lower values mean louder audio but potentially some clipping.",
+    )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Apply noise suppresion to clean up the audio.",
+    )
+    parser.add_argument(
+        "--save-clean",
+        action="store_true",
+        help="Save the file that was used to make the audio conditioning, after cleaning and loudness normalization.",
+    )
+    parser.add_argument(
+        "-o", "--out", type=Path, help="Out path if not same as original file."
+    )
     parser.add_argument(
         "files",
         type=Path,
         help="Audio files to process. "
         "If a directory is given, runs on all audio files in this directory, "
         "including subdirectories",
-        nargs="*",
+        nargs="+",
     )
 
     args = parser.parse_args()
     if args.model_root is not None:
-        candidates = list(args.model_root.glob('*_mimi_voice.safetensors'))
+        candidates = list(args.model_root.glob("*_mimi_voice.safetensors"))
         assert len(candidates) == 1, candidates
         args.mimi_weight = candidates[0]
-        args.config = args.model_root / 'config.json'
+        args.config = args.model_root / "config.json"
 
     if args.hf_repo is not None:
-        args.config = Path(hf_hub_download(repo_id=args.hf_repo, filename="config.json"))
+        args.config = Path(
+            hf_hub_download(repo_id=args.hf_repo, filename="config.json")
+        )
         _config = json.loads(args.config.read_text())
-        _mimi_weight = f'{_config["model_id"]["sig"]}_{_config["model_id"]["epoch"]}_mimi_voice.safetensors'
-        args.mimi_weight = Path(hf_hub_download(repo_id=args.hf_repo, filename=_mimi_weight))
+        _mimi_weight = f"{_config['model_id']['sig']}_{_config['model_id']['epoch']}_mimi_voice.safetensors"
+        args.mimi_weight = Path(
+            hf_hub_download(repo_id=args.hf_repo, filename=_mimi_weight)
+        )
 
     print("loading mimi")
     # need a bit of manual param override at the moment.
@@ -95,7 +122,7 @@ def main():
         sys.exit(1)
     raw_config = json.loads(args.config.read_text())
     try:
-        model_id = raw_config['model_id']
+        model_id = raw_config["model_id"]
     except KeyError:
         print("The provided config doesn't contain model_id, this is required.")
         sys.exit(1)
@@ -108,13 +135,20 @@ def main():
         else:
             files.append(file)
 
+    if not files:
+        print(f"No audio files found in {args.files}.")
+        sys.exit(1)
+
     cleaner = None
     if args.clean:
         cleaner = Cleaner(sample_rate=mimi.sample_rate)
         cleaner.to(device=args.device)
 
+    n_new = 0
+
     with safe_open(args.mimi_weight, framework="pt") as f:
         metadata = f.metadata()
+
     for file in files:
         out_folder = file.parent if args.out is None else args.out
         out_folder.mkdir(exist_ok=True, parents=True)
@@ -122,6 +156,9 @@ def main():
         if out_file.exists():
             print(f"File {out_file} already exists, skipping.")
             continue
+
+        print(f"Creating {out_file}")
+        n_new += 1
 
         seek = 0.0
         name = file.name
@@ -139,10 +176,18 @@ def main():
 
         if cleaner is not None:
             wav = cleaner(wav.to(device=args.device)).clamp(-0.99, 0.99)
-            if args.save_clean:
-                clean_file = out_folder / (file.name + ".clean.wav")
-                sphn.write_wav(clean_file, wav.cpu().numpy()[0], cleaner.sample_rate)
-                print(f"Saved {clean_file}.")
+
+        if args.loudness_headroom is not None:
+            wav = normalize_loudness(
+                wav,
+                sample_rate=mimi.sample_rate,
+                loudness_headroom_db=args.loudness_headroom,
+            )
+
+        if args.save_clean:
+            clean_file = out_folder / (file.name + ".clean.wav")
+            sphn.write_wav(clean_file, wav.cpu().numpy()[0], cleaner.sample_rate)
+            print(f"Saved clean file {clean_file}")
 
         missing = length - wav.shape[-1]
         wav = torch.nn.functional.pad(wav, (0, missing))
@@ -151,11 +196,17 @@ def main():
         tensors = {"speaker_wavs": emb.cpu()}
         save_file(tensors, out_file, metadata)
 
-        print(f"Saved {out_file}.")
+    print(
+        f"Created voice embeddings for {n_new} files in {out_folder}, {args.clean=} {args.loudness_headroom=}"
+    )
 
 
-def normalize_loudness(wav: torch.Tensor, sample_rate: int, loudness_headroom_db: float = 22,
-                       energy_floor: float = 2e-3):
+def normalize_loudness(
+    wav: torch.Tensor,
+    sample_rate: int,
+    loudness_headroom_db: float = 18,
+    energy_floor: float = 2e-3,
+):
     """Normalize an input signal to a user loudness in dB LKFS.
     Audio loudness is defined according to the ITU-R BS.1770-4 recommendation.
 
@@ -167,6 +218,9 @@ def normalize_loudness(wav: torch.Tensor, sample_rate: int, loudness_headroom_db
     Returns:
         torch.Tensor: Loudness normalized output data.
     """
+    if loudness_headroom_db < 0:
+        raise ValueError("loudness_headroom_db must be non-negative.")
+
     wav = wav - wav.mean(dim=-1, keepdim=True)
     energy = wav.std()
     if energy < energy_floor:
@@ -186,18 +240,45 @@ def normalize_loudness(wav: torch.Tensor, sample_rate: int, loudness_headroom_db
     return output
 
 
+class Cleaner(nn.Module):
+    def __init__(self, dry_fraction: float = 0.02, sample_rate: int = 24000):
+        super().__init__()
+        self.dry_fraction = dry_fraction
+        self.sample_rate = sample_rate
+        self._demucs = get_demucs()
+        demucs_sr = self._demucs.sample_rate
+        cutoff = demucs_sr / sample_rate / 2
+        self._lowpass = julius.lowpass.LowPassFilter(cutoff)
+        self._downsample = julius.resample.ResampleFrac(sample_rate, demucs_sr)
+        self._upsample = julius.resample.ResampleFrac(demucs_sr, sample_rate)
+
+    @torch.no_grad()
+    def forward(self, wav: torch.Tensor):
+        assert wav.dim() == 3, "Must be [B, C, T]"
+        low = self._lowpass(wav)
+        high = wav - low
+        low = self._downsample(low, full=True)
+
+        denoised = self._demucs(low)
+        denoised = (1 - self.dry_fraction) * denoised + self.dry_fraction * low
+        denoised = self._upsample(denoised, output_length=wav.shape[-1])
+        denoised = denoised + high
+
+        return denoised
+
+
 def sinc(t: torch.Tensor) -> torch.Tensor:
     """sinc.
 
     :param t: the input tensor
     """
-    return torch.where(t == 0, torch.ones(1, device=t.device, dtype=t.dtype), torch.sin(t) / t)
+    return torch.where(
+        t == 0, torch.ones(1, device=t.device, dtype=t.dtype), torch.sin(t) / t
+    )
 
 
 def kernel_upsample2(zeros=56, device=None):
-    """kernel_upsample2.
-
-    """
+    """kernel_upsample2."""
     win = torch.hann_window(4 * zeros + 1, periodic=False, device=device)
     winodd = win[1::2]
     t = torch.linspace(-zeros + 0.5, zeros - 0.5, 2 * zeros, device=device)
@@ -215,15 +296,15 @@ def upsample2(x, zeros=56):
     """
     *other, time = x.shape
     kernel = kernel_upsample2(zeros, x.device).to(x)
-    out = F.conv1d(x.view(-1, 1, time), kernel, padding=zeros)[..., 1:].view(*other, time)
+    out = F.conv1d(x.view(-1, 1, time), kernel, padding=zeros)[..., 1:].view(
+        *other, time
+    )
     y = torch.stack([x, out], dim=-1)
     return y.view(*other, -1)
 
 
 def kernel_downsample2(zeros=56, device=None):
-    """kernel_downsample2.
-
-    """
+    """kernel_downsample2."""
     win = torch.hann_window(4 * zeros + 1, periodic=False, device=device)
     winodd = win[1::2]
     t = torch.linspace(-zeros + 0.5, zeros - 0.5, 2 * zeros, device=device)
@@ -245,8 +326,9 @@ def downsample2(x, zeros=56):
     xodd = x[..., 1::2]
     *other, time = xodd.shape
     kernel = kernel_downsample2(zeros, x.device).to(x)
-    out = xeven + F.conv1d(xodd.view(-1, 1, time), kernel, padding=zeros)[..., :-1].view(
-        *other, time)
+    out = xeven + F.conv1d(xodd.view(-1, 1, time), kernel, padding=zeros)[
+        ..., :-1
+    ].view(*other, time)
     return out.view(*other, -1).mul(0.5)
 
 
@@ -254,7 +336,9 @@ class BLSTM(nn.Module):
     def __init__(self, dim, layers=2, bi=True):
         super().__init__()
         klass = nn.LSTM
-        self.lstm = klass(bidirectional=bi, num_layers=layers, hidden_size=dim, input_size=dim)
+        self.lstm = klass(
+            bidirectional=bi, num_layers=layers, hidden_size=dim, input_size=dim
+        )
         self.linear = None
         if bi:
             self.linear = nn.Linear(2 * dim, dim)
@@ -268,7 +352,7 @@ class BLSTM(nn.Module):
 
 def rescale_conv(conv, reference):
     std = conv.weight.std().detach()
-    scale = (std / reference)**0.5
+    scale = (std / reference) ** 0.5
     conv.weight.data /= scale
     if conv.bias is not None:
         conv.bias.data /= scale
@@ -304,23 +388,25 @@ class Demucs(nn.Module):
         - sample_rate (float): sample_rate used for training the model.
 
     """
-    def __init__(self,
-                 chin=1,
-                 chout=1,
-                 hidden=48,
-                 depth=5,
-                 kernel_size=8,
-                 stride=4,
-                 causal=True,
-                 resample=4,
-                 growth=2,
-                 max_hidden=10_000,
-                 normalize=True,
-                 glu=True,
-                 rescale=0.1,
-                 floor=1e-3,
-                 sample_rate=16_000):
 
+    def __init__(
+        self,
+        chin=1,
+        chout=1,
+        hidden=48,
+        depth=5,
+        kernel_size=8,
+        stride=4,
+        causal=True,
+        resample=4,
+        growth=2,
+        max_hidden=10_000,
+        normalize=True,
+        glu=True,
+        rescale=0.1,
+        floor=1e-3,
+        sample_rate=16_000,
+    ):
         super().__init__()
         if resample not in [1, 2, 4]:
             raise ValueError("Resample should be 1, 2 or 4.")
@@ -347,13 +433,15 @@ class Demucs(nn.Module):
             encode += [
                 nn.Conv1d(chin, hidden, kernel_size, stride),
                 nn.ReLU(),
-                nn.Conv1d(hidden, hidden * ch_scale, 1), activation,
+                nn.Conv1d(hidden, hidden * ch_scale, 1),
+                activation,
             ]
             self.encoder.append(nn.Sequential(*encode))
 
             decode = []
             decode += [
-                nn.Conv1d(hidden, ch_scale * hidden, 1), activation,
+                nn.Conv1d(hidden, ch_scale * hidden, 1),
+                activation,
                 nn.ConvTranspose1d(hidden, chout, kernel_size, stride),
             ]
             if index > 0:
@@ -387,7 +475,7 @@ class Demucs(nn.Module):
 
     @property
     def total_stride(self):
-        return self.stride ** self.depth // self.resample
+        return self.stride**self.depth // self.resample
 
     def forward(self, mix):
         if mix.dim() == 2:
@@ -416,7 +504,7 @@ class Demucs(nn.Module):
         x = x.permute(1, 2, 0)
         for decode in self.decoder:
             skip = skips.pop(-1)
-            x = x + skip[..., :x.shape[-1]]
+            x = x + skip[..., : x.shape[-1]]
             x = decode(x)
         if self.resample == 2:
             x = downsample2(x)
@@ -438,14 +526,12 @@ def fast_conv(conv, x):
     assert batch == 1
     if kernel == 1:
         x = x.view(chin, length)
-        out = torch.addmm(
-            conv.bias.view(-1, 1),
-            conv.weight.view(chout, chin), x)
+        out = torch.addmm(conv.bias.view(-1, 1), conv.weight.view(chout, chin), x)
     elif length == kernel:
         x = x.view(chin * kernel, 1)
         out = torch.addmm(
-            conv.bias.view(-1, 1),
-            conv.weight.view(chout, chin * kernel), x)
+            conv.bias.view(-1, 1), conv.weight.view(chout, chin * kernel), x
+        )
     else:
         out = conv(x)
     return out.view(batch, chout, -1)
@@ -468,12 +554,16 @@ class DemucsStreamer:
         - resample_buffer (int): size of the buffer of previous inputs/outputs
             kept for resampling.
     """
-    def __init__(self, demucs,
-                 dry=0,
-                 num_frames=1,
-                 resample_lookahead=64,
-                 resample_buffer=256,
-                 mean_decay_duration: float = 10.):
+
+    def __init__(
+        self,
+        demucs,
+        dry=0,
+        num_frames=1,
+        resample_lookahead=64,
+        resample_buffer=256,
+        mean_decay_duration: float = 10.0,
+    ):
         device = next(iter(demucs.parameters())).device
         self.demucs = demucs
         self.lstm_state = None
@@ -482,7 +572,9 @@ class DemucsStreamer:
         self.resample_lookahead = resample_lookahead
         resample_buffer = min(demucs.total_stride, resample_buffer)
         self.resample_buffer = resample_buffer
-        self.frame_length = demucs.valid_length(1) + demucs.total_stride * (num_frames - 1)
+        self.frame_length = demucs.valid_length(1) + demucs.total_stride * (
+            num_frames - 1
+        )
         self.total_length = self.frame_length + self.resample_lookahead
         self.stride = demucs.total_stride * num_frames
         self.resample_in = torch.zeros(demucs.chin, resample_buffer, device=device)
@@ -490,10 +582,12 @@ class DemucsStreamer:
 
         self.frames = 0
         self.total_time = 0
-        self.mean_variance = 0.
-        self.mean_total = 0.
+        self.mean_variance = 0.0
+        self.mean_total = 0.0
         mean_receptive_field_in_samples = mean_decay_duration * demucs.sample_rate
-        mean_receptive_field_in_frames = mean_receptive_field_in_samples / demucs.total_stride
+        mean_receptive_field_in_frames = (
+            mean_receptive_field_in_samples / demucs.total_stride
+        )
         self.mean_decay = 1 - 1 / mean_receptive_field_in_frames
 
         self.pending = torch.zeros(demucs.chin, 0, device=device)
@@ -525,7 +619,9 @@ class DemucsStreamer:
         self.lstm_state = None
         self.conv_state = None
         pending_length = self.pending.shape[1]
-        padding = torch.zeros(self.demucs.chin, self.total_length, device=self.pending.device)
+        padding = torch.zeros(
+            self.demucs.chin, self.total_length, device=self.pending.device
+        )
         out = self.feed(padding)
         return out[:, :pending_length]
 
@@ -550,24 +646,31 @@ class DemucsStreamer:
         outs = []
         while self.pending.shape[1] >= self.total_length:
             self.frames += 1
-            frame = self.pending[:, :self.total_length]
+            frame = self.pending[:, : self.total_length]
             dry_signal = frame[:, :stride]
             if demucs.normalize:
                 mono = frame.mean(0)
                 variance = (mono**2).mean()
-                self.mean_variance = self.mean_variance * self.mean_decay + (1 - self.mean_decay) * variance
-                self.mean_total = self.mean_total * self.mean_decay + (1 - self.mean_decay)
+                self.mean_variance = (
+                    self.mean_variance * self.mean_decay
+                    + (1 - self.mean_decay) * variance
+                )
+                self.mean_total = self.mean_total * self.mean_decay + (
+                    1 - self.mean_decay
+                )
                 frame = frame / (demucs.floor + torch.sqrt(self.variance))  # type: ignore
             padded_frame = torch.cat([self.resample_in, frame], dim=-1)
-            self.resample_in[:] = frame[:, stride - resample_buffer:stride]
+            self.resample_in[:] = frame[:, stride - resample_buffer : stride]
             frame = padded_frame
 
             if resample == 4:
                 frame = upsample2(upsample2(frame))
             elif resample == 2:
                 frame = upsample2(frame)
-            frame = frame[:, resample * resample_buffer:]  # remove pre sampling buffer
-            frame = frame[:, :resample * self.frame_length]  # remove extra samples after window
+            frame = frame[:, resample * resample_buffer :]  # remove pre sampling buffer
+            frame = frame[
+                :, : resample * self.frame_length
+            ]  # remove extra samples after window
 
             out, extra = self._separate_frame(frame)
             padded_out = torch.cat([self.resample_out, out, extra], 1)
@@ -579,7 +682,7 @@ class DemucsStreamer:
             else:
                 out = padded_out
 
-            out = out[:, resample_buffer // resample:]
+            out = out[:, resample_buffer // resample :]
             out = out[:, :stride]
 
             if demucs.normalize:
@@ -639,25 +742,25 @@ class DemucsStreamer:
         extra = None
         for idx, decode in enumerate(demucs.decoder):
             skip = skips.pop(-1)
-            x += skip[..., :x.shape[-1]]
+            x += skip[..., : x.shape[-1]]
             x = fast_conv(decode[0], x)
             x = decode[1](x)
 
             if extra is not None:
-                skip = skip[..., x.shape[-1]:]
-                extra += skip[..., :extra.shape[-1]]
+                skip = skip[..., x.shape[-1] :]
+                extra += skip[..., : extra.shape[-1]]
                 extra = decode[2](decode[1](decode[0](extra)))
             x = decode[2](x)
-            next_state.append(x[..., -demucs.stride:] - decode[2].bias.view(-1, 1))
+            next_state.append(x[..., -demucs.stride :] - decode[2].bias.view(-1, 1))
             if extra is None:
-                extra = x[..., -demucs.stride:]
+                extra = x[..., -demucs.stride :]
             else:
-                extra[..., :demucs.stride] += next_state[-1]
-            x = x[..., :-demucs.stride]
+                extra[..., : demucs.stride] += next_state[-1]
+            x = x[..., : -demucs.stride]
 
             if not first:
                 prev = self.conv_state.pop(0)
-                x[..., :demucs.stride] += prev
+                x[..., : demucs.stride] += prev
             if idx != demucs.depth - 1:
                 x = decode[3](x)
                 extra = decode[3](extra)
@@ -669,37 +772,9 @@ class DemucsStreamer:
 def get_demucs():
     model = Demucs(hidden=64)
     url = "https://dl.fbaipublicfiles.com/adiyoss/denoiser/dns64-a7761ff99a7d5bb6.th"
-    state_dict = torch.hub.load_state_dict_from_url(url, map_location='cpu')
+    state_dict = torch.hub.load_state_dict_from_url(url, map_location="cpu")
     model.load_state_dict(state_dict)
     return model
-
-
-class Cleaner(nn.Module):
-    def __init__(self, dry_fraction: float = 0.02, sample_rate: int = 24000):
-        super().__init__()
-        self.dry_fraction = dry_fraction
-        self.sample_rate = sample_rate
-        self._demucs = get_demucs()
-        demucs_sr = self._demucs.sample_rate
-        cutoff = demucs_sr / sample_rate / 2
-        self._lowpass = julius.lowpass.LowPassFilter(cutoff)
-        self._downsample = julius.resample.ResampleFrac(sample_rate, demucs_sr)
-        self._upsample = julius.resample.ResampleFrac(demucs_sr, sample_rate)
-
-    @torch.no_grad()
-    def forward(self, wav: torch.Tensor):
-        assert wav.dim() == 3, "Must be [B, C, T]"
-        low = self._lowpass(wav)
-        high = wav - low
-        low = self._downsample(low, full=True)
-
-        denoised = self._demucs(low)
-        denoised = (1 - self.dry_fraction) * denoised + self.dry_fraction * low
-        denoised = self._upsample(denoised, output_length=wav.shape[-1])
-        denoised = denoised + high
-
-        denoised = normalize_loudness(denoised, self.sample_rate)
-        return denoised
 
 
 if __name__ == "__main__":
