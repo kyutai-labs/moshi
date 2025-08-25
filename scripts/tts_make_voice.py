@@ -17,6 +17,7 @@ import julius
 import sphn
 import torch
 import torchaudio.transforms
+from huggingface_hub import hf_hub_download
 from safetensors import safe_open
 from safetensors.torch import save_file
 from torch import nn
@@ -38,13 +39,7 @@ def main():
     parser.add_argument(
         "--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi."
     )
-    parser.add_argument(
-        "--hf-repo",
-        type=str,
-        default=loaders.DEFAULT_REPO,
-        help="HF repo to look into, defaults Moshiko. "
-        "Use this to select a different pre-trained model.",
-    )
+    parser.add_argument("--hf-repo", type=str, help="HF repo to look into.")
     parser.add_argument(
         "--device",
         type=str,
@@ -105,16 +100,20 @@ def main():
         args.mimi_weight = candidates[0]
         args.config = args.model_root / "config.json"
 
-    print("retrieving checkpoint")
-    checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
-        args.hf_repo,
-        mimi_weights=args.mimi_weight,
-    )
+    if args.hf_repo is not None:
+        args.config = Path(
+            hf_hub_download(repo_id=args.hf_repo, filename="config.json")
+        )
+        _config = json.loads(args.config.read_text())
+        _mimi_weight = f"{_config['model_id']['sig']}_{_config['model_id']['epoch']}_mimi_voice.safetensors"
+        args.mimi_weight = Path(
+            hf_hub_download(repo_id=args.hf_repo, filename=_mimi_weight)
+        )
+
+    print("loading mimi")
     # need a bit of manual param override at the moment.
     loaders._quantizer_kwargs["n_q"] = 16
-    checkpoint_info.lm_config = None
-    print("loading mimi")
-    mimi = checkpoint_info.get_mimi(device=args.device)
+    mimi = loaders.get_mimi(args.mimi_weight, device=args.device, num_codebooks=16)
     print("mimi loaded")
 
     ext = ".safetensors"
@@ -140,15 +139,15 @@ def main():
         print(f"No audio files found in {args.files}.")
         sys.exit(1)
 
-    with safe_open(checkpoint_info.mimi_weights, framework="pt") as f:
-        metadata = f.metadata()
-
     cleaner = None
     if args.clean:
         cleaner = Cleaner(sample_rate=mimi.sample_rate)
         cleaner.to(device=args.device)
 
     n_new = 0
+
+    with safe_open(args.mimi_weight, framework="pt") as f:
+        metadata = f.metadata()
 
     for file in files:
         out_folder = file.parent if args.out is None else args.out

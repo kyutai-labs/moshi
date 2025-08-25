@@ -259,6 +259,8 @@ class CheckpointInfo:
             num_codebooks = 8
         else:
             num_codebooks = max(self.lm_config["dep_q"], self.lm_config["n_q"] - self.lm_config["dep_q"])
+        if self.tts_config.get('multistream'):
+            num_codebooks //= 2
         return get_mimi(self.mimi_weights, num_codebooks=num_codebooks, device=device)
 
     def get_moshi(
@@ -349,7 +351,7 @@ def get_moshi_lm(
             lm_kwargs["dim"], device, lm_kwargs
         )
         del lm_kwargs["conditioners"]
-    if "fuser" in lm_kwargs:
+    if lm_kwargs.get("fuser", None) is not None:
         lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
 
     lm_kwargs = lm_kwargs | lm_kwargs_overrides
