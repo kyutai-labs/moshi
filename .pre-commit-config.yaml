@@ -19,10 +19,16 @@ repos:
       entry: scripts/run_ci_when_installed.sh moshi 'cd moshi && pytest tests'
       pass_filenames: false
       always_run: true
-    - id: flake8-moshi_mlx
-      name: flake8 on moshi_mlx package
+    - id: ruff-moshi_mlx
+      name: ruff on moshi_mlx package
       language: system
-      entry: bash -c 'cd moshi_mlx && flake8'
+      entry: bash -c 'cd moshi_mlx && uvx ruff check'
+      pass_filenames: false
+      always_run: true
+    - id: ruff-format-moshi_mlx
+      name: ruff format on moshi_mlx package
+      language: system
+      entry: bash -c 'cd moshi_mlx && uvx ruff format --check'
       pass_filenames: false
       always_run: true
     - id: pyright-moshi_mlx
