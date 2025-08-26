@@ -170,7 +170,7 @@ def model_server(client_to_server, server_to_client, lm_config, args):
     try:
         while True:
             data = client_to_server.get()
-            data = mx.array(data).transpose(1, 0)[:, :gen.main_codebooks]
+            data = mx.array(data).transpose(1, 0)[:, : gen.main_codebooks]
             text_token = gen.step(data, ct=ct)
             text_token = text_token[0].item()
             audio_tokens = gen.last_audio_tokens()

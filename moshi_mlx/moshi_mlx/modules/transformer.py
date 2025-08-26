@@ -89,7 +89,7 @@ class CrossAttention(nn.Module):
 
         b, t, hd = xs.shape
         qkv_w = self.in_proj.weight
-        q = xs @ qkv_w[:self.cfg.d_model].T
+        q = xs @ qkv_w[: self.cfg.d_model].T
         q = q.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
 
         if cache.cross_attn is None:
@@ -97,9 +97,9 @@ class CrossAttention(nn.Module):
             assert b == b_kv
             assert hd == hd_kv
             assert "bias" not in self.in_proj
-            k = cross_attention_src @ qkv_w[self.cfg.d_model:2 * self.cfg.d_model].T
+            k = cross_attention_src @ qkv_w[self.cfg.d_model : 2 * self.cfg.d_model].T
             k = k.reshape(b, t_kv, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
-            v = cross_attention_src @ qkv_w[2 * self.cfg.d_model:].T
+            v = cross_attention_src @ qkv_w[2 * self.cfg.d_model :].T
             v = v.reshape(b, t_kv, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
             cache.cross_attn = k, v
         else:
@@ -272,9 +272,7 @@ class Transformer(nn.Module):
     def make_cache(self) -> list[LayerCache]:
         num_kv_heads = self.cfg.num_heads // self.cfg.kv_repeat
         return [
-            LayerCache(
-                KVCache(head_dim=self.cfg.head_dim, n_kv_heads=num_kv_heads)
-            )
+            LayerCache(KVCache(head_dim=self.cfg.head_dim, n_kv_heads=num_kv_heads))
             for _ in self.layers
         ]
 
