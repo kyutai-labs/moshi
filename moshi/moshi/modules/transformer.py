@@ -16,7 +16,7 @@ from einops import rearrange
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from ..utils.compile import no_compile
+from ..utils.compile import no_compile, torch_compile_lazy
 from ..utils import quantize
 from ..utils.quantize import replace_linear_with_qlinear
 from .gating import make_gating
@@ -33,6 +33,7 @@ class LayerNormF32(nn.LayerNorm):
         return out_f32.to(input.dtype)
 
 
+@torch_compile_lazy
 def _rms_norm(
     x: torch.Tensor,
     alpha: torch.Tensor,
