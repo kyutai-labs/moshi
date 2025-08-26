@@ -146,7 +146,7 @@ class SplitResidualVectorQuantizer(nn.Module):
         input_dim: int | None,
         output_dim: int | None,
         nq: int,
-        bins: int
+        bins: int,
     ):
         super().__init__()
         self._nq = nq
@@ -164,7 +164,7 @@ class SplitResidualVectorQuantizer(nn.Module):
             output_dim=output_dim,
             nq=nq - 1,
             bins=bins,
-            force_projection=True
+            force_projection=True,
         )
 
     def encode(self, xs: mx.array) -> mx.array:

@@ -17,7 +17,7 @@ class Conv1d(nn.Module):
         padding: int = 0,
         groups: int = 1,
         dilation: int = 1,
-        bias: bool = True
+        bias: bool = True,
     ):
         super().__init__()
         nn.Conv1d
@@ -43,7 +43,7 @@ class Conv1d(nn.Module):
             stride=self._stride,
             padding=self._padding,
             dilation=self._dilation,
-            groups=self._groups
+            groups=self._groups,
         )
         if self.bias is not None:
             y = y + self.bias
@@ -59,7 +59,7 @@ class ConvTranspose1d(nn.Module):
         stride: int = 1,
         padding: int = 0,
         groups: int = 1,
-        bias: bool = True
+        bias: bool = True,
     ):
         super().__init__()
         nn.Conv1d
@@ -79,7 +79,11 @@ class ConvTranspose1d(nn.Module):
         self._in_channels = in_channels
         self._out_channels = out_channels
         if groups == in_channels and groups == out_channels:
-            eye = mx.eye(out_channels).astype(self.weight.dtype).reshape((out_channels, 1, out_channels))
+            eye = (
+                mx.eye(out_channels)
+                .astype(self.weight.dtype)
+                .reshape((out_channels, 1, out_channels))
+            )
             eye = mx.repeat(eye, repeats=ksize, axis=1)
             self._expanded_weight = mx.repeat(self.weight, repeats=groups, axis=0) * eye
             self._expanded_groups = 1
@@ -95,7 +99,11 @@ class ConvTranspose1d(nn.Module):
         out_channels = self._out_channels
         ksize = self._ksize
         if groups == in_channels and groups == out_channels:
-            eye = mx.eye(out_channels).astype(self.weight.dtype).reshape((out_channels, 1, out_channels))
+            eye = (
+                mx.eye(out_channels)
+                .astype(self.weight.dtype)
+                .reshape((out_channels, 1, out_channels))
+            )
             eye = mx.repeat(eye, repeats=ksize, axis=1)
             self._expanded_weight = mx.repeat(self.weight, repeats=groups, axis=0) * eye
             self._expanded_groups = 1
@@ -143,7 +151,7 @@ class NormConv1d(nn.Module):
             padding=padding,
             groups=groups,
             dilation=dilation,
-            bias=bias
+            bias=bias,
         )
 
     def __call__(self, xs: mx.array) -> mx.array:
@@ -168,7 +176,7 @@ class NormConvTranspose1d(nn.Module):
             stride=stride,
             padding=padding,
             groups=groups,
-            bias=bias
+            bias=bias,
         )
 
     def __call__(self, xs: mx.array) -> mx.array:
@@ -191,6 +199,7 @@ def unpad1d(xs: mx.array, unpad_l: int, unpad_r: int) -> mx.array:
     left = unpad_l
     right = xs.shape[-1] - unpad_r
     return xs[..., left:right]
+
 
 # TODO(laurent): add a streaming module abstract class?
 
@@ -260,9 +269,7 @@ class StreamableConv1d(nn.Module):
             self._left_pad_applied = True
             padding_total = ksize - stride
             xs = mx.pad(
-                xs,
-                pad_width=((0, 0), (0, 0), (padding_total, 0)),
-                mode=self._pad_mode
+                xs, pad_width=((0, 0), (0, 0), (padding_total, 0)), mode=self._pad_mode
             )
         if self._prev_xs is not None:
             xs = mx.concat([self._prev_xs, xs], axis=-1)
@@ -335,17 +342,12 @@ class StreamableConvTranspose1d(nn.Module):
             ys1, ys2 = ys[..., :pt] + prev_ys, ys[..., pt:]
             ys = mx.concat([ys1, ys2], axis=-1)
         invalid_steps = self._ksize - stride
-        ys, self._prev_ys = ys[..., :ot - invalid_steps], ys[..., ot - invalid_steps:]
+        ys, self._prev_ys = ys[..., : ot - invalid_steps], ys[..., ot - invalid_steps :]
         return ys
 
 
 class ConvDownsample1d(nn.Module):
-    def __init__(
-        self,
-        stride: int,
-        dim: int,
-        causal: bool
-    ):
+    def __init__(self, stride: int, dim: int, causal: bool):
         self.conv = StreamableConv1d(
             in_channels=dim,
             out_channels=dim,
@@ -369,12 +371,7 @@ class ConvDownsample1d(nn.Module):
 
 
 class ConvTrUpsample1d(nn.Module):
-    def __init__(
-        self,
-        stride: int,
-        dim: int,
-        causal: bool
-    ):
+    def __init__(self, stride: int, dim: int, causal: bool):
         self.convtr = StreamableConvTranspose1d(
             in_channels=dim,
             out_channels=dim,

@@ -36,15 +36,25 @@ def hf_get(filename: str) -> str:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokenizer", type=str)
-    parser.add_argument("--moshi-weights", type=str, help="Path to a local checkpoint file for Moshi.")
-    parser.add_argument("--mimi-weights", type=str, help="Path to a local checkpoint file for Mimi.")
+    parser.add_argument(
+        "--moshi-weights", type=str, help="Path to a local checkpoint file for Moshi."
+    )
+    parser.add_argument(
+        "--mimi-weights", type=str, help="Path to a local checkpoint file for Mimi."
+    )
     parser.add_argument("--hf-repo", type=str, default="kyutai/moshiko-mlx-q8")
     parser.add_argument("--lm-config", type=str, help="The LM config as a json file.")
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--cfg-coef", type=float, default=1.)
+    parser.add_argument("--cfg-coef", type=float, default=1.0)
     parser.add_argument("--temp", type=float, default=0.8)
     parser.add_argument("infile", type=str, help="Input audio file.")
-    parser.add_argument("outfile", type=str, help="Output audio file in wav format.", nargs="?", default="")
+    parser.add_argument(
+        "outfile",
+        type=str,
+        help="Output audio file in wav format.",
+        nargs="?",
+        default="",
+    )
     args = parser.parse_args()
 
     mx.random.seed(299792458)
@@ -96,7 +106,9 @@ def main():
         pad_left = stt_config.get("audio_silence_prefix_seconds", 0.0)
         pad_left = int(pad_left * 24000)
         pad_right = int((pad_right + 1.0) * 24000)
-        in_pcms = np.pad(in_pcms, pad_width=[(0, 0), (pad_left, pad_right)], mode="constant")
+        in_pcms = np.pad(
+            in_pcms, pad_width=[(0, 0), (pad_left, pad_right)], mode="constant"
+        )
 
     log("info", f"loading the audio tokenizer {mimi_weights}")
     generated_codebooks = lm_config.generated_codebooks
@@ -127,9 +139,11 @@ def main():
     start_time = time.time()
     log("info", f"steps to run: {steps}")
     for idx in range(0, steps):
-        pcm_data = in_pcms[:, idx * 1920:(idx + 1) * 1920]
+        pcm_data = in_pcms[:, idx * 1920 : (idx + 1) * 1920]
         other_audio_tokens = audio_tokenizer.encode_step(pcm_data[None, 0:1])
-        other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[:, :, :other_codebooks]
+        other_audio_tokens = mx.array(other_audio_tokens).transpose(0, 2, 1)[
+            :, :, :other_codebooks
+        ]
         text_token = gen.step(other_audio_tokens[0], ct)
         text_token = text_token[0].item()
         audio_tokens = gen.last_audio_tokens()

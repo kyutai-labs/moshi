@@ -444,7 +444,8 @@ class TTSModel:
     def valid_cfg_conditionings(self) -> set[float]:
         valid_cfg_conditionings = set()
         if (
-            self.lm.condition_provider is not None and "cfg" in self.lm.condition_provider.conditioners
+            self.lm.condition_provider is not None
+            and "cfg" in self.lm.condition_provider.conditioners
         ):
             cfg_conditioner = self.lm.condition_provider.conditioners["cfg"]
             assert isinstance(cfg_conditioner, LutConditioner)
@@ -632,7 +633,8 @@ class TTSModel:
                     break
             missing = self.lm.n_q - self.lm.dep_q
             input_tokens = (
-                mx.ones((len(states), missing), dtype=mx.int64) * self.machine.token_ids.zero
+                mx.ones((len(states), missing), dtype=mx.int64)
+                * self.machine.token_ids.zero
             )
             lm_gen.step(input_tokens, ct=ct, cross_attention_src=cross_attention_src)
             frame = lm_gen.last_audio_tokens()

@@ -5,8 +5,11 @@ from huggingface_hub import hf_hub_download
 from pathlib import Path
 
 
-def hf_get(filename: str | Path, hf_repo: str | None = None,
-           check_local_file_exists: bool = False) -> Path:
+def hf_get(
+    filename: str | Path,
+    hf_repo: str | None = None,
+    check_local_file_exists: bool = False,
+) -> Path:
     if isinstance(filename, Path):
         return filename
     if filename.startswith("hf://"):
