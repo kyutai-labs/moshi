@@ -10,23 +10,23 @@ having the model signal us when it thinks the next step will be the start of a w
 to feed and feed it the token representation of the word over the next few steps.
 """
 
+import re
+import typing as tp
 from collections import deque
 from dataclasses import dataclass, field
 from functools import cached_property
-import re
 from pathlib import Path
-import typing as tp
 
-from safetensors.torch import load_file
-from sentencepiece import SentencePieceProcessor
 import sphn
 import torch
+from safetensors.torch import load_file
+from sentencepiece import SentencePieceProcessor
 
-from ..conditioners import ConditionAttributes, dropout_all_conditions, TensorCondition
+from ..conditioners import ConditionAttributes, TensorCondition, dropout_all_conditions
 from ..conditioners.text import LUTConditioner
+from . import LMGen, LMModel, MimiModel, loaders
+from .lm import OnAudioLogitsHook
 from .lm_utils import ScaledEmbedding
-from . import loaders, MimiModel, LMModel, LMGen
-
 
 DEFAULT_DSM_TTS_REPO = 'kyutai/tts-1.6b-en_fr'
 DEFAULT_DSM_TTS_VOICE_REPO = 'kyutai/tts-voices'
@@ -383,6 +383,7 @@ class TTSModel:
     n_q: int = 32
     max_gen_length: int = 30000
     padding_bonus: float = 0.
+    on_audio_logits_hook: OnAudioLogitsHook | None = None
 
     @staticmethod
     def from_checkpoint_info(checkpoint_info: loaders.CheckpointInfo,
@@ -580,11 +581,19 @@ class TTSModel:
             # No proper support for skipping some codebooks for multistream models.
             self.lm.dep_q = self.n_q
         lm_gen = LMGen(
-            self.lm, temp=self.temp, temp_text=self.temp,
-            cfg_coef=self.cfg_coef, condition_tensors=condition_tensors,
-            on_text_logits_hook=_on_text_logits_hook, on_text_hook=_on_text_hook, on_audio_hook=_on_audio_hook,
-            cfg_is_masked_until=cfg_is_masked_until, cfg_is_no_text=cfg_is_no_text,
-            **kwargs)
+            self.lm,
+            temp=self.temp,
+            temp_text=self.temp,
+            cfg_coef=self.cfg_coef,
+            condition_tensors=condition_tensors,
+            on_text_logits_hook=_on_text_logits_hook,
+            on_text_hook=_on_text_hook,
+            on_audio_hook=_on_audio_hook,
+            on_audio_logits_hook=self.on_audio_logits_hook,
+            cfg_is_masked_until=cfg_is_masked_until,
+            cfg_is_no_text=cfg_is_no_text,
+            **kwargs,
+        )
         no_depformer_tokens = torch.full(
             (len(all_entries), self.lm.dep_q, 1), self.machine.token_ids.zero,
             dtype=torch.long, device=device)
@@ -675,3 +684,49 @@ class TTSModel:
         null_text = torch.full_like(prefix[:1], self.machine.token_ids.zero)
         prefix = torch.cat([null_text, prefix], dim=0)
         return prefix
+
+
+class StickToBeginningLogits(OnAudioLogitsHook):
+    def __init__(
+        self,
+        lm_model: LMModel,
+        warmup_steps: int,
+        codebooks_affected: list[int],
+        strengths: list[float],
+    ):
+        self.num_audio_codebooks = lm_model.num_audio_codebooks
+        self.cardinality = lm_model.card
+        self.warmup_steps = warmup_steps
+        self.codebooks_affected = codebooks_affected
+        self.strengths = torch.Tensor(strengths).to(lm_model.device)
+        print(self.strengths)
+
+        self.step = 0
+        self.logits_sum: torch.Tensor
+
+    @torch.no_grad()
+    def __call__(self, codebook_index: int, logits: torch.Tensor):
+        assert logits.shape[1] == 1
+        assert logits.shape[2] == 1
+
+        if self.step == 0:
+            batch_size = logits.shape[0]
+            self.logits_sum = torch.zeros(
+                (batch_size, self.num_audio_codebooks, self.cardinality),
+                device=logits.device,
+            )
+
+        if codebook_index == 0:
+            self.step += 1
+
+        if self.step <= self.warmup_steps:
+            self.logits_sum[:, codebook_index] += logits[:, 0, 0, :]
+        else:
+            if codebook_index in self.codebooks_affected:
+                logits[:, 0, 0, :] += (
+                    self.logits_sum[:, codebook_index] / self.warmup_steps
+                ) * self.strengths[:, None]
+
+    def logits_mean(self):
+        assert self.step > 0
+        return self.logits_sum / self.step

@@ -8,24 +8,22 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import logging
+import typing as tp
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from functools import partial
-import logging
-import typing as tp
+
 import torch
 from torch import nn
-from ..conditioners import ConditionProvider, ConditionFuser, ConditionTensors
-from ..utils.sampling import sample_token
+
+from ..conditioners import ConditionFuser, ConditionProvider, ConditionTensors
+from ..modules.streaming import State, StreamingContainer, StreamingModule
+from ..modules.transformer import StreamingTransformer, create_norm_fn
 from ..utils.compile import CUDAGraphed
 from ..utils.quantize import replace_linear_with_qlinear
-from ..modules.streaming import StreamingContainer, StreamingModule, State
-from ..modules.transformer import StreamingTransformer, create_norm_fn
-from .lm_utils import (_delay_sequence,
-                       _undelay_sequence,
-                       _init_layer,
-                       ScaledEmbedding)
-
+from ..utils.sampling import sample_token
+from .lm_utils import ScaledEmbedding, _delay_sequence, _init_layer, _undelay_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -543,6 +541,8 @@ class _LMGenState(State):
     def __exit__(self, exc_type, exc_value, traceback):
         self.exit_stack.__exit__(exc_type, exc_value, traceback)
 
+class OnAudioLogitsHook(tp.Protocol):
+    def __call__(self, codebook_index: int, logits: torch.Tensor) -> None: ...
 
 class LMGen(StreamingModule[_LMGenState]):
     def __init__(
@@ -559,6 +559,7 @@ class LMGen(StreamingModule[_LMGenState]):
         on_text_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         on_text_logits_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         on_audio_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
+        on_audio_logits_hook: OnAudioLogitsHook | None = None,
         support_out_of_sync: bool = False,
         cfg_is_masked_until: list[int] | None = None,
         cfg_is_no_text: bool = False,
@@ -585,6 +586,7 @@ class LMGen(StreamingModule[_LMGenState]):
         self.on_text_hook = on_text_hook
         self.on_text_logits_hook = on_text_logits_hook
         self.on_audio_hook = on_audio_hook
+        self.on_audio_logits_hook = on_audio_logits_hook
         self.support_out_of_sync = support_out_of_sync
         self.cfg_is_masked_until = cfg_is_masked_until
         self.cfg_is_no_text = cfg_is_no_text
@@ -740,7 +742,12 @@ class LMGen(StreamingModule[_LMGenState]):
             audio_tokens = None
         else:
             if depformer_replace_tokens is None:
-                audio_tokens = state.graphed_depth(text_token, transformer_out)
+                audio_tokens = self.depformer_step(
+                    text_token,
+                    transformer_out,
+                    on_audio_logits_hook=self.on_audio_logits_hook,
+                )
+                # audio_tokens = state.graphed_depth(text_token, transformer_out)
             else:
                 assert depformer_replace_tokens.dim() == 3
                 audio_tokens = depformer_replace_tokens.squeeze(-1)
@@ -801,6 +808,7 @@ class LMGen(StreamingModule[_LMGenState]):
         self,
         text_token: torch.Tensor,
         transformer_out: torch.Tensor,
+        on_audio_logits_hook: OnAudioLogitsHook | None = None
     ) -> torch.Tensor:
         B, = text_token.shape
         B_cfg = B
@@ -818,6 +826,10 @@ class LMGen(StreamingModule[_LMGenState]):
                 if self.cfg_coef != 1.:
                     input_ = input_.repeat(2, 1, 1)
                 logits = lm_model.forward_depformer(cb_index, input_, transformer_out)
+                
+                if on_audio_logits_hook:
+                    on_audio_logits_hook(cb_index, logits)
+
                 if self.cfg_coef != 1.:
                     logits, logits_null = logits.chunk(2)
                     logits = logits_null + (logits - logits_null) * self.cfg_coef
