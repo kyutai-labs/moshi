@@ -543,7 +543,6 @@ class TTSModel:
         def _on_text_logits_hook(text_logits: torch.Tensor):
             if self.padding_bonus:
                 text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
-            return text_logits
 
         def _on_audio_hook(audio_tokens: torch.Tensor):
             audio_offset = self.lm.audio_offset
@@ -593,7 +592,7 @@ class TTSModel:
             for offset in range(self.max_gen_length):
                 # Stop early if we've generated everything
                 if all(state.end_step is not None for state in states):
-                    max_end_step = max(state.end_step for state in states)
+                    max_end_step = max(state.end_step for state in states)  # type: ignore
                     if offset >= max_end_step + self.delay_steps + self.final_padding:
                         break
                 missing = self.lm.n_q - self.lm.dep_q

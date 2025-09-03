@@ -140,7 +140,7 @@ class ResidualVectorQuantizer(BaseQuantizer):
 
     def decode(self, codes: torch.Tensor) -> torch.Tensor:
         """Decode the given codes to the quantized representation.
-        
+
         All elements must be 0 <= c < self.cardinality, otherwise a dramatic CUDA crash
         occurs. We can't check this condition though, to avoid a synchronization point.
         """
