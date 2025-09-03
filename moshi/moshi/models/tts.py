@@ -517,10 +517,7 @@ class TTSModel:
         assert self.lm.condition_provider is not None
         condition_tensors = self.lm.condition_provider.prepare_and_provide(attributes)
 
-        states = []
-        for entries in all_entries:
-            state = self.machine.new_state(entries)
-            states.append(state)
+        states = [self.machine.new_state(entries) for entries in all_entries]
 
         cfg_is_masked_until = None
         text_prefixes = None
@@ -543,12 +540,12 @@ class TTSModel:
                 delayed = delayed.to(device)
                 audio_prefixes.append(deque(delayed.t()))
 
-        def _on_text_logits_hook(text_logits):
+        def _on_text_logits_hook(text_logits: torch.Tensor):
             if self.padding_bonus:
                 text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
             return text_logits
 
-        def _on_audio_hook(audio_tokens):
+        def _on_audio_hook(audio_tokens: torch.Tensor):
             audio_offset = self.lm.audio_offset
             delays = self.lm.delays
             ungenerated = self.machine.token_ids.ungenerated
@@ -563,7 +560,8 @@ class TTSModel:
                         mask = audio_codes != ungenerated
                         audio_tokens[b] = torch.where(mask, audio_codes, audio_tokens[b])
 
-        def _on_text_hook(text_tokens):
+        def _on_text_hook(text_tokens: torch.Tensor):
+            """Runs when the text tokens are sampled, but before the depformer."""
             tokens = text_tokens.tolist()
             out_tokens = []
             for b, (token, state, logged) in enumerate(zip(tokens, states, logged_text_tokens)):
@@ -604,7 +602,11 @@ class TTSModel:
                     assert missing == 0
                 input_tokens = torch.full((len(states), missing, 1), self.machine.token_ids.zero,
                                           dtype=torch.long, device=self.lm.device)
+                # Since the audio is delayed by self.delay_steps, in these first steps
+                # we don't need to run the depformer since the audio stream should be
+                # all token_ids.zero
                 depformer_replace_tokens = no_depformer_tokens if offset < self.delay_steps else None
+
                 frame = lm_gen.step(input_tokens, depformer_replace_tokens=depformer_replace_tokens)
                 if frame is not None:
                     frames.append(frame.clone())
