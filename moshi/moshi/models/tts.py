@@ -10,23 +10,22 @@ having the model signal us when it thinks the next step will be the start of a w
 to feed and feed it the token representation of the word over the next few steps.
 """
 
+import re
+import typing as tp
 from collections import deque
 from dataclasses import dataclass, field
 from functools import cached_property
-import re
 from pathlib import Path
-import typing as tp
 
-from safetensors.torch import load_file
-from sentencepiece import SentencePieceProcessor
 import sphn
 import torch
+from safetensors.torch import load_file
+from sentencepiece import SentencePieceProcessor
 
-from ..conditioners import ConditionAttributes, dropout_all_conditions, TensorCondition
+from ..conditioners import ConditionAttributes, TensorCondition, dropout_all_conditions
 from ..conditioners.text import LUTConditioner
+from . import LMGen, LMModel, MimiModel, loaders
 from .lm_utils import ScaledEmbedding
-from . import loaders, MimiModel, LMModel, LMGen
-
 
 DEFAULT_DSM_TTS_REPO = 'kyutai/tts-1.6b-en_fr'
 DEFAULT_DSM_TTS_VOICE_REPO = 'kyutai/tts-voices'
@@ -372,6 +371,8 @@ class TTSModel:
     voice_repo: str
 
     machine: StateMachine
+    # The delay of the audio streams compared to the text stream.
+    # Note that in addition, the acoustic tokens are delayed wrt the semantic ones.
     delay_steps: int
     max_speakers: int = 5
     multistream: bool = False
@@ -469,8 +470,7 @@ class TTSModel:
             attributes = list(attributes) + nulled
 
         assert self.lm.condition_provider is not None
-        prepared = self.lm.condition_provider.prepare(attributes)
-        condition_tensors = self.lm.condition_provider(prepared)
+        condition_tensors = self.lm.condition_provider.prepare_and_provide(attributes)
         missing = self.lm.n_q - self.lm.dep_q
         input_tokens = torch.full((batch_size, missing, 1), self.machine.token_ids.zero,
                                   dtype=torch.long, device=self.lm.device)
@@ -515,8 +515,7 @@ class TTSModel:
             attributes = list(attributes) + nulled
 
         assert self.lm.condition_provider is not None
-        prepared = self.lm.condition_provider.prepare(attributes)
-        condition_tensors = self.lm.condition_provider(prepared)
+        condition_tensors = self.lm.condition_provider.prepare_and_provide(attributes)
 
         states = []
         for entries in all_entries:
@@ -594,6 +593,7 @@ class TTSModel:
 
         with lm_gen.streaming(len(states)):
             for offset in range(self.max_gen_length):
+                # Stop early if we've generated everything
                 if all(state.end_step is not None for state in states):
                     max_end_step = max(state.end_step for state in states)
                     if offset >= max_end_step + self.delay_steps + self.final_padding:

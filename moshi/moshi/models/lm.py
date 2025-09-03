@@ -8,24 +8,22 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import logging
+import typing as tp
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from functools import partial
-import logging
-import typing as tp
+
 import torch
 from torch import nn
-from ..conditioners import ConditionProvider, ConditionFuser, ConditionTensors
-from ..utils.sampling import sample_token
+
+from ..conditioners import ConditionFuser, ConditionProvider, ConditionTensors
+from ..modules.streaming import State, StreamingContainer, StreamingModule
+from ..modules.transformer import StreamingTransformer, create_norm_fn
 from ..utils.compile import CUDAGraphed
 from ..utils.quantize import replace_linear_with_qlinear
-from ..modules.streaming import StreamingContainer, StreamingModule, State
-from ..modules.transformer import StreamingTransformer, create_norm_fn
-from .lm_utils import (_delay_sequence,
-                       _undelay_sequence,
-                       _init_layer,
-                       ScaledEmbedding)
-
+from ..utils.sampling import sample_token
+from .lm_utils import ScaledEmbedding, _delay_sequence, _init_layer, _undelay_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +290,11 @@ class LMModel(StreamingContainer):
 
     @property
     def audio_offset(self) -> int:
+        """From which channel does audio start? Always 1 in practice.
+
+        The state has shape [B, text_channels + audio_channels, T] where text_channels=1
+        in practice, but in the future we might want to support >1.
+        """
         return 1
 
     def _get_initial_token(self) -> torch.Tensor:

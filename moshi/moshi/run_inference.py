@@ -3,22 +3,21 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-from collections import deque
-from dataclasses import dataclass
-from pathlib import Path
 import random
 import sys
 import time
+from collections import deque
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import sentencepiece
-import torch
 import sphn
+import torch
 
-
-from .client_utils import log, AnyPrinter, Printer, RawPrinter
+from .client_utils import AnyPrinter, Printer, RawPrinter, log
 from .conditioners import ConditionAttributes, ConditionTensors
-from .models import loaders, MimiModel, LMModel, LMGen
+from .models import LMGen, LMModel, MimiModel, loaders
 
 
 def seed_all(seed):
@@ -54,8 +53,7 @@ def get_condition_tensors(
                 f"Model expects conditioning but model type {model_type} is not supported."
             )
         assert conditions is not None
-        prepared = lm.condition_provider.prepare(conditions)
-        condition_tensors = lm.condition_provider(prepared)
+        return lm.condition_provider.prepare_and_provide(conditions)
     return condition_tensors
 
 

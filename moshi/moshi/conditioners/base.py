@@ -6,17 +6,16 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 
+import logging
+import typing as tp
 from collections import defaultdict
 from dataclasses import dataclass, field
 from itertools import chain
-import logging
-import typing as tp
 
 import torch
 from torch import nn
 
 from ..modules.transformer import create_sin_embedding
-
 
 logger = logging.getLogger(__name__)
 TextCondition = tp.Optional[str]  # a text condition can be a string or None (if doesn't exist)
@@ -340,6 +339,11 @@ class ConditionProvider(nn.Module):
             condition, mask = self.conditioners[name](inputs)
             output[name] = ConditionType(condition, mask)
         return output
+
+    def prepare_and_provide(self, inputs: tp.Sequence[ConditionAttributes]):
+        """See .prepare() and .forward()."""
+        prepared = self.prepare(inputs)
+        return self(prepared)
 
 
 class ConditionFuser(nn.Module):
