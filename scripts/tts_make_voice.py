@@ -149,12 +149,14 @@ def main():
     with safe_open(args.mimi_weight, framework="pt") as f:
         metadata = f.metadata()
 
+    n_skipped = 0
+
     for file in files:
         out_folder = file.parent if args.out is None else args.out
         out_folder.mkdir(exist_ok=True, parents=True)
         out_file = out_folder / (file.name + ext)
         if out_file.exists():
-            print(f"File {out_file} already exists, skipping.")
+            n_skipped += 1
             continue
 
         print(f"Creating {out_file}")
@@ -195,6 +197,9 @@ def main():
         emb = mimi.encode_to_latent(wav.to(args.device), quantize=False)
         tensors = {"speaker_wavs": emb.cpu()}
         save_file(tensors, out_file, metadata)
+
+    if n_skipped > 0:
+        print(f"Skipped {n_skipped} files that already have embeddings.")
 
     print(
         f"Created voice embeddings for {n_new} files in {out_folder}, {args.clean=} {args.loudness_headroom=}"
