@@ -13,7 +13,7 @@ try:
     from huggingface_hub.errors import EntryNotFoundError
 except ImportError:
     from huggingface_hub.utils import EntryNotFoundError  # pyright: ignore
-from safetensors.torch import load_model, load_file
+from safetensors.torch import load_file
 import sentencepiece
 import torch
 import typing as tp
@@ -324,7 +324,8 @@ def get_mimi(
     model.eval()
     if filename is not None:
         if _is_safetensors(filename):
-            load_model(model, filename, device=str(device))
+            state = load_file(filename, device=str(device))
+            model.load_state_dict(state)
         else:
             pkg = torch.load(filename, "cpu")
             model.load_state_dict(pkg["model"])
