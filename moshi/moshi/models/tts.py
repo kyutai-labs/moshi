@@ -10,23 +10,22 @@ having the model signal us when it thinks the next step will be the start of a w
 to feed and feed it the token representation of the word over the next few steps.
 """
 
+import re
+import typing as tp
 from collections import deque
 from dataclasses import dataclass, field
 from functools import cached_property
-import re
 from pathlib import Path
-import typing as tp
 
-from safetensors.torch import load_file
-from sentencepiece import SentencePieceProcessor
 import sphn
 import torch
+from safetensors.torch import load_file
+from sentencepiece import SentencePieceProcessor
 
-from ..conditioners import ConditionAttributes, dropout_all_conditions, TensorCondition
+from ..conditioners import ConditionAttributes, TensorCondition, dropout_all_conditions
 from ..conditioners.text import LUTConditioner
+from . import LMGen, LMModel, MimiModel, loaders
 from .lm_utils import ScaledEmbedding
-from . import loaders, MimiModel, LMModel, LMGen
-
 
 DEFAULT_DSM_TTS_REPO = 'kyutai/tts-1.6b-en_fr'
 DEFAULT_DSM_TTS_VOICE_REPO = 'kyutai/tts-voices'
@@ -372,6 +371,8 @@ class TTSModel:
     voice_repo: str
 
     machine: StateMachine
+    # The delay of the audio streams compared to the text stream.
+    # Note that in addition, the acoustic tokens are delayed wrt the semantic ones.
     delay_steps: int
     max_speakers: int = 5
     multistream: bool = False
@@ -469,8 +470,7 @@ class TTSModel:
             attributes = list(attributes) + nulled
 
         assert self.lm.condition_provider is not None
-        prepared = self.lm.condition_provider.prepare(attributes)
-        condition_tensors = self.lm.condition_provider(prepared)
+        condition_tensors = self.lm.condition_provider.prepare_and_provide(attributes)
         missing = self.lm.n_q - self.lm.dep_q
         input_tokens = torch.full((batch_size, missing, 1), self.machine.token_ids.zero,
                                   dtype=torch.long, device=self.lm.device)
@@ -515,13 +515,9 @@ class TTSModel:
             attributes = list(attributes) + nulled
 
         assert self.lm.condition_provider is not None
-        prepared = self.lm.condition_provider.prepare(attributes)
-        condition_tensors = self.lm.condition_provider(prepared)
+        condition_tensors = self.lm.condition_provider.prepare_and_provide(attributes)
 
-        states = []
-        for entries in all_entries:
-            state = self.machine.new_state(entries)
-            states.append(state)
+        states = [self.machine.new_state(entries) for entries in all_entries]
 
         cfg_is_masked_until = None
         text_prefixes = None
@@ -544,12 +540,11 @@ class TTSModel:
                 delayed = delayed.to(device)
                 audio_prefixes.append(deque(delayed.t()))
 
-        def _on_text_logits_hook(text_logits):
+        def _on_text_logits_hook(text_logits: torch.Tensor):
             if self.padding_bonus:
                 text_logits[..., self.machine.token_ids.pad] += self.padding_bonus
-            return text_logits
 
-        def _on_audio_hook(audio_tokens):
+        def _on_audio_hook(audio_tokens: torch.Tensor):
             audio_offset = self.lm.audio_offset
             delays = self.lm.delays
             ungenerated = self.machine.token_ids.ungenerated
@@ -564,7 +559,8 @@ class TTSModel:
                         mask = audio_codes != ungenerated
                         audio_tokens[b] = torch.where(mask, audio_codes, audio_tokens[b])
 
-        def _on_text_hook(text_tokens):
+        def _on_text_hook(text_tokens: torch.Tensor):
+            """Runs when the text tokens are sampled, but before the depformer."""
             tokens = text_tokens.tolist()
             out_tokens = []
             for b, (token, state, logged) in enumerate(zip(tokens, states, logged_text_tokens)):
@@ -594,8 +590,9 @@ class TTSModel:
 
         with lm_gen.streaming(len(states)):
             for offset in range(self.max_gen_length):
+                # Stop early if we've generated everything
                 if all(state.end_step is not None for state in states):
-                    max_end_step = max(state.end_step for state in states)
+                    max_end_step = max(state.end_step for state in states)  # type: ignore
                     if offset >= max_end_step + self.delay_steps + self.final_padding:
                         break
                 missing = self.lm.n_q - self.lm.dep_q
@@ -604,7 +601,11 @@ class TTSModel:
                     assert missing == 0
                 input_tokens = torch.full((len(states), missing, 1), self.machine.token_ids.zero,
                                           dtype=torch.long, device=self.lm.device)
+                # Since the audio is delayed by self.delay_steps, in these first steps
+                # we don't need to run the depformer since the audio stream should be
+                # all token_ids.zero
                 depformer_replace_tokens = no_depformer_tokens if offset < self.delay_steps else None
+
                 frame = lm_gen.step(input_tokens, depformer_replace_tokens=depformer_replace_tokens)
                 if frame is not None:
                     frames.append(frame.clone())
