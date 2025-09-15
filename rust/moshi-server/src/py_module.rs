@@ -281,6 +281,10 @@ impl Inner {
                 // We store the channel ids here to check that they have not changed when sending
                 // the data back to the user.
                 let (in_data, channel_ids) = self.pre_process(step_idx)?;
+                if channel_ids.iter().all(|c| c.is_none()) {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                    continue;
+                }
                 let start_time = std::time::Instant::now();
                 Python::with_gil(|py| -> Result<()> {
                     self.app
