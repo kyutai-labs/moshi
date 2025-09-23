@@ -388,7 +388,11 @@ class TTSService:
             in_text_onlys.append(in_text_only)
 
         in_text_only_mask = torch.tensor(in_text_onlys, dtype=torch.bool)
-        run_in_text_only = self.remaining_text_only > 0 and in_text_only_mask.any()
+        # Either we're interleaving text-only steps, or all active clients are in text-only mode
+        # so there's no need to run the depformer anyway.
+        run_in_text_only = (
+            self.remaining_text_only > 0 and in_text_only_mask.any()
+        ) or in_text_only_mask.sum() == sum(actives)
 
         if run_in_text_only:
             self.remaining_text_only -= 1
