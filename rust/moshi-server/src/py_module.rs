@@ -312,18 +312,16 @@ impl Inner {
                         if let Some(c) = channel.as_mut() {
                             let mask = mask[batch_idx];
                             // The channel has changed so skip the update.
-                            if Some(c.id) != channel_ids[batch_idx] {
+                            if Some(c.id) != channel_ids[batch_idx] || !c.sent_init {
                                 return;
                             }
                             if (mask & MASK_AR_STEP) > 0 {
                                 c.steps += 1;
                             }
-                            if c.sent_init {
-                                if (mask & MASK_MISSING_WORDS) > 0 {
-                                    metrics::MISSING_WORDS_STEPS.inc();
-                                } else {
-                                    metrics::COULD_HAVE_RUN_STEPS.inc();
-                                }
+                            if (mask & MASK_MISSING_WORDS) > 0 {
+                                metrics::MISSING_WORDS_STEPS.inc();
+                            } else {
+                                metrics::COULD_HAVE_RUN_STEPS.inc();
                             }
                             if (mask & MASK_WORD_FINISHED) > 0 {
                                 // MASK_WORD_FINISHED currently indicates the beggining of a new
