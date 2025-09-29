@@ -265,7 +265,7 @@ impl BatchedAsrInner {
                     )?;
                     let elapsed = start_time.elapsed().as_secs_f64();
                     metrics::MODEL_STEP_DURATION.observe(elapsed);
-                    tracing::info!(step_idx, with_data, "{:.2}ms", elapsed * 1000.);
+                    tracing::debug!(step_idx, with_data, "{:.2}ms", elapsed * 1000.);
                     step_idx += 1;
                     self.post_process(asr_msgs, step_idx, &mut markers, &mask, &ref_channel_ids)?;
                 } else {
@@ -385,10 +385,9 @@ impl BatchedAsrInner {
         for asr_msg in asr_msgs.into_iter() {
             match asr_msg {
                 moshi::asr::AsrMsg::Word { tokens, start_time, batch_idx } => {
-                    let msg = OutMsg::Word {
-                        text: self.text_tokenizer.decode_piece_ids(&tokens)?,
-                        start_time,
-                    };
+                    let text = self.text_tokenizer.decode_piece_ids(&tokens)?;
+                    tracing::info!(batch_idx, start_time, text = %text, "asr word");
+                    let msg = OutMsg::Word { text, start_time };
                     if let Some(c) = channels[batch_idx].as_ref() {
                         if c.send(msg, ref_channel_ids[batch_idx]).is_err() {
                             channels[batch_idx] = None;
@@ -589,6 +588,7 @@ impl BatchedAsr {
         tracing::info!(batch_idx, "batched-asr channel");
         in_tx.send(InMsg::Init)?;
 
+        let expect_pcm16le = query.pcm16le;
         crate::utils::spawn("recv_loop", async move {
             let mut receiver = receiver;
             // There are two timeouts here:
@@ -620,7 +620,7 @@ impl BatchedAsr {
                     Message::Close(_) => break,
                 };
                 last_message_received = std::time::Instant::now();
-                let msg: InMsg = rmp_serde::from_slice(&msg)?;
+                let msg = InMsg::from_ws_payload(&msg, expect_pcm16le)?;
                 in_tx.send(msg)?;
             }
             Ok::<_, anyhow::Error>(())
