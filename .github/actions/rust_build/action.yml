@@ -10,11 +10,11 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions-rs/toolchain@v1
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
-        profile: minimal
         toolchain: ${{ inputs.toolchain }}
         override: true
+        components: clippy, rustfmt
     - name: cargo cache
       uses: actions/cache@v3
       with:
