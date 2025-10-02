@@ -1,8 +1,7 @@
 # Copyright (c) Kyutai, all rights reserved.
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-"""Import Moshi model, in particular with support for a 'light' depth transformer
-with low rank embeddings and weight sharing for some codebooks."""
+"""Import Mimi codecs."""
 
 import argparse
 from functools import partial
