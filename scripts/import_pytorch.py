@@ -42,7 +42,7 @@ def import_model(
         'dim', 'text_card', 'existing_text_padding_id', 'num_heads', 'num_layers', 'hidden_scale', 'causal',
         'layer_scale', 'context', 'max_period', 'gating', 'norm', 'positional_embedding',
         'depformer_dim', 'depformer_num_heads', 'depformer_num_layers', 'depformer_dim_feedforward',
-        'depformer_layer_scale', 'depformer_multi_linear',
+        'depformer_layer_scale', 'depformer_multi_linear', 'depformer_norm',
         'depformer_max_period', 'depformer_gating', 'depformer_pos_emb', 'depformer_weights_per_step',
         'depformer_low_rank_embeddings', 'demux_second_stream',
         'text_card_out']

@@ -95,6 +95,7 @@ class LMModel(StreamingContainer):
         depformer_weights_per_step_schedule: list[int] | None = None,
         depformer_low_rank_embeddings: int | None = None,
         depformer_pos_emb: str = "sin",
+        depformer_norm: str | None = None,
         existing_text_padding_id: int = 3,
         existing_text_end_padding_id: int = 0,
         extra_heads_num_heads: int = 0,
@@ -193,6 +194,11 @@ class LMModel(StreamingContainer):
                 depformer_dim,
                 demux_second_stream=demux_second_text_stream,
             )
+            if depformer_norm is None:
+                self.depformer_norms = nn.ModuleList([nn.Identity() for _ in range(dep_q)])
+            else:
+                self.depformer_norms = nn.ModuleList(
+                    [create_norm_fn(depformer_norm, depformer_dim) for _ in range(dep_q)])
             if depformer_dim_feedforward is None:
                 depformer_dim_feedforward = int(hidden_scale * depformer_dim)
             self.depformer = StreamingTransformer(
@@ -435,7 +441,7 @@ class LMModel(StreamingContainer):
         depformer_output = self.depformer(depformer_input)
         all_logits = []
         for cb_index in range(Ka):
-            logits = self.linears[cb_index](depformer_output[:, cb_index])
+            logits = self.linears[cb_index](self.depformer_norms[cb_index](depformer_output[:, cb_index]))
             all_logits.append(logits.view(B, T, -1))
         logits = torch.stack(all_logits, 1)
         assert logits.dim() == 4, logits.shape  # [B, Ka, T, card]
@@ -481,7 +487,7 @@ class LMModel(StreamingContainer):
         # depformer_input is [B, 1, depformer_dim].
         # The streaming state of the depformer ensures that the proper layer is run.
         dep_output = self.depformer(depformer_input)
-        logits = self.linears[depformer_cb_index](dep_output)
+        logits = self.linears[depformer_cb_index](self.depformer_norms[depformer_cb_index](dep_output))
         logits = logits[:, None]
         assert logits.dim() == 4, logits.shape  # [B, Ka, S, card]
         return logits
