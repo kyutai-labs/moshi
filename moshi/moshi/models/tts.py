@@ -19,6 +19,7 @@ from pathlib import Path
 
 import sphn
 import torch
+import tqdm.auto
 from safetensors.torch import load_file
 from sentencepiece import SentencePieceProcessor
 
@@ -355,7 +356,8 @@ class TTSModel:
         cfg_coef: classifier free guidance coefficient. Note that some models were trained with
             CFG distillation, e.g. CFG should not be used at inference time.
         final_padding: how many steps to sample past the last word.
-        n_q: how many audio codebooks (e.g. RVQ levels) to generate. Trade off between quality and speed.
+        n_q: how many audio codebooks (e.g. RVQ levels) to generate. Reasonable values
+            are between 8 and 32, higher means better quality but slower generation.
         max_gen_length: will stop generating after that many steps even if the text has not been fully consumed.
         padding_bonus: additive bonus for the padding logits, positive value will lead to slower speech.
         kwargs: other arguments for `moshi.models.lm.LMGen`.
@@ -676,3 +678,109 @@ class TTSModel:
         null_text = torch.full_like(prefix[:1], self.machine.token_ids.zero)
         prefix = torch.cat([null_text, prefix], dim=0)
         return prefix
+
+    def simple_generate(
+        self, text: str | list[str], voice: str | list[str], show_progress: bool = True
+    ) -> list[torch.Tensor]:
+        """Generate audio directly from text and voice name(s).
+
+        `text` and `voice` can be "broadcast" against each other like in NumPy: if one
+        is a list and the other a single item, the single item is repeated for each item
+        in the list. If both are lists, they must have the same length and voice[i]
+        will be used for text[i].
+
+        If you need more control, refer to the examples in
+        https://github.com/kyutai-labs/delayed-streams-modeling
+
+        Args:
+            text: text or list of texts to synthesize.
+            voice: voice name or list of voice names to use. Each entry can be a path
+                relative to the voice repo (see https://huggingface.co/kyutai/tts-voices)
+                or a path to a local .safetensors file with the voice embedding.
+            show_progress: whether to show a progress bar.
+
+        Returns:
+            list of 1D float32 tensors with the generated audio, sampled at `self.mimi.sample_rate`.
+            It's a list because the length of the generated audio can vary.
+        """
+        multiple_texts = isinstance(text, list)
+        multiple_voices = isinstance(voice, list)
+
+        texts: list[str]
+        voices: list[str]
+        if not multiple_texts and not multiple_voices:
+            texts = [text]
+            voices = [voice]
+        elif multiple_texts and not multiple_voices:
+            texts = text
+            voices = [voice] * len(text)
+        elif not multiple_texts and multiple_voices:
+            texts = [text] * len(voice)
+            voices = voice
+        elif multiple_texts and multiple_voices:
+            if len(text) != len(voice):
+                raise ValueError(
+                    f"Number of texts and voices must match, got {len(text)=} != {len(voice)=}"
+                )
+            if len(text) == 0:
+                raise ValueError("Got empty list, nothing to generate")
+            texts = text
+            voices = voice
+        else:
+            assert False, "Never happens, just making the type-checker happy"
+
+        entries_batch = [self.prepare_script([t], padding_between=1) for t in texts]
+        voice_paths = [
+            Path(v) if v.endswith(".safetensors") else self.get_voice_path(v)
+            for v in voices
+        ]
+
+        condition_attributes_batch = [
+            self.make_condition_attributes([vp], cfg_coef=2.0) for vp in voice_paths
+        ]
+
+        with tqdm.auto.tqdm(disable=not show_progress, desc="Generating") as pbar:
+
+            def _on_frame(frame):
+                if (frame != -1).all():
+                    pbar.update(1)
+
+            tts_result = self.generate(
+                entries_batch, condition_attributes_batch, on_frame=_on_frame
+            )
+
+        # No progress bar for Mimi decoding because it's quick
+        with self.mimi.streaming(len(entries_batch)), torch.no_grad():
+            pcms_timewise = []
+            for frame in tts_result.frames[self.delay_steps :]:
+                pcm = self.mimi.decode(frame[:, 1:, :])
+                pcm = torch.clip(pcm, -1, 1)
+                pcms_timewise.append(pcm)
+
+        # I'm not sure why but otherwise there is a little click at the beginning
+        # and removing two frames makes the largest end_steps match len(pcms_timewise)
+        pcms_timewise = pcms_timewise[2:]
+
+        pcms_batchwise = [
+            torch.concat(
+                [pcm[i, 0, :] for pcm in pcms_timewise[: tts_result.end_steps[i]]]
+            )
+            for i in range(len(entries_batch))
+        ]
+        return pcms_batchwise
+
+
+def get_default_tts_model(
+    n_q: int = 32, device: torch.device | str = "cuda"
+) -> TTSModel:
+    """Get the default TTS model with reasonable parameters.
+
+    Args:
+        n_q: how many audio codebooks (e.g. RVQ levels) to generate. Reasonable values
+            are between 8 and 32, higher means better quality but slower generation.
+    """
+    checkpoint_info = loaders.CheckpointInfo.from_hf_repo(DEFAULT_DSM_TTS_REPO)
+    tts_model = TTSModel.from_checkpoint_info(
+        checkpoint_info, n_q=n_q, temp=0.6, device=device
+    )
+    return tts_model
