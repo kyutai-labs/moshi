@@ -42,3 +42,8 @@ dev = [
     "pre-commit",
     "gradio-webrtc>=0.0.18"
 ]
+
+# Ruff is not enforced atm, but if you want to use it on your code
+# (e.g. via "Format modified lines" in VSCode), you'll get these settings
+[tool.ruff]
+line-length = 120

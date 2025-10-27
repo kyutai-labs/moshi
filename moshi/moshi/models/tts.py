@@ -416,6 +416,10 @@ class TTSModel:
             machine=machine, delay_steps=delay_steps, multistream=multistream,
             **kwargs)
         mimi_n_q = tts_model.n_q
+
+        if tts_model.n_q > tts_model.lm.n_q:
+            raise ValueError(f"Requested n_q={tts_model.n_q}, but model only supports at most n_q={tts_model.lm.n_q}.")
+
         if tts_model.multistream:
             mimi_n_q //= 2
             if tts_model.n_q < tts_model.lm.n_q:
@@ -535,7 +539,7 @@ class TTSModel:
                 if cfg_is_masked_until is not None:
                     cfg_is_masked_until.append(prefix.shape[-1] + self.delay_steps)
                 K, _ = prefix.shape
-                assert K == self.lm.num_codebooks
+                assert K == self.lm.num_codebooks, f"Prefix has {K} codebooks, expected {self.lm.num_codebooks}."
                 text_prefixes.append(deque(prefix[0].cpu().tolist()))
                 delays = [d + self.delay_steps for d in self.lm.delays[self.lm.audio_offset:]]
                 delayed = _delayed(prefix[self.lm.audio_offset:], delays, self.machine.token_ids.ungenerated)
@@ -643,6 +647,9 @@ class TTSModel:
             mask = None
             for idx in range(5):
                 if idx < len(voices):
+                    if voices[idx].suffix != ".safetensors":
+                        raise ValueError(f"Voice file must be a .safetensors file, got {voices[idx]}")
+
                     emb = load_file(voices[idx], device='cpu')['speaker_wavs']
                     assert emb.dim() == 3
                     if voice_tensor is None:
@@ -680,7 +687,7 @@ class TTSModel:
         return prefix
 
     def simple_generate(
-        self, text: str | list[str], voice: str | list[str], show_progress: bool = True
+        self, text: str | list[str], voice: str | list[str], cfg_coef: float = 2.0, show_progress: bool = True
     ) -> list[torch.Tensor]:
         """Generate audio directly from text and voice name(s).
 
@@ -697,6 +704,9 @@ class TTSModel:
             voice: voice name or list of voice names to use. Each entry can be a path
                 relative to the voice repo (see https://huggingface.co/kyutai/tts-voices)
                 or a path to a local .safetensors file with the voice embedding.
+            cfg_coef: Classifier-free guidance coefficient. A higher value makes the model
+                follow the voice conditioning more strictly, at the cost of some audio quality.
+                Set to 1.0 to disable CFG.
             show_progress: whether to show a progress bar.
 
         Returns:
@@ -735,9 +745,25 @@ class TTSModel:
             for v in voices
         ]
 
-        condition_attributes_batch = [
-            self.make_condition_attributes([vp], cfg_coef=2.0) for vp in voice_paths
-        ]
+        trained_with_cfg_distillation = bool(self.valid_cfg_conditionings)
+        if not trained_with_cfg_distillation:
+            # Pass the CFG coef to the model directly - otherwise we set it in the conditioning below
+            self.cfg_coef = cfg_coef
+
+        # Some models allow explicit conditioning on the speaker via cross-attention,
+        # while others can be conditioned by providing a voice prefix.
+        use_speaker_conditioning = self.multi_speaker
+        if use_speaker_conditioning:
+            condition_attributes_batch = [
+                self.make_condition_attributes([vp], cfg_coef=cfg_coef if trained_with_cfg_distillation else None)
+                for vp in voice_paths
+            ]
+            prefixes = None
+            prefix_length_frames = [0] * len(voice_paths)
+        else:
+            condition_attributes_batch = []
+            prefixes = [self.get_prefix(vp) for vp in voice_paths]
+            prefix_length_frames = [prefix.shape[-1] for prefix in prefixes]
 
         with tqdm.auto.tqdm(disable=not show_progress, desc="Generating") as pbar:
 
@@ -745,9 +771,7 @@ class TTSModel:
                 if (frame != -1).all():
                     pbar.update(1)
 
-            tts_result = self.generate(
-                entries_batch, condition_attributes_batch, on_frame=_on_frame
-            )
+            tts_result = self.generate(entries_batch, condition_attributes_batch, on_frame=_on_frame, prefixes=prefixes)
 
         # No progress bar for Mimi decoding because it's quick
         with self.mimi.streaming(len(entries_batch)), torch.no_grad():
@@ -762,9 +786,7 @@ class TTSModel:
         pcms_timewise = pcms_timewise[2:]
 
         pcms_batchwise = [
-            torch.concat(
-                [pcm[i, 0, :] for pcm in pcms_timewise[: tts_result.end_steps[i]]]
-            )
+            torch.concat([pcm[i, 0, :] for pcm in pcms_timewise[prefix_length_frames[i] : tts_result.end_steps[i]]])
             for i in range(len(entries_batch))
         ]
         return pcms_batchwise
