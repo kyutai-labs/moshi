@@ -30,6 +30,7 @@ from .lm_utils import ScaledEmbedding
 
 DEFAULT_DSM_TTS_REPO = 'kyutai/tts-1.6b-en_fr'
 DEFAULT_DSM_TTS_VOICE_REPO = 'kyutai/tts-voices'
+PUBLIC_DATA_DSM_TTS_REPO = 'kyutai/tts-0.75b-en-public'
 
 
 @dataclass
@@ -696,16 +697,20 @@ class TTSModel:
         in the list. If both are lists, they must have the same length and voice[i]
         will be used for text[i].
 
+        Accepted values for `voice` entries:
+        - a path to a .wav relative to the voice repo: https://huggingface.co/kyutai/tts-voices.
+        - a path to a .safetensors file with the voice embeddings, will be interpreted as a local path.
+        - for `kyutai/tts-0.75b-en-public` (in general, models conditioned via audio prefix and not
+            a voice embedding): a path to a local audio file, specified as `file://path/to/voice.wav`.
+
         If you need more control, refer to the examples in
         https://github.com/kyutai-labs/delayed-streams-modeling
 
         Args:
             text: text or list of texts to synthesize.
-            voice: voice name or list of voice names to use. Each entry can be a path
-                relative to the voice repo (see https://huggingface.co/kyutai/tts-voices)
-                or a path to a local .safetensors file with the voice embedding.
+            voice: voice or list of voices to use. See above for what the possible values are.
             cfg_coef: Classifier-free guidance coefficient. A higher value makes the model
-                follow the voice conditioning more strictly, at the cost of some audio quality.
+                follow the voice and text conditioning more strictly, at the cost of some audio quality.
                 Set to 1.0 to disable CFG.
             show_progress: whether to show a progress bar.
 
@@ -800,9 +805,26 @@ def get_default_tts_model(
     Args:
         n_q: how many audio codebooks (e.g. RVQ levels) to generate. Reasonable values
             are between 8 and 32, higher means better quality but slower generation.
+        device: device to load the model on.
     """
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(DEFAULT_DSM_TTS_REPO)
     tts_model = TTSModel.from_checkpoint_info(
         checkpoint_info, n_q=n_q, temp=0.6, device=device
+    )
+    return tts_model
+
+
+def get_public_data_tts_model(
+    device: torch.device | str = "cuda"
+) -> TTSModel:
+    """Get the public-data TTS model with reasonable parameters.
+
+    Args:
+        device: device to load the model on.
+    """
+    checkpoint_info = loaders.CheckpointInfo.from_hf_repo(PUBLIC_DATA_DSM_TTS_REPO)
+    tts_model = TTSModel.from_checkpoint_info(
+        # This model only supports 16 RVQ levels
+        checkpoint_info, n_q=16, temp=0.6, device=device
     )
     return tts_model
