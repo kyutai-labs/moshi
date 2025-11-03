@@ -14,6 +14,7 @@ dependencies = [
     "torch >= 2.2.0, < 2.8",
     "aiohttp>=3.10.5, <3.12",
     "pytest >= 8.3.3",
+    "tqdm >= 4.48",
 ]
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
@@ -42,3 +43,8 @@ dev = [
     "pre-commit",
     "gradio-webrtc>=0.0.18"
 ]
+
+# Ruff is not enforced atm, but if you want to use it on your code
+# (e.g. via "Format modified lines" in VSCode), you'll get these settings
+[tool.ruff]
+line-length = 120
