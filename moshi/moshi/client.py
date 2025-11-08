@@ -136,9 +136,20 @@ class Connection:
 
     async def run(self) -> None:
         with self._in_stream, self._out_stream:
-            await asyncio.gather(
-                self._recv_loop(), self._decoder_loop(), self._queue_loop()
-            )
+            tasks = [
+                asyncio.create_task(self._recv_loop()),
+                asyncio.create_task(self._decoder_loop()),
+                asyncio.create_task(self._queue_loop())
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+            # Cancel any remaining tasks
+            for task in pending:
+                task.cancel()
+
+            # Wait for cancelled tasks to complete
+            if pending:
+                await asyncio.wait(pending, return_when=asyncio.ALL_COMPLETED)
 
 
 async def run(printer: AnyPrinter, args):
