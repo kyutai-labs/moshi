@@ -833,10 +833,11 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         self.positional_scale = positional_scale
         self.betas = betas
 
-        assert positional_embedding in {"sin", "rope", "sin_rope", "none"}
+        assert positional_embedding in {"sin", "rope", "sin_rope", "none", "rope_concat"}
         self.rope: tp.Optional[RotaryEmbedding] = None
-        if self.positional_embedding in {"rope", "sin_rope"}:
-            self.rope = RotaryEmbedding(max_period=max_period)
+        if self.positional_embedding in {"rope", "sin_rope", "rope_concat"}:
+            interleave = self.positional_embedding != "rope_concat"
+            self.rope = RotaryEmbedding(interleave=interleave, max_period=max_period)
 
         self.checkpointing = checkpointing
 
