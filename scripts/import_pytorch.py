@@ -58,6 +58,7 @@ def import_model(
             config[key] = tr_args[key]
         else:
             print(f"Missing config key {key}")
+    print("HEYYYY")
     print(config)
     if config['norm'].startswith('real_'):
         config['norm'] = config['norm'].removeprefix('real_')
