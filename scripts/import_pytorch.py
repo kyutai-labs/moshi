@@ -100,8 +100,27 @@ def import_model(
     for idx in range(cfg.transformer_lm.depformer_num_layers):
         in_proj_key = f"depformer.layers.{idx}.self_attn.in_proj_weight"
         in_proj = model[in_proj_key]
-        in_proj = in_proj.view(num_weights, -1, *in_proj.shape[1:])
-        model[in_proj_key] = in_proj[:kept_weights].view(-1, *in_proj.shape[2:]).contiguous()
+        d_model = cfg.transformer_lm.dim
+        num_heads = cfg.transformer_lm.num_heads
+        kv_repeat = cfg.transformer_lm.kv_repeat
+        num_kv = num_heads // kv_repeat
+        kv_dim = (d_model // num_heads) * num_kv
+        out_dim = d_model + 2 * kv_dim
+
+        for idx in range(cfg.transformer_lm.depformer_num_layers):
+            in_proj_key = f"depformer.layers.{idx}.self_attn.in_proj_weight"
+            W = model[in_proj_key]                      # [num_weights * out_dim, d_model]
+            
+            # reshape along actual out_dim
+            W = W.view(num_weights, out_dim, d_model)   # correct shape
+            W = W[:kept_weights]                        # trim unused heads
+            model[in_proj_key] = W.view(-1, d_model).contiguous()
+
+            out_proj_key = f"depformer.layers.{idx}.self_attn.out_proj.weight"
+            W = model[out_proj_key]                     # [num_weights * d_model, d_model]
+            W = W.view(num_weights, d_model, d_model)   # d_model unaffected by kv_repeat
+            W = W[:kept_weights]
+            model[out_proj_key] = W.view(-1, d_model).contiguous()
         out_proj_key = f"depformer.layers.{idx}.self_attn.out_proj.weight"
         out_proj = model[out_proj_key]
         out_proj = out_proj.view(num_weights, -1, *out_proj.shape[1:])
