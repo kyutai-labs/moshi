@@ -17,6 +17,7 @@ import torch
 def import_model(
     args,
 ) -> None:
+    print("HEYYYY")
     args.out_folder.mkdir(exist_ok=True, parents=True)
     out_config = args.out_folder / 'config.json'
     out_file = args.out_folder / 'checkpoint.safetensors'
