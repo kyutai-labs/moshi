@@ -12,60 +12,73 @@ from ..utils.compile import torch_compile_lazy
 def apply_rope(
     q: torch.Tensor,
     k: torch.Tensor,
-    offset: torch.Tensor,
+    offset: torch.Tensor | int = 0,
     max_period: float = 10_000,
+    interleave: bool = True,
     time_before_heads: bool = False,
 ):
     """
     Args:
-        q (torch.Tensor): queries, shape `[B, T, H, D]`.
-        k (torch.Tensor): keys, shape `[B, T, H, D]`.
-        offset (int): current offset, e.g. when streaming.
-        max_period (float): maximum period for the cos and sin.
-        time_before_heads (bool):  if True, expected [B, T, H, D], else [B, H, T ,D]
+        q, k: [B, T, H, D] ou [B, H, T, D] selon `time_before_heads`
+        offset: position offset (int ou tensor)
+        max_period: période maximale (RoPE)
+        interleave: si False, le layout est [r..., i...]
+        time_before_heads: si True, format [B, T, H, D], sinon [B, H, T, D]
     """
-
+    # --- gestion du format d'entrée ---
     if time_before_heads:
         B, T, H, D = q.shape
     else:
         B, H, T, D = q.shape
+
     assert k.shape == q.shape
-    assert D > 0
     assert D % 2 == 0
-    assert max_period > 0
 
     ds = torch.arange(D // 2, device=q.device, dtype=torch.float32)
     freqs = torch.exp(ds * (-math.log(max_period) * 2 / D))
-    ts = offset.float().view(-1, 1) + torch.arange(T, device=q.device, dtype=torch.float32)
+
+    ts = (
+        offset.float().view(-1, 1) + torch.arange(T, device=q.device, dtype=torch.float32)
+        if isinstance(offset, torch.Tensor)
+        else torch.arange(offset, offset + T, device=q.device, dtype=torch.float32)
+    )
+
     if time_before_heads:
         ts = ts.view(B, -1, 1, 1)
     else:
         ts = ts.view(B, 1, -1, 1)
 
-    dims = q.shape[:-1]
-    q = q.view(*dims, D // 2, 2)
-    k = k.view(*dims, D // 2, 2)
-
-    # convention is `r` suffix is real part, `i` is imaginary.
-    qr = q[..., 0].float()
-    qi = q[..., 1].float()
-
-    kr = k[..., 0].float()
-    ki = k[..., 1].float()
-
     rotr = torch.cos(freqs * ts)
     roti = torch.sin(freqs * ts)
+
+    # --- séparation réelle / imaginaire selon le layout ---
+    if interleave:
+        # [r0,i0,r1,i1,...]
+        q = q.view(*q.shape[:-1], D // 2, 2)
+        k = k.view(*k.shape[:-1], D // 2, 2)
+        qr, qi = q[..., 0].float(), q[..., 1].float()
+        kr, ki = k[..., 0].float(), k[..., 1].float()
+    else:
+        # [r..., i...]
+        qr, qi = q[..., : D // 2].float(), q[..., D // 2 :].float()
+        kr, ki = k[..., : D // 2].float(), k[..., D // 2 :].float()
+
+    # --- rotation RoPE ---
     qor = qr * rotr - qi * roti
     qoi = qr * roti + qi * rotr
-
     kor = kr * rotr - ki * roti
     koi = kr * roti + ki * rotr
 
     dtype = q.dtype
-    qo = torch.stack([qor.to(dtype), qoi.to(dtype)], dim=-1)
-    ko = torch.stack([kor.to(dtype), koi.to(dtype)], dim=-1)
+    if interleave:
+        qo = torch.stack([qor.to(dtype), qoi.to(dtype)], dim=-1).view(*q.shape[:-2], D)
+        ko = torch.stack([kor.to(dtype), koi.to(dtype)], dim=-1).view(*k.shape[:-2], D)
+    else:
+        qo = torch.cat([qor.to(dtype), qoi.to(dtype)], dim=-1)
+        ko = torch.cat([kor.to(dtype), koi.to(dtype)], dim=-1)
 
-    return qo.view(*dims, D), ko.view(*dims, D)
+    return qo, ko
+
 
 
 class RotaryEmbedding(nn.Module):
@@ -75,9 +88,10 @@ class RotaryEmbedding(nn.Module):
         max_period (float): Maximum period of the rotation frequencies.
     """
 
-    def __init__(self, max_period: float = 10000.0):
+    def __init__(self, interleave: bool, max_period: float = 10000.0):
         super().__init__()
         self.max_period = max_period
+        self.interleave = interleave
 
     def forward(
         self,
@@ -87,4 +101,4 @@ class RotaryEmbedding(nn.Module):
         time_before_heads: bool = False,
     ):
         """Apply rope rotation to query or key tensor."""
-        return apply_rope(q, k, offset, self.max_period, time_before_heads)
+        return apply_rope(q, k, offset, self.interleave, self.max_period, time_before_heads)
