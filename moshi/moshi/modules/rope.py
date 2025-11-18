@@ -31,7 +31,14 @@ def apply_rope(
     else:
         B, H, T, D = q.shape
 
-    assert k.shape == q.shape
+    assert q.shape[0] == k.shape[0]   # B
+    if time_before_heads:
+        assert q.shape[1] == k.shape[1]  # T
+        assert q.shape[3] == k.shape[3]  # D
+    else:
+        assert q.shape[2] == k.shape[2]  # T
+        assert q.shape[3] == k.shape[3]  # D
+
     assert D % 2 == 0
 
     ds = torch.arange(D // 2, device=q.device, dtype=torch.float32)

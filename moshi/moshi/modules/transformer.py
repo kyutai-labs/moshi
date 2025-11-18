@@ -387,7 +387,6 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             assert not causal, "causal and cross attention makes no sense."
             # We do not want to activate the streaming KVCache if we are a cross attention.
             # self.set_streaming_detached(True)
-        print(kv_repeat)
         out_dim = embed_dim
         num_kv = num_heads // kv_repeat
         kv_dim = (embed_dim // num_heads) * num_kv
