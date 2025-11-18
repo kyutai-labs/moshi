@@ -212,11 +212,18 @@ class RingKVCache:
         dtype: torch.dtype = torch.bfloat16,
     ):
         self.capacity = capacity
-        self.cache = torch.zeros(
-            (2, batch_size, num_heads, capacity, dim_per_head),
-            device=device,
-            dtype=dtype,
-        )
+        if num_heads != 16:
+            self.cache = torch.zeros(
+                (2, batch_size, num_heads, capacity, dim_per_head),
+                device=device,
+                dtype=dtype,
+            )
+        else:
+            self.cache = torch.zeros(
+                (2, batch_size, num_heads//2, capacity, dim_per_head),
+                device=device,
+                dtype=dtype,
+            )
         self.respect_exec_mask = respect_exec_mask
         if self.respect_exec_mask:
             self.end_offset = torch.zeros(batch_size, device=device, dtype=torch.long)
