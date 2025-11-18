@@ -565,9 +565,11 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         if self.rope:
             q, k = self.rope(q, k, offset, time_before_heads=False)
 
+        print("q k v shape before complete :", q.shape, k.shape, v.shape)
+
         k, v, pos_k = self._complete_kv(k, v)
 
-        print("q k v shape before:", q.shape, k.shape, v.shape)
+        print("q k v shape before expand:", q.shape, k.shape, v.shape)
         
         if self.kv_repeat > 1:
             k = expand_repeated_kv(k, self.kv_repeat)
