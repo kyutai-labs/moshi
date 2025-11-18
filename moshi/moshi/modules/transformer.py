@@ -212,18 +212,11 @@ class RingKVCache:
         dtype: torch.dtype = torch.bfloat16,
     ):
         self.capacity = capacity
-        if num_heads != 16:
-            self.cache = torch.zeros(
-                (2, batch_size, num_heads, capacity, dim_per_head),
-                device=device,
-                dtype=dtype,
-            )
-        else:
-            self.cache = torch.zeros(
-                (2, batch_size, num_heads//2, capacity, dim_per_head),
-                device=device,
-                dtype=dtype,
-            )
+        self.cache = torch.zeros(
+            (2, batch_size, num_heads, capacity, dim_per_head),
+            device=device,
+            dtype=dtype,
+        )
         self.respect_exec_mask = respect_exec_mask
         if self.respect_exec_mask:
             self.end_offset = torch.zeros(batch_size, device=device, dtype=torch.long)
@@ -478,7 +471,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 capacity = self.context
 
             kv_cache = RingKVCache(
-                batch_size, self.num_heads, dim_per_head, capacity,
+                batch_size, self.num_heads//self.kv_repeat, dim_per_head, capacity,
                 respect_exec_mask=not self.weights_per_step, device=device, dtype=dtype
             )
         return _MHAState(
@@ -576,7 +569,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
 
         k, v, pos_k = self._complete_kv(k, v)
 
-        print("q k v shape before expand:", q.shape, k.shape, v.shape)
+        print("q k v shape before:", q.shape, k.shape, v.shape)
         
         if self.kv_repeat > 1:
             k = expand_repeated_kv(k, self.kv_repeat)
