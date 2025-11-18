@@ -558,6 +558,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
             )
             else:
+                print("kh: ", self.num_heads//self.kv_repeat)
                 q = rearrange(projected[:, :, :self.embed_dim], "b t (h d) -> b h t d", h=self.num_heads)
                 k, v = rearrange(projected[:, :, self.embed_dim:],
                                "b t (p kh d) -> p b kh t d", p=2, kh=self.num_heads//self.kv_repeat)
