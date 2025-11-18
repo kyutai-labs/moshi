@@ -33,15 +33,17 @@ def import_model(
     if cfg.tokens.multistream:
         n_q *= 2
 
+    include_depformer = cfg['transformer_lm']['depformer']
+
     in_n_q = n_q
-    out_n_q = args.out_n_q or n_q
+    out_n_q = (args.out_n_q or n_q) if include_depformer else 0
     print(f"in_n_q: {in_n_q}, out_n_q: {out_n_q}")
 
     keys = [
         'dim', 'text_card', 'existing_text_padding_id', 'num_heads', 'num_layers', 'hidden_scale', 'causal',
         'layer_scale', 'context', 'max_period', 'gating', 'norm', 'positional_embedding',
         'depformer_dim', 'depformer_num_heads', 'depformer_num_layers', 'depformer_dim_feedforward',
-        'depformer_layer_scale', 'depformer_multi_linear',
+        'depformer_layer_scale', 'depformer_multi_linear', 'depformer_norm',
         'depformer_max_period', 'depformer_gating', 'depformer_pos_emb', 'depformer_weights_per_step',
         'depformer_low_rank_embeddings', 'demux_second_stream', 'kv_repeat', 'depformer_kv_repeat',
         'text_card_out']
@@ -71,6 +73,7 @@ def import_model(
         config['tts_config'] = {
             'audio_delay': cfg.interleaver.audio_delay,
             'second_stream_ahead': kw_interleaver.get('second_stream_ahead', 0),
+            'multistream': cfg.tokens.multistream,
         }
 
     config['model_id'] = {}
@@ -84,7 +87,6 @@ def import_model(
     if schedule is None:
         has_schedule = False
         schedule = list(range(in_n_q))
-    num_weights = max(schedule) + 1
     schedule = schedule[:out_n_q]
     if has_schedule:
         config['depformer_weights_per_step_schedule'] = schedule
@@ -94,38 +96,47 @@ def import_model(
         config.update(extra)
     out_config.write_text(json.dumps(config, indent=2))
 
-    kept_weights = max(schedule) + 1
-    print(f"Number of dep weights: {num_weights}, keeping {kept_weights}")
+    if include_depformer:
+        schedule = cfg.transformer_lm.get('depformer_weights_per_step_schedule', None)
+        if schedule is None:
+            schedule = list(range(in_n_q))
 
-    for idx in range(cfg.transformer_lm.depformer_num_layers):
-        in_proj_key = f"depformer.layers.{idx}.self_attn.in_proj_weight"
-        in_proj = model[in_proj_key]
-        in_proj = in_proj.view(num_weights, -1, *in_proj.shape[1:])
-        model[in_proj_key] = in_proj[:kept_weights].view(-1, *in_proj.shape[2:]).contiguous()
-        out_proj_key = f"depformer.layers.{idx}.self_attn.out_proj.weight"
-        out_proj = model[out_proj_key]
-        out_proj = out_proj.view(num_weights, -1, *out_proj.shape[1:])
-        model[out_proj_key] = out_proj[:kept_weights].view(-1, *out_proj.shape[2:]).contiguous()
+        num_weights = max(schedule) + 1
+        schedule = schedule[:out_n_q]
+        kept_weights = max(schedule) + 1
+        print(f"Number of dep weights: {num_weights}, keeping {kept_weights}")
 
-    # For mimi inference, we trim the depformer layer that are unused.
-    for dep_idx in range(out_n_q - 1, in_n_q - 1):
-        del model[f"depformer_emb.{dep_idx}.weight"]
-        if cfg.transformer_lm.get('depformer_low_rank_embeddings'):
-            del model[f"depformer_emb.{dep_idx}.low_rank.weight"]
+        print(f"DepFormer num layers {cfg.transformer_lm.depformer_num_layers}", flush=True)
+
+        for idx in range(cfg.transformer_lm.depformer_num_layers):
+            in_proj_key = f"depformer.layers.{idx}.self_attn.in_proj_weight"
+            in_proj = model[in_proj_key]
+            in_proj = in_proj.view(num_weights, -1, *in_proj.shape[1:])
+            model[in_proj_key] = in_proj[:kept_weights].view(-1, *in_proj.shape[2:]).contiguous()
+            out_proj_key = f"depformer.layers.{idx}.self_attn.out_proj.weight"
+            out_proj = model[out_proj_key]
+            out_proj = out_proj.view(num_weights, -1, *out_proj.shape[1:])
+            model[out_proj_key] = out_proj[:kept_weights].view(-1, *out_proj.shape[2:]).contiguous()
+
+        # For mimi inference, we trim the depformer layer that are unused.
+        for dep_idx in range(out_n_q - 1, in_n_q - 1):
+            del model[f"depformer_emb.{dep_idx}.weight"]
+            if cfg.transformer_lm.get('depformer_low_rank_embeddings'):
+                del model[f"depformer_emb.{dep_idx}.low_rank.weight"]
+        for real_idx in range(kept_weights, num_weights):
+            model.pop(f"depformer_in.{real_idx}.weight")
+            for idx in range(cfg.transformer_lm.depformer_num_layers):
+                model.pop(f"depformer.layers.{idx}.gating.{real_idx}.linear_in.weight")
+                model.pop(f"depformer.layers.{idx}.gating.{real_idx}.linear_out.weight")
     for dep_idx in range(out_n_q, in_n_q):
         del model[f"linears.{dep_idx}.weight"]
-    for real_idx in range(kept_weights, num_weights):
-        model.pop(f"depformer_in.{real_idx}.weight")
-        for idx in range(cfg.transformer_lm.depformer_num_layers):
-            model.pop(f"depformer.layers.{idx}.gating.{real_idx}.linear_in.weight")
-            model.pop(f"depformer.layers.{idx}.gating.{real_idx}.linear_out.weight")
 
     save_file(model, out_file)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="moshi_import", description="Imports moshi checkpoints"
+        prog="moshi_import", description="Imports Mimi checkpoints"
     )
     parser.add_argument("--out_n_q", type=int,
                         help="Number of codebooks to keep in the Depth Transformer.")

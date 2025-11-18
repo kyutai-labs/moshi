@@ -44,11 +44,11 @@ def min_p_sampling(
     probs = mx.softmax(logits * (1 / temperature), axis=-1)
 
     # Indices sorted in decreasing order
-    sorted_indices = mx.argsort(-logits).squeeze(0)
-    sorted_probs = probs[..., sorted_indices]
+    sorted_indices = mx.argsort(-logits, axis=-1)
+    sorted_probs = mx.take_along_axis(probs, sorted_indices, axis=-1)
 
     # Top probability
-    top_probs = probs[..., sorted_indices[0]]
+    top_probs = mx.take_along_axis(probs, sorted_indices[..., :1], axis=-1)
 
     # Calculate the min_p threshold
     scaled_min_p = min_p * top_probs
@@ -61,8 +61,10 @@ def min_p_sampling(
     selected_probs = mx.where(tokens_to_remove, 0, sorted_probs)
 
     # Return sampled token
-    sorted_token = mx.random.categorical(mx.log(selected_probs))
-    return sorted_indices[sorted_token]
+    sorted_token = mx.random.categorical(mx.log(selected_probs), axis=-1)
+    return mx.take_along_axis(sorted_indices, sorted_token[..., None], axis=-1).squeeze(
+        -1
+    )
 
 
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
@@ -101,14 +103,14 @@ def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.arr
         top_p: The cumulative probability threshold for top-p filtering.
         temperature: Temperature parameter for softmax distribution reshaping.
     Returns:
-        token selected based on the top-p criterion.
+        tokens selected based on the top-p criterion.
     """
     # referenced implementation from https://github.com/huggingface/transformers/blob/main/src/transformers/generation/logits_process.py#L449-L460  # noqa
     probs = mx.softmax(logits * (1 / temperature), axis=-1)
 
     # sort probs in ascending order
     sorted_indices = mx.argsort(probs, axis=-1)
-    sorted_probs = probs[..., sorted_indices.squeeze(0)]
+    sorted_probs = mx.take_along_axis(probs, sorted_indices, axis=-1)
 
     cumulative_probs = mx.cumsum(sorted_probs, axis=-1)
 
@@ -119,10 +121,10 @@ def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.arr
         0,
     )
 
-    sorted_token = mx.random.categorical(mx.log(top_probs))
-    token = sorted_indices.squeeze(0)[sorted_token]
+    sorted_token = mx.random.categorical(mx.log(top_probs), axis=-1)
+    token = mx.take_along_axis(sorted_indices, sorted_token[..., None], axis=-1)
 
-    return token
+    return token.squeeze(-1)
 
 
 @partial(mx.compile, inputs=mx.random.state, outputs=mx.random.state)
@@ -160,4 +162,4 @@ class Sampler:
             else:
                 token = categorical_sampling(logits, self.temp)
 
-        return token, logprobs
+        return token.astype(mx.int32), logprobs

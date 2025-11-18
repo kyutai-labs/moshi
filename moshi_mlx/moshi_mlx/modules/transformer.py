@@ -3,6 +3,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass
+
 from .kv_cache import KVCache, RotatingKVCache
 
 import mlx.core as mx
@@ -56,6 +57,60 @@ class LayerScale(nn.Module):
         return xs * self.scale
 
 
+@dataclass
+class LayerCache:
+    self_attn: KVCache | RotatingKVCache
+    cross_attn: tuple[mx.array, mx.array] | None = None
+
+    def reset(self):
+        self.self_attn.reset()
+        self.cross_attn = None
+
+
+class CrossAttention(nn.Module):
+    def __init__(self, cfg: TransformerConfig):
+        super().__init__()
+
+        num_kv = cfg.num_heads // cfg.kv_repeat
+        out_dim = cfg.d_model + 2 * num_kv * cfg.d_model // cfg.num_heads
+        self.cfg = cfg
+        self.in_proj = nn.Linear(cfg.d_model, out_dim, bias=cfg.bias_attn)
+        self.out_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=cfg.bias_attn)
+        self.scale = cfg.head_dim ** (-0.5)
+
+    def __call__(
+        self,
+        xs: mx.array,
+        cross_attention_src: mx.array,
+        cache: LayerCache,
+    ) -> mx.array:
+        # TODO: Add some cross-attention kv caching.
+        assert self.cfg.kv_repeat == 1, "only kv_repeat==1 is supported"
+
+        b, t, hd = xs.shape
+        qkv_w = self.in_proj.weight
+        q = xs @ qkv_w[: self.cfg.d_model].T
+        q = q.reshape(b, t, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
+
+        if cache.cross_attn is None:
+            b_kv, t_kv, hd_kv = cross_attention_src.shape
+            assert b == b_kv
+            assert hd == hd_kv
+            assert "bias" not in self.in_proj
+            k = cross_attention_src @ qkv_w[self.cfg.d_model : 2 * self.cfg.d_model].T
+            k = k.reshape(b, t_kv, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
+            v = cross_attention_src @ qkv_w[2 * self.cfg.d_model :].T
+            v = v.reshape(b, t_kv, self.cfg.num_heads, self.cfg.head_dim).swapaxes(1, 2)
+            cache.cross_attn = k, v
+        else:
+            k, v = cache.cross_attn
+
+        xs = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale)
+        xs = xs.transpose(0, 2, 1, 3).reshape(b, t, hd)
+        xs = self.out_proj(xs)
+        return xs
+
+
 class Attention(nn.Module):
     def __init__(self, cfg: TransformerConfig):
         super().__init__()
@@ -90,6 +145,8 @@ class Attention(nn.Module):
         k, v = cache.update_and_fetch(k, v)
         k_len = k.shape[2]
         k_target_len = t + min(self.cfg.context, k_len - t)
+        # TODO(laurent): the trimming below is incorrect for RotatingKVCache.
+        # https://github.com/kyutai-labs/delayed-streams-modeling/issues/106
         if k_target_len < k_len:
             k = k[:, :, k_len - k_target_len :]
             v = v[:, :, k_len - k_target_len :]
@@ -134,7 +191,6 @@ class TransformerLayer(nn.Module):
         super().__init__()
 
         assert not cfg.use_conv_block, "conv-block is not supported"
-        assert not cfg.cross_attention, "cross-attn is not supported"
         if cfg.gating:
             self.gating = MlpGating(cfg)
         else:
@@ -157,15 +213,41 @@ class TransformerLayer(nn.Module):
             self.layer_scale_1 = Id()
             self.layer_scale_2 = Id()
         self.self_attn = Attention(cfg)
+        self.cfg = cfg
+
+        if cfg.cross_attention:
+            # Always use layer-norm for the cross-attention.
+            self.norm_cross = nn.LayerNorm(cfg.d_model, 1e-5)
+            self.cross_attention = CrossAttention(cfg)
+        else:
+            self.cross_attention = None
+
+    def _cross_attention_block(
+        self,
+        x: mx.array,
+        cache: LayerCache,
+        cross_attention_src: mx.array,
+    ) -> mx.array:
+        assert self.cross_attention is not None
+        x_orig = x
+        x = self.norm_cross(x)
+        update = self.cross_attention(x, cross_attention_src, cache)
+        return x_orig + update
 
     def __call__(
         self,
         xs: mx.array,
-        cache: KVCache | RotatingKVCache,
+        cache: LayerCache,
+        cross_attention_src: None | mx.array = None,
     ) -> mx.array:
         n1 = self.norm1(xs)
-        n1 = self.self_attn(n1, cache=cache)
+        n1 = self.self_attn(n1, cache=cache.self_attn)
         xs = xs + self.layer_scale_1(n1)
+        if self.cross_attention is not None:
+            assert cross_attention_src is not None
+            xs = self._cross_attention_block(xs, cache, cross_attention_src)
+        else:
+            assert cross_attention_src is None
         xs = xs + self.layer_scale_2(self.gating(self.norm2(xs)))
         return xs
 
@@ -180,26 +262,29 @@ class Transformer(nn.Module):
     def __call__(
         self,
         xs: mx.array,
-        cache: list[KVCache] | list[RotatingKVCache],
+        cache: list[LayerCache],
+        cross_attention_src: None | mx.array = None,
     ) -> mx.array:
         for layer, c in zip(self.layers, cache):
-            xs = layer(xs, cache=c)
+            xs = layer(xs, cache=c, cross_attention_src=cross_attention_src)
         return xs
 
-    def make_cache(self) -> list[KVCache]:
+    def make_cache(self) -> list[LayerCache]:
         num_kv_heads = self.cfg.num_heads // self.cfg.kv_repeat
         return [
-            KVCache(head_dim=self.cfg.head_dim, n_kv_heads=num_kv_heads)
+            LayerCache(KVCache(head_dim=self.cfg.head_dim, n_kv_heads=num_kv_heads))
             for _ in self.layers
         ]
 
-    def make_rot_cache(self) -> list[RotatingKVCache]:
+    def make_rot_cache(self) -> list[LayerCache]:
         num_kv_heads = self.cfg.num_heads // self.cfg.kv_repeat
         return [
-            RotatingKVCache(
-                head_dim=self.cfg.head_dim,
-                n_kv_heads=num_kv_heads,
-                max_size=self.cfg.max_seq_len,
+            LayerCache(
+                RotatingKVCache(
+                    head_dim=self.cfg.head_dim,
+                    n_kv_heads=num_kv_heads,
+                    max_size=self.cfg.max_seq_len,
+                )
             )
             for _ in self.layers
         ]
@@ -228,13 +313,14 @@ class ProjectedTransformer(nn.Module):
     def __call__(
         self,
         xs: mx.array,
-        cache: list[KVCache] | list[RotatingKVCache],
+        cache: list[LayerCache],
+        cross_attention_src: None | mx.array = None,
     ) -> list[mx.array]:
         if self.conv_layout:
             xs = xs.swapaxes(1, 2)
         if self.input_proj is not None:
             xs = self.input_proj(xs)
-        xs = self.transformer(xs, cache=cache)
+        xs = self.transformer(xs, cache=cache, cross_attention_src=cross_attention_src)
         outs = []
         for output_proj in self.output_projs:
             if output_proj is None:
@@ -246,8 +332,8 @@ class ProjectedTransformer(nn.Module):
             outs.append(out)
         return outs
 
-    def make_cache(self) -> list[KVCache]:
+    def make_cache(self) -> list[LayerCache]:
         return self.transformer.make_cache()
 
-    def make_rot_cache(self) -> list[RotatingKVCache]:
+    def make_rot_cache(self) -> list[LayerCache]:
         return self.transformer.make_rot_cache()

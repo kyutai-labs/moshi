@@ -13,7 +13,7 @@ try:
     from huggingface_hub.errors import EntryNotFoundError
 except ImportError:
     from huggingface_hub.utils import EntryNotFoundError  # pyright: ignore
-from safetensors.torch import load_model, load_file
+from safetensors.torch import load_file
 import sentencepiece
 import torch
 import typing as tp
@@ -78,6 +78,14 @@ _transformer_kwargs = {
     "input_dimension": _seanet_kwargs["dimension"],
     "output_dimensions": [_seanet_kwargs["dimension"]],
 }
+_mimi_config = {
+    "sample_rate": 24000,
+    "channels": 1,
+    "frame_rate": 12.5,
+    "seanet": _seanet_kwargs,
+    "quantizer": _quantizer_kwargs,
+    "transformer": _transformer_kwargs,
+}
 
 _lm_kwargs = {
     "dim": 4096,
@@ -111,15 +119,23 @@ _lm_kwargs = {
 }
 
 
-def hf_get(filename: str | Path, hf_repo: str | None = None) -> Path:
+def hf_get(filename: str | Path, hf_repo: str | None = None,
+           check_local_file_exists: bool = False) -> Path:
     if isinstance(filename, Path):
         return filename
     if filename.startswith("hf://"):
-        parts = filename[5:].split("/")
+        parts = filename.removeprefix("hf://").split("/")
         repo_name = parts[0] + "/" + parts[1]
         filename = "/".join(parts[2:])
         return Path(hf_hub_download(repo_name, filename))
+    elif filename.startswith("file://"):
+        # Provide a way to force the read of a local file.
+        filename = filename.removeprefix("file://")
+        return Path(filename)
     elif hf_repo is not None:
+        if check_local_file_exists:
+            if Path(filename).exists():
+                return Path(filename)
         return Path(hf_hub_download(hf_repo, filename))
     else:
         return Path(filename)
@@ -137,10 +153,12 @@ class CheckpointInfo:
         lm_config: config for instantiating the LM model.
             Can be None if the original Moshi 7B config should be used.
         raw_config: raw config, including original keys not intended for the LM.
+        mimi_config: configuration for the Mimi codec.
         model_type: indicate the intended use, should be `moshi` or `hibiki`.
         lora_weights: path to an optional checkpoint with lora weights.
         lm_gen_config: optional default params to use for generation with this model.
         tts_config: optional TTS specific configuration.
+        stt_config: optional STT specific configuration.
         model_id: optional dict containing tracability information on the model origin, in particular
             its signature and epoch.
     """
@@ -150,10 +168,12 @@ class CheckpointInfo:
     tokenizer: Path
     lm_config: dict | None = None
     raw_config: dict | None = None
+    mimi_config: dict | None = None
     model_type: str = "moshi"
     lora_weights: Path | None = None
     lm_gen_config: dict = field(default_factory=dict)
     tts_config: dict = field(default_factory=dict)
+    stt_config: dict = field(default_factory=dict)
     model_id: dict = field(default_factory=dict)
 
     @staticmethod
@@ -163,6 +183,7 @@ class CheckpointInfo:
         mimi_weights: Path | str | None = None,
         tokenizer: Path | str | None = None,
         config_path: Path | str | None = None,
+        mimi_config_path: Path | str | None = None,
         lora_weights: Path | str | None = None,
     ) -> "CheckpointInfo":
         """Downloads the checkpoints from the given repo, along with its config.
@@ -186,12 +207,14 @@ class CheckpointInfo:
         if config_path is None:
             moshi_name = MOSHI_NAME
             mimi_name = MIMI_NAME
+            mimi_config_name = None
             tokenizer_name = TEXT_TOKENIZER_NAME
             lm_config = None
             raw_config = None
             model_type = "moshi"
             lm_gen_config = {}
             tts_config = {}
+            stt_config = {}
             model_id = {}
             lora_name = None
         else:
@@ -199,11 +222,13 @@ class CheckpointInfo:
             lm_config = dict(raw_config)
             moshi_name = lm_config.pop("moshi_name", MOSHI_NAME)
             mimi_name = lm_config.pop("mimi_name", MIMI_NAME)
+            mimi_config_name = lm_config.pop("mimi_config_name", None)
             tokenizer_name = lm_config.pop("tokenizer_name", TEXT_TOKENIZER_NAME)
             lora_name = lm_config.pop("lora_name", None)
             model_type = lm_config.pop("model_type", "moshi")
             lm_gen_config = lm_config.pop("lm_gen_config", {})
             tts_config = lm_config.pop("tts_config", {})
+            stt_config = lm_config.pop("stt_config", {})
             model_id = lm_config.pop("model_id", {})
 
         if moshi_weights is None:
@@ -221,6 +246,15 @@ class CheckpointInfo:
         else:
             tokenizer_final = hf_get(tokenizer)
 
+        if mimi_config_path is None and mimi_config_name is not None:
+            mimi_config_path = hf_get(mimi_config_name, hf_repo)
+        elif mimi_config_path is not None:
+            mimi_config_path = hf_get(mimi_config_path)
+        if mimi_config_path is None:
+            mimi_config = None
+        else:
+            mimi_config = json.loads(mimi_config_path.read_text())
+
         if lora_weights is None and lora_name:
             lora_weights_final = hf_get(lora_name, hf_repo)
         elif lora_weights is not None:
@@ -234,10 +268,12 @@ class CheckpointInfo:
             tokenizer_final,
             lm_config,
             raw_config,
+            mimi_config,
             model_type,
             lora_weights_final,
             lm_gen_config=lm_gen_config,
             tts_config=tts_config,
+            stt_config=stt_config,
             model_id=model_id,
         )
 
@@ -246,7 +282,11 @@ class CheckpointInfo:
             num_codebooks = 8
         else:
             num_codebooks = max(self.lm_config["dep_q"], self.lm_config["n_q"] - self.lm_config["dep_q"])
-        return get_mimi(self.mimi_weights, num_codebooks=num_codebooks, device=device)
+        if self.tts_config.get('multistream'):
+            num_codebooks //= 2
+        return get_mimi(
+            self.mimi_weights, self.mimi_config,
+            num_codebooks=num_codebooks, device=device)
 
     def get_moshi(
         self,
@@ -279,28 +319,31 @@ def _is_safetensors(path: Path | str) -> bool:
 
 
 def get_mimi(
-    filename: str | Path | None, device: torch.device | str = "cpu", num_codebooks: int = 8
+    filename: str | Path | None, mimi_config: dict | None = None,
+    device: torch.device | str = "cpu", num_codebooks: int = 8
 ) -> MimiModel:
     """Return a pretrained Mimi model, or unintialized if `filename` is None."""
-    encoder = SEANetEncoder(**_seanet_kwargs)
-    decoder = SEANetDecoder(**_seanet_kwargs)
+    if mimi_config is None:
+        mimi_config = _mimi_config
+    encoder = SEANetEncoder(**mimi_config['seanet'])
+    decoder = SEANetDecoder(**mimi_config['seanet'])
     encoder_transformer = transformer.ProjectedTransformer(
-        device=device, **_transformer_kwargs
+        device=device, **mimi_config['transformer']
     )
     decoder_transformer = transformer.ProjectedTransformer(
-        device=device, **_transformer_kwargs
+        device=device, **mimi_config['transformer']
     )
     quantizer = SplitResidualVectorQuantizer(
-        **_quantizer_kwargs,
+        **mimi_config['quantizer'],
     )
     model = MimiModel(
         encoder,
         decoder,
         quantizer,
-        channels=1,
-        sample_rate=SAMPLE_RATE,
-        frame_rate=FRAME_RATE,
-        encoder_frame_rate=SAMPLE_RATE / encoder.hop_length,
+        channels=mimi_config['channels'],
+        sample_rate=mimi_config['sample_rate'],
+        frame_rate=mimi_config['frame_rate'],
+        encoder_frame_rate=mimi_config['sample_rate'] / encoder.hop_length,
         causal=True,
         resample_method="conv",
         encoder_transformer=encoder_transformer,
@@ -309,7 +352,8 @@ def get_mimi(
     model.eval()
     if filename is not None:
         if _is_safetensors(filename):
-            load_model(model, filename, device=str(device))
+            state = load_file(filename, device=str(device))
+            model.load_state_dict(state)
         else:
             pkg = torch.load(filename, "cpu")
             model.load_state_dict(pkg["model"])
@@ -336,7 +380,7 @@ def get_moshi_lm(
             lm_kwargs["dim"], device, lm_kwargs
         )
         del lm_kwargs["conditioners"]
-    if "fuser" in lm_kwargs:
+    if lm_kwargs.get("fuser", None) is not None:
         lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
 
     lm_kwargs = lm_kwargs | lm_kwargs_overrides

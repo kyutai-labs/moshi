@@ -16,6 +16,8 @@ use tokio::time::{timeout, Duration};
 
 const FRAME_SIZE: usize = 1920;
 const SEND_PING_EVERY: Duration = Duration::from_secs(10);
+const POST_RETRY_DELAY: Duration = Duration::from_millis(100);
+const POST_MAX_RETRIES: usize = 1000;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct Marker {
@@ -120,7 +122,7 @@ impl Logger {
     ) -> Result<Self> {
         let since_epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
         let (secs, us) = (since_epoch.as_secs(), since_epoch.subsec_micros());
-        let base_path = log_dir.as_ref().join(format!("{}-asr-{secs}-{us}", instance_name));
+        let base_path = log_dir.as_ref().join(format!("{instance_name}-asr-{secs}-{us}"));
         let (log_tx, log_rx) = std::sync::mpsc::channel::<(Tensor, Tensor)>();
         Ok(Self { base_path, log_tx, log_rx, log_frequency_s })
     }
@@ -220,7 +222,7 @@ impl BatchedAsrInner {
         )?;
         let log_tx = logger.map(|v| v.log_tx.clone());
         let dev = state.device().clone();
-        let model_loop: task::JoinHandle<Result<()>> = task::spawn_blocking(move || {
+        crate::utils::spawn_blocking("model_loop", move || {
             tracing::info!("warming-up the asr");
             warmup(&mut state, conditions.as_ref())?;
             tracing::info!("starting asr loop {batch_size}");
@@ -269,13 +271,6 @@ impl BatchedAsrInner {
                 } else {
                     std::thread::sleep(std::time::Duration::from_millis(2));
                 }
-            }
-        });
-        task::spawn(async {
-            match model_loop.await {
-                Err(err) => tracing::error!(?err, "model loop join err"),
-                Ok(Err(err)) => tracing::error!(?err, "model loop err"),
-                Ok(Ok(())) => tracing::info!("model loop exited"),
             }
         });
         Ok(())
@@ -455,7 +450,7 @@ impl BatchedAsr {
         config: &crate::Config,
         dev: &Device,
     ) -> Result<Self> {
-        let dtype = dev.bf16_default_to_f32();
+        let dtype = crate::utils::model_dtype(asr.dtype_override.as_deref(), dev)?;
         let vb_lm =
             unsafe { VarBuilder::from_mmaped_safetensors(&[&asr.lm_model_file], dtype, dev)? };
         let lm = moshi::lm::LmModel::batched(
@@ -506,7 +501,7 @@ impl BatchedAsr {
         Ok(Self { channels, config: asr.clone(), batch_size })
     }
 
-    fn channels(&self) -> Result<(usize, InSend, OutRecv)> {
+    fn channels(&self) -> Result<Option<(usize, InSend, OutRecv)>> {
         let mut channels = self.channels.lock().unwrap();
         // Linear scan to find an available channel. This is fairly inefficient, instead we should
         // probably have a queue of available slots.
@@ -516,24 +511,70 @@ impl BatchedAsr {
                 let (out_tx, out_rx) = tokio::sync::mpsc::unbounded_channel::<OutMsg>();
                 let c = Channel::new(in_rx, out_tx)?;
                 *channel = Some(c);
-                return Ok((batch_idx, in_tx, out_rx));
+                return Ok(Some((batch_idx, in_tx, out_rx)));
             }
         }
-        anyhow::bail!("no free channels");
+        Ok(None)
+    }
+
+    pub async fn handle_query(&self, query: axum::body::Bytes) -> Result<Vec<OutMsg>> {
+        tracing::info!("batched-asr post query");
+        let (batch_idx, in_tx, mut out_rx) = {
+            let mut num_tries = 0;
+            loop {
+                match self.channels() {
+                    Ok(Some(x)) => break x,
+                    Ok(None) => {
+                        num_tries += 1;
+                        if num_tries > POST_MAX_RETRIES {
+                            tracing::error!("no free channels after 1000 tries");
+                            anyhow::bail!("no free channels");
+                        }
+                        tokio::time::sleep(POST_RETRY_DELAY).await;
+                    }
+                    Err(err) => {
+                        tracing::error!(?err, "no free channels");
+                        Err(err)?
+                    }
+                }
+            }
+        };
+        tracing::info!(batch_idx, "batched-asr channel");
+        in_tx.send(InMsg::Init)?;
+        let (pcm, sample_rate) = crate::utils::pcm_decode(query)?;
+        let pcm = if sample_rate == 24000 {
+            pcm
+        } else {
+            kaudio::resample(&pcm, sample_rate as usize, 24000)?
+        };
+        in_tx.send(InMsg::Audio { pcm })?;
+        in_tx.send(InMsg::Marker { id: 0 })?;
+        in_tx.send(InMsg::Audio { pcm: vec![0f32; 240000] })?;
+        let mut msgs = vec![];
+        while let Some(msg) = out_rx.recv().await {
+            match msg {
+                OutMsg::Marker { .. } => break,
+                OutMsg::Error { .. } | OutMsg::Word { .. } | OutMsg::EndWord { .. } => {
+                    msgs.push(msg)
+                }
+                OutMsg::Ready | OutMsg::Step { .. } => {}
+            }
+        }
+        Ok(msgs)
     }
 
     pub async fn handle_socket(&self, socket: ws::WebSocket, query: Query) -> Result<()> {
         use futures_util::{SinkExt, StreamExt};
         use serde::Serialize;
 
-        tracing::info!(?query, "batched-asr query");
+        tracing::info!(?query, "batched-asr ws query");
         metrics::CONNECT.inc();
 
         let (mut sender, receiver) = socket.split();
-        let (batch_idx, in_tx, mut out_rx) = match self.channels() {
-            Ok(v) => v,
-            Err(err) => {
-                tracing::error!(?err, "no free channels");
+        let (batch_idx, in_tx, mut out_rx) = match self.channels()? {
+            Some(v) => v,
+            None => {
+                tracing::error!("no free channels");
                 let mut msg = vec![];
                 OutMsg::Error { message: "no free channels".into() }.serialize(
                     &mut rmp_serde::Serializer::new(&mut msg)
@@ -542,13 +583,13 @@ impl BatchedAsr {
                 )?;
                 sender.send(ws::Message::binary(msg)).await?;
                 sender.close().await?;
-                return Err(err);
+                anyhow::bail!("no free channels")
             }
         };
         tracing::info!(batch_idx, "batched-asr channel");
         in_tx.send(InMsg::Init)?;
 
-        let recv_loop = task::spawn(async move {
+        crate::utils::spawn("recv_loop", async move {
             let mut receiver = receiver;
             // There are two timeouts here:
             // - The short timeout handles the case where the client does not answer the regular pings.
@@ -584,7 +625,7 @@ impl BatchedAsr {
             }
             Ok::<_, anyhow::Error>(())
         });
-        let send_loop = task::spawn(async move {
+        crate::utils::spawn("send_loop", async move {
             let mut sender = sender;
             loop {
                 // The recv method is cancel-safe so can be wrapped in a timeout.
@@ -606,23 +647,6 @@ impl BatchedAsr {
             }
             Ok::<(), anyhow::Error>(())
         });
-
-        // Keep track of the outputs of the different threads.
-        task::spawn(async {
-            match send_loop.await {
-                Err(err) => tracing::error!(?err, "send loop join err"),
-                Ok(Err(err)) => tracing::error!(?err, "send loop err"),
-                Ok(Ok(())) => tracing::info!("send loop exited"),
-            }
-        });
-        task::spawn(async {
-            match recv_loop.await {
-                Err(err) => tracing::error!(?err, "recv loop join err"),
-                Ok(Err(err)) => tracing::error!(?err, "recv loop err"),
-                Ok(Ok(())) => tracing::info!("recv loop exited"),
-            }
-        });
-
         Ok(())
     }
 

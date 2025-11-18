@@ -3,6 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use anyhow::Result;
+use candle::{DType, Device};
 
 #[derive(Debug, PartialEq, Clone, serde::Deserialize, serde::Serialize)]
 pub struct BuildInfo {
@@ -54,7 +55,7 @@ pub fn resolve_or_download(input: &str) -> Result<String> {
             }
             let repo = format!("{}/{}", s[0], s[1]);
             let file = s[2..].join("/");
-            let api = hf_hub::api::sync::Api::new()?.model(repo);
+            let api = hf_hub::api::sync::ApiBuilder::from_env().build()?.model(repo);
             api.get(&file)?.to_string_lossy().to_string()
         }
     };
@@ -176,4 +177,37 @@ pub fn pcm_decode(bytes: axum::body::Bytes) -> anyhow::Result<(Vec<f32>, u32)> {
         }
     }
     Ok((pcm_data, sample_rate))
+}
+
+pub fn spawn<F>(name: &'static str, future: F) -> tokio::task::JoinHandle<()>
+where
+    F: std::future::Future<Output = Result<()>> + Send + 'static,
+{
+    tokio::task::spawn(async move {
+        match future.await {
+            Ok(_) => tracing::info!(?name, "task completed successfully"),
+            Err(err) => tracing::error!(?name, ?err, "task failed"),
+        }
+    })
+}
+
+pub fn spawn_blocking<F>(name: &'static str, f: F) -> tokio::task::JoinHandle<()>
+where
+    F: FnOnce() -> Result<()> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || match f() {
+        Ok(_) => tracing::info!(?name, "task completed successfully"),
+        Err(err) => tracing::error!(?name, ?err, "task failed"),
+    })
+}
+
+pub fn model_dtype(over: Option<&str>, dev: &Device) -> Result<DType> {
+    let dtype = match over {
+        None => dev.bf16_default_to_f32(),
+        Some(s) => {
+            use std::str::FromStr;
+            DType::from_str(s)?
+        }
+    };
+    Ok(dtype)
 }

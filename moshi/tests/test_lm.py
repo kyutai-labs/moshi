@@ -1,5 +1,5 @@
 from pathlib import Path
-from safetensors.torch import load_file, load_model
+from safetensors.torch import load_file
 import torch
 
 from moshi.models import lm
@@ -45,7 +45,8 @@ def test_init():
 @torch.no_grad
 def test_forward():
     model = _get_lm()
-    load_model(model, _get_assets() / 'test_lm_model.safetensors')
+    state = load_file(_get_assets() / 'test_lm_model.safetensors')
+    model.load_state_dict(state)
     codes = load_file(_get_assets() / 'test_lm_codes.safetensors')['codes']
     out = model(codes)
     assert out.logits is not None
