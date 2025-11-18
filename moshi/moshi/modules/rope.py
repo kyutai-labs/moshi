@@ -108,4 +108,4 @@ class RotaryEmbedding(nn.Module):
         time_before_heads: bool = False,
     ):
         """Apply rope rotation to query or key tensor."""
-        return apply_rope(q, k, offset, self.interleave, self.max_period, time_before_heads)
+        return apply_rope(q, k, offset, self.max_period, self.interleave, time_before_heads)
