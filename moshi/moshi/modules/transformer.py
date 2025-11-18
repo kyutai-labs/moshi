@@ -549,30 +549,30 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             k, v = self._get_cross_attention(key, value)
         else:
             projected = apply_weights_per_step(
-                self.in_projs, self.weights_per_step_schedule, query, offset_cpu
+                self.in_projs, self.weights_per_step_schedule, query, offset_cpu)
+
+            print("projected shape: ", projected.shape)
+            
+            if self.kv_repeat == 1:
+                q, k, v = rearrange(
+                projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
             )
-
-            q, k, v = rearrange(
-                projected,
-                "b t (p h d) -> p b h t d",
-                p=3,
-                h=self.num_heads,
-            )
-
-            if self.kv_repeat > 1:
-                H = self.num_heads
-                Hk = H // self.kv_repeat
-                k = k[:, :Hk]
-                v = v[:, :Hk]
-
+            else:
+                q = rearrange(projected[:, :, :self.embed_dim], "b t (h d) -> b h t d", h=self.num_heads)
+                k, v = rearrange(projected[:, :, self.embed_dim:],
+                               "b t (p kh d) -> p b kh t d", p=2, kh=self.num_heads//self.kv_repeat)
         if self.rope:
             q, k = self.rope(q, k, offset, time_before_heads=False)
 
         k, v, pos_k = self._complete_kv(k, v)
-
+        
         if self.kv_repeat > 1:
             k = expand_repeated_kv(k, self.kv_repeat)
             v = expand_repeated_kv(v, self.kv_repeat)
+
+        print("num_heads: ", self.num_heads)
+        print("dim: ", self.embed_dim)
+        print("kv_repeat: ", self.kv_repeat)
         print(q.shape, k.shape, v.shape)
         pos_k = pos_k[:, None]
         if self.causal:
