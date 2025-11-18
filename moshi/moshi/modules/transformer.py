@@ -563,9 +563,11 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             q, k = self.rope(q, k, offset, time_before_heads=False)
 
         k, v, pos_k = self._complete_kv(k, v)
+        
         if self.kv_repeat > 1:
             k = expand_repeated_kv(k, self.kv_repeat)
             v = expand_repeated_kv(v, self.kv_repeat)
+        print(q.shape, k.shape, v.shape)
         pos_k = pos_k[:, None]
         if self.causal:
             pos_q = offset.view(-1, 1, 1) + torch.arange(T, device=q.device, dtype=torch.long).view(
