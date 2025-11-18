@@ -109,6 +109,8 @@ class LMModel(StreamingContainer):
         gradient_checkpointing: bool = False,
         **kwargs,
     ):
+        import torch._dynamo
+        torch._dynamo.config.suppress_errors = True
         super().__init__()
         self.n_q = n_q
         self.dep_q = dep_q
