@@ -87,7 +87,6 @@ def apply_rope(
     return qo, ko
 
 
-
 class RotaryEmbedding(nn.Module):
     """Rotary positional embedding (RoPE) from [Su et al 2022](https://arxiv.org/abs/2104.09864).
 

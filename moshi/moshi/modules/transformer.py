@@ -32,6 +32,7 @@ class LayerNormF32(nn.LayerNorm):
         out_f32 = super().forward(x_f32)
         return out_f32.to(input.dtype)
 
+
 def expand_repeated_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     b, h, t, d = x.shape
     return (
@@ -39,6 +40,8 @@ def expand_repeated_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
         .expand(b, h, n_rep, t, d)
         .reshape(b, h * n_rep, t, d)
     )
+
+
 
 @torch_compile_lazy
 def _rms_norm(
@@ -472,7 +475,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 capacity = self.context
 
             kv_cache = RingKVCache(
-                batch_size, self.num_heads//self.kv_repeat, dim_per_head, capacity,
+                batch_size, self.num_heads // self.kv_repeat, dim_per_head, capacity,
                 respect_exec_mask=not self.weights_per_step, device=device, dtype=dtype
             )
         return _MHAState(
@@ -550,15 +553,16 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             k, v = self._get_cross_attention(key, value)
         else:
             projected = apply_weights_per_step(
-                self.in_projs, self.weights_per_step_schedule, query, offset_cpu)            
+                self.in_projs, self.weights_per_step_schedule, query, offset_cpu) 
             if self.kv_repeat == 1:
                 q, k, v = rearrange(
-                projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
-            )
+                    projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
+                )
             else:
                 q = rearrange(projected[:, :, :self.embed_dim], "b t (h d) -> b h t d", h=self.num_heads)
                 k, v = rearrange(projected[:, :, self.embed_dim:],
-                               "b t (p kh d) -> p b kh t d", p=2, kh=self.num_heads//self.kv_repeat)
+                               "b t (p kh d) -> p b kh t d", p=2, kh=self.num_heads // self.kv_repeat
+                )
         if self.rope:
             q, k = self.rope(q, k, offset, time_before_heads=False)
 
