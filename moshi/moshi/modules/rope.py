@@ -12,7 +12,7 @@ from ..utils.compile import torch_compile_lazy
 def apply_rope(
     q: torch.Tensor,
     k: torch.Tensor,
-    offset: torch.Tensor | int = 0,
+    offset: torch.Tensor,
     max_period: float = 10_000,
     interleave: bool = True,
     time_before_heads: bool = False,
@@ -25,7 +25,6 @@ def apply_rope(
         interleave: si False, le layout est [r..., i...]
         time_before_heads: si True, format [B, T, H, D], sinon [B, H, T, D]
     """
-    # --- gestion du format d'entrée ---
     if time_before_heads:
         B, T, H, D = q.shape
     else:
@@ -44,11 +43,7 @@ def apply_rope(
     ds = torch.arange(D // 2, device=q.device, dtype=torch.float32)
     freqs = torch.exp(ds * (-math.log(max_period) * 2 / D))
 
-    ts = (
-        offset.float().view(-1, 1) + torch.arange(T, device=q.device, dtype=torch.float32)
-        if isinstance(offset, torch.Tensor)
-        else torch.arange(offset, offset + T, device=q.device, dtype=torch.float32)
-    )
+    ts = offset.float().view(-1, 1) + torch.arange(T, device=q.device, dtype=torch.float32)
 
     if time_before_heads:
         ts = ts.view(B, -1, 1, 1)
