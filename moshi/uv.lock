@@ -693,7 +693,7 @@ name = "exceptiongroup"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0b/9f/a65090624ecf468cdca03533906e7c69ed7588582240cfe7cc9e770b50eb/exceptiongroup-1.3.0.tar.gz", hash = "sha256:b241f5885f560bc56a59ee63ca4c6a8bfa46ae4ad651af316d4e81817bb9fd88", size = 29749, upload-time = "2025-05-10T17:42:51.123Z" }
 wheels = [
@@ -1224,6 +1224,7 @@ dependencies = [
     { name = "sounddevice" },
     { name = "sphn" },
     { name = "torch" },
+    { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
@@ -1242,17 +1243,18 @@ requires-dist = [
     { name = "einops", specifier = ">=0.7,<0.9" },
     { name = "flake8", marker = "extra == 'dev'" },
     { name = "gradio-webrtc", marker = "extra == 'dev'", specifier = ">=0.0.18" },
-    { name = "huggingface-hub", specifier = ">=0.24,<0.29" },
+    { name = "huggingface-hub", specifier = ">=0.24,<0.34" },
     { name = "numpy", specifier = ">=1.26,<2.3" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pyright", marker = "extra == 'dev'" },
     { name = "pytest", specifier = ">=8.3.3" },
     { name = "pytest", marker = "extra == 'dev'" },
-    { name = "safetensors", specifier = ">=0.4.0,<0.6" },
+    { name = "safetensors", specifier = ">=0.4.0,<0.7" },
     { name = "sentencepiece", specifier = "==0.2" },
     { name = "sounddevice", specifier = "==0.5" },
     { name = "sphn", specifier = ">=0.1.4,<0.2.0" },
-    { name = "torch", specifier = ">=2.2.0,<2.7" },
+    { name = "torch", specifier = ">=2.2.0,<2.8" },
+    { name = "tqdm", specifier = ">=4.48" },
 ]
 provides-extras = ["dev"]
 
