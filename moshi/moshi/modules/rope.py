@@ -19,12 +19,14 @@ def apply_rope(
 ):
     """
     Args:
-        q, k: [B, T, H, D] ou [B, H, T, D] selon `time_before_heads`
-        offset: position offset (int ou tensor)
-        max_period: période maximale (RoPE)
-        interleave: si False, le layout est [r..., i...]
-        time_before_heads: si True, format [B, T, H, D], sinon [B, H, T, D]
+        q (torch.Tensor): queries, shape `[B, T, H, D]`.
+        k (torch.Tensor): keys, shape `[B, T, H, D]`.
+        offset (int): current offset, e.g. when streaming.
+        max_period (float): maximum period for the cos and sin.
+        interleave (bool): If True, real and imaginarie part are interleaved
+        time_before_heads (bool):  if True, expected [B, T, H, D], else [B, H, T ,D]
     """
+
     if time_before_heads:
         B, T, H, D = q.shape
     else:
@@ -53,7 +55,6 @@ def apply_rope(
     rotr = torch.cos(freqs * ts)
     roti = torch.sin(freqs * ts)
 
-    # --- séparation réelle / imaginaire selon le layout ---
     if interleave:
         # [r0,i0,r1,i1,...]
         q = q.view(*q.shape[:-1], D // 2, 2)
@@ -65,7 +66,6 @@ def apply_rope(
         qr, qi = q[..., : D // 2].float(), q[..., D // 2 :].float()
         kr, ki = k[..., : D // 2].float(), k[..., D // 2 :].float()
 
-    # --- rotation RoPE ---
     qor = qr * rotr - qi * roti
     qoi = qr * roti + qi * rotr
     kor = kr * rotr - ki * roti
