@@ -23,7 +23,7 @@ class QLinear(nn.Module):
 
     def forward(self, x):
         import bitsandbytes as bnb  # type: ignore
-        state = bnb.MatmulLtState()
+        state = bnb.MatmulLtState()  # pyright: ignore
         state.CB = self.weight  # type: ignore
         assert isinstance(state.CB, torch.Tensor)
         state.SCB = self.weight_scb  # type: ignore
@@ -35,7 +35,7 @@ class QLinear(nn.Module):
                 "the model once initialized.")
         assert state.SCB.dtype == torch.float, state.SCB.dtype
         state.has_fp16_weights = False
-        y = bnb.matmul(x.half(), state.CB, state=state)
+        y = bnb.matmul(x.half(), state.CB, state=state)  # pyright: ignore
         assert isinstance(y, torch.Tensor)
         return y
 
