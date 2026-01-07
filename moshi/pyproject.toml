@@ -10,7 +10,7 @@ dependencies = [
     "einops >= 0.7, < 0.9",
     "sentencepiece >= 0.2.0, < 0.3",
     "sounddevice == 0.5",
-    "sphn >= 0.1.4, < 0.3.0",
+    "sphn >= 0.2.0, < 0.3.0",
     "torch >= 2.2.0, < 2.10",
     "aiohttp>=3.10.5, <3.12",
     "tqdm >= 4.48",
