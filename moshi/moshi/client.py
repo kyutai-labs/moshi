@@ -49,7 +49,7 @@ class Connection:
         self._opus_reader = sphn.OpusStreamReader(sample_rate)
         self._output_queue = queue.Queue()
         self._all_pcm_data = None
-        self_event_loop = asyncio.get_event_loop()
+        self._event_loop = asyncio.get_event_loop()
 
     async def _ws_send(self, msg) -> None:
         if len(msg) > 0:
