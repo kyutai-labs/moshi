@@ -21,10 +21,10 @@ class Connection:
         self,
         printer: AnyPrinter,
         websocket: aiohttp.ClientWebSocketResponse,
+        event_loop: asyncio.AbstractEventLoop,
         sample_rate: float = 24000,
         channels: int = 1,
         frame_size: int = 1920,
-        event_loop: asyncio.AbstractEventLoop,
     ) -> None:
         self.printer = printer
         self.websocket = websocket
@@ -115,8 +115,8 @@ class Connection:
     def _on_audio_input(self, in_data, frames, time_, status) -> None:
         assert in_data.shape == (self.frame_size, self.channels), in_data.shape
         opus_bytes = self._opus_writer.append_pcm(in_data[:, 0])
-        self._ws_send(opus_bytes),
-        asyncio.run_coroutine_threadsafe(asyncio.get_running_loop(), self._event_loop).result()
+        if len(opus_bytes) > 0:
+            asyncio.run_coroutine_threadsafe(self._ws_send(opus_bytes), self._event_loop)
 
     def _on_audio_output(self, out_data, frames, time_, status) -> None:
         assert out_data.shape == (self.frame_size, self.channels), out_data.shape
