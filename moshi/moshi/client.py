@@ -24,6 +24,7 @@ class Connection:
         sample_rate: float = 24000,
         channels: int = 1,
         frame_size: int = 1920,
+        event_loop: asyncio.AbstractEventLoop,
     ) -> None:
         self.printer = printer
         self.websocket = websocket
@@ -49,7 +50,7 @@ class Connection:
         self._opus_reader = sphn.OpusStreamReader(sample_rate)
         self._output_queue = queue.Queue()
         self._all_pcm_data = None
-        self._event_loop = asyncio.get_event_loop()
+        self._event_loop = event_loop
 
     async def _ws_send(self, msg) -> None:
         if len(msg) > 0:
@@ -159,7 +160,7 @@ async def run(printer: AnyPrinter, args):
         async with session.ws_connect(uri) as ws:
             printer.log("info", "connected!")
             printer.print_header()
-            connection = Connection(printer, ws)
+            connection = Connection(printer, ws, event_loop=asyncio.get_event_loop())
             await connection.run()
 
 
