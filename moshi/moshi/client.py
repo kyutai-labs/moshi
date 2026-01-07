@@ -49,6 +49,7 @@ class Connection:
         self._opus_reader = sphn.OpusStreamReader(sample_rate)
         self._output_queue = queue.Queue()
         self._all_pcm_data = None
+        self_event_loop = asyncio.get_event_loop()
 
     async def _ws_send(self, msg) -> None:
         if len(msg) > 0:
@@ -113,10 +114,8 @@ class Connection:
     def _on_audio_input(self, in_data, frames, time_, status) -> None:
         assert in_data.shape == (self.frame_size, self.channels), in_data.shape
         opus_bytes = self._opus_writer.append_pcm(in_data[:, 0])
-        asyncio.run_coroutine_threadsafe(
-            self._ws_send(opus_bytes),
-            asyncio.get_running_loop()
-        )
+        self._ws_send(opus_bytes),
+        asyncio.run_coroutine_threadsafe(asyncio.get_running_loop(), self._event_loop).result()
 
     def _on_audio_output(self, out_data, frames, time_, status) -> None:
         assert out_data.shape == (self.frame_size, self.channels), out_data.shape
