@@ -48,35 +48,25 @@ class Connection:
         self._opus_writer = sphn.OpusStreamWriter(sample_rate)
         self._opus_reader = sphn.OpusStreamReader(sample_rate)
         self._output_queue = queue.Queue()
+        self._all_pcm_data = None
 
-    async def _queue_loop(self) -> None:
-        while True:
-            if self._done:
+    async def _ws_send(self, msg) -> None:
+        if len(msg) > 0:
+            try:
+                await self.websocket.send_bytes(b"\x01" + msg)
+            except Exception as e:
+                print(e)
+                self._lost_connection()
                 return
-            await asyncio.sleep(0.001)
-            msg = self._opus_writer.read_bytes()
-            if len(msg) > 0:
-                try:
-                    await self.websocket.send_bytes(b"\x01" + msg)
-                except Exception as e:
-                    print(e)
-                    self._lost_connection()
-                    return
 
-    async def _decoder_loop(self) -> None:
-        all_pcm_data = None
-        while True:
-            if self._done:
-                return
-            await asyncio.sleep(0.001)
-            pcm = self._opus_reader.read_pcm()
-            if all_pcm_data is None:
-                all_pcm_data = pcm
-            else:
-                all_pcm_data = np.concatenate((all_pcm_data, pcm))
-            while all_pcm_data.shape[-1] >= self.frame_size:
-                self._output_queue.put(all_pcm_data[: self.frame_size])
-                all_pcm_data = np.array(all_pcm_data[self.frame_size :])
+    async def _decode(self, pcm) -> None:
+        if self._all_pcm_data is None:
+            self._all_pcm_data = pcm
+        else:
+            self._all_pcm_data = np.concatenate((self._all_pcm_data, pcm))
+        while self._all_pcm_data.shape[-1] >= self.frame_size:
+            self._output_queue.put(self._all_pcm_data[: self.frame_size])
+            self._all_pcm_data = np.array(self._all_pcm_data[self.frame_size :])
 
     async def _recv_loop(self) -> None:
         try:
@@ -102,7 +92,8 @@ class Connection:
                 kind = message[0]
                 if kind == 1:  # audio
                     payload = message[1:]
-                    self._opus_reader.append_bytes(payload)
+                    pcm = self._opus_reader.append_bytes(payload)
+                    await self._decode(pcm)
                     self.printer.print_pending()
                 elif kind == 2:  # text
                     payload = message[1:]
@@ -121,7 +112,11 @@ class Connection:
 
     def _on_audio_input(self, in_data, frames, time_, status) -> None:
         assert in_data.shape == (self.frame_size, self.channels), in_data.shape
-        self._opus_writer.append_pcm(in_data[:, 0])
+        opus_bytes = self._opus_writer.append_pcm(in_data[:, 0])
+        asyncio.run_coroutine_threadsafe(
+            self._ws_send(opus_bytes),
+            asyncio.get_running_loop()
+        )
 
     def _on_audio_output(self, out_data, frames, time_, status) -> None:
         assert out_data.shape == (self.frame_size, self.channels), out_data.shape
@@ -136,9 +131,7 @@ class Connection:
 
     async def run(self) -> None:
         with self._in_stream, self._out_stream:
-            await asyncio.gather(
-                self._recv_loop(), self._decoder_loop(), self._queue_loop()
-            )
+            await self._recv_loop()
 
 
 async def run(printer: AnyPrinter, args):
