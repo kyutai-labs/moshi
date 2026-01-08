@@ -23,6 +23,9 @@ pub mod tts;
 pub mod tts_streaming;
 pub mod wav;
 
+// Add compatibility module
+pub mod compat;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum NormType {
     RmsNorm,
