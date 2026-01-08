@@ -79,8 +79,8 @@ class LMModel(StreamingContainer):
         self,
         delays: tp.List[int] = [0],
         n_q: int = 8,
-        dep_q: int = 8,
-        card: int = 1024,
+        dep_q: int = 0,
+        card: int = 2048,
         text_card: int = 32000,
         text_card_out: int | None = None,
         demux_second_text_stream: bool = False,
@@ -90,6 +90,7 @@ class LMModel(StreamingContainer):
         norm: str = "layer_norm",
         norm_emb: bool = False,
         bias_proj: bool = False,
+        text_depth: int = 1,
         depformer_dim: int = 256,
         depformer_dim_feedforward: int | list[int] | None = None,
         depformer_multi_linear: bool = False,
@@ -111,19 +112,19 @@ class LMModel(StreamingContainer):
     ):
         super().__init__()
         self.n_q = n_q
-        self.dep_q = dep_q
-        self.card = card
+        self.dep_q = 0
+        # hardcoded par flemme
+        dep_q = 0
+        self.card = 2048
         self.text_card = text_card
         text_card_out = text_card if text_card_out is None else text_card_out
+        self.text_depth = text_depth
         assert len(delays) == self.num_codebooks, f"expected {self.num_codebooks} delays, got {len(delays)}."
         self.delays = delays
         self.dim = dim
         self.existing_text_padding_id = existing_text_padding_id
         self.existing_text_end_padding_id = existing_text_end_padding_id
         self.context = context
-        self.depformer_weights_per_step_schedule = depformer_weights_per_step_schedule
-        if depformer_weights_per_step_schedule is not None:
-            assert len(depformer_weights_per_step_schedule) == dep_q
         EmbeddingFactory = partial(
             ScaledEmbedding,
             norm=norm_emb,
@@ -136,8 +137,15 @@ class LMModel(StreamingContainer):
         )
         # Unlike for audio, here we authorize the model to output the special token.
         self.text_emb = EmbeddingFactory(text_card + 1, dim, demux_second_stream=demux_second_text_stream)
+        
+        
+        if self.text_depth > 1:
+                self.proj_text_embs = nn.ModuleList([nn.Linear(dim, dim) for _ in range(self.text_depth)])
+        if self.text_depth <= 1:
 
-        self.text_linear = nn.Linear(dim, text_card_out, bias=bias_proj)
+            self.text_linear = nn.Linear(dim, text_card_out, bias=bias_proj)
+        else:
+            self.text_linears = self.text_linears = nn.ModuleList([nn.Linear(dim, self.text_card, bias=bias_proj) for _ in range(self.text_depth)])
         depformer_prefix = "depformer_"
         main_kwargs = {
             k: v for k, v in kwargs.items() if not k.startswith(depformer_prefix)
@@ -156,7 +164,7 @@ class LMModel(StreamingContainer):
             **main_kwargs,
         )
         self.out_norm = create_norm_fn(norm, dim)
-        self.depformer_multi_linear = depformer_multi_linear
+        
         kwargs_dep = main_kwargs.copy()
         kwargs_dep.update(
             {
@@ -216,7 +224,7 @@ class LMModel(StreamingContainer):
             self.depformer = None
 
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
-
+        
         self.linears = nn.ModuleList(
             [nn.Linear(dim, self.card, bias=bias_proj) for _ in range(dep_q)]
         )
@@ -278,7 +286,7 @@ class LMModel(StreamingContainer):
 
     @property
     def num_codebooks(self) -> int:
-        return self.n_q + 1
+        return self.n_q + self.text_depth
 
     @property
     def num_audio_codebooks(self) -> int:
@@ -286,7 +294,10 @@ class LMModel(StreamingContainer):
 
     @property
     def audio_offset(self) -> int:
-        return 1
+        if self.text_depth >= 1:
+            return self.text_depth
+        else:
+            return 1
 
     def _get_initial_token(self) -> torch.Tensor:
         # Returns the initial token that will be fed to the model to predict the very first timestep.
@@ -301,6 +312,7 @@ class LMModel(StreamingContainer):
         audio_token = special
         text_token = text_special
         audio_token = audio_token.expand(-1, self.num_audio_codebooks, -1)
+        text_token = text_token.expand(-1, self.text_depth, -1)
         token = torch.cat([text_token, audio_token], dim=1)
         return token
 
@@ -357,8 +369,8 @@ class LMModel(StreamingContainer):
             self.delays[self.audio_offset:self.audio_offset + self.dep_q],
             logits, fill_value=float('NaN'))
         logits_mask &= (codes[:, self.audio_offset: self.audio_offset + self.dep_q] != self.zero_token_id)
-        text_logits, text_logits_mask = _undelay_sequence(self.delays[:1], text_logits, fill_value=float('NaN'))
-        text_logits_mask &= (codes[:, :1] != self.zero_token_id)
+        text_logits, text_logits_mask = _undelay_sequence(self.delays[:self.audio_offset], text_logits, fill_value=float('NaN'))
+        text_logits_mask &= (codes[:, :self.audio_offset] != self.zero_token_id)
         return LMOutput(logits, logits_mask, text_logits, text_logits_mask)
 
     def forward_text(
@@ -377,9 +389,17 @@ class LMModel(StreamingContainer):
                 input_sequence[:, cb_index + self.audio_offset]
             )
             input_ = audio_emb if input_ is None else input_ + audio_emb
-        text_emb = self.text_emb(input_sequence[:, 0])
+        if self.text_depth <= 1:
+            text_emb = self.text_emb(input_sequence[:, 0])
+            input_ = text_emb if input_ is None else input_ + text_emb
+        else:
+            for s in range(self.text_depth):
+                text_emb = self.text_emb(input_sequence[:, s])
+                text_emb_proj = self.proj_text_embs[s](text_emb)
+                input_ = text_emb_proj if input_ is None else input_ + text_emb_proj
 
-        input_ = text_emb if input_ is None else input_ + text_emb
+
+        
         if sum_condition is not None:
             input_ = input_ + sum_condition.to(input_)
         if cross_attention_src is not None:
@@ -388,8 +408,12 @@ class LMModel(StreamingContainer):
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
         assert isinstance(transformer_out, torch.Tensor)
-        text_logits = self.text_linear(transformer_out)
-        text_logits = text_logits[:, None]
+        if self.text_depth <= 1:
+            text_logits = self.text_linear(transformer_out)
+            text_logits = text_logits[:, None]
+        else:
+            text_logits_list = [self.text_linears[k](transformer_out) for k in range(self.text_depth)]
+            text_logits = torch.stack(text_logits_list, dim=1)
         return transformer_out, text_logits
 
     def forward_depformer_training(
@@ -495,13 +519,17 @@ class LMModel(StreamingContainer):
         _init_layer(self.text_emb)
         if self.depformer_text_emb is not None:
             _init_layer(self.depformer_text_emb)
-        _init_layer(self.text_linear)
-
+        
+        if self.text_depth > 1:
+            for i in range(self.text_depth):
+                _init_layer(self.text_linears[i])
+        else:
+            _init_layer(self.text_linear)
         for tr_layer in self.transformer.layers:
             tr_layer.apply(_init_layer)
 
         for linear in self.linears:
-            _init_layer(linear)
+           _init_layer(linear)
 
 
 @dataclass
@@ -592,7 +620,6 @@ class LMGen(StreamingModule[_LMGenState]):
             dtype=torch.long,
         )
         offsets = torch.zeros(batch_size, device=lm_model.device, dtype=torch.long)
-
         if self.lm_model.fuser is None:
             assert not self.condition_tensors
             condition_sum = None
@@ -606,10 +633,10 @@ class LMGen(StreamingModule[_LMGenState]):
             if condition_cross is not None:
                 condition_cross = condition_cross.to(self.lm_model.dtype)
 
-        disable = lm_model.device.type != 'cuda'
-        graphed_main = CUDAGraphed(lm_model.forward_text, disable=disable)
+        #disable = lm_model.device.type != 'cuda'
+        graphed_main = CUDAGraphed(lm_model.forward_text, disable=False)
         if lm_model.depformer is not None:
-            graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
+            graphed_depth = CUDAGraphed(self.depformer_step, disable=False)
         else:
             graphed_depth = None
 
@@ -653,7 +680,8 @@ class LMGen(StreamingModule[_LMGenState]):
         B, Ki, S = input_tokens.shape
         assert B == state.batch_size, f"Got a batch size {B}, expected {state.batch_size}"
         assert S == 1, "Only support being given steps one by one."
-        needed_tokens = lm_model.num_codebooks - lm_model.dep_q - 1
+        needed_tokens = lm_model.num_codebooks - lm_model.dep_q - self.lm_model.text_depth
+        
         assert (
             Ki >= needed_tokens
         ), f"We expect {needed_tokens} tokens from the user stream, got {Ki}."
@@ -663,17 +691,18 @@ class LMGen(StreamingModule[_LMGenState]):
 
         CT = state.cache.shape[2]
 
-        delays = self.delays_cuda[lm_model.dep_q + 1:]
+        delays = self.delays_cuda[lm_model.dep_q + lm_model.text_depth:]
         write_positions = (state.offsets[:, None, None] + delays[:, None]) % CT
-        scatter_with_mask_(state.cache[:, lm_model.dep_q + 1:], -1, write_positions, input_tokens,
+        
+        scatter_with_mask_(state.cache[:, lm_model.dep_q + self.lm_model.text_depth:], -1, write_positions, input_tokens,
                            state.exec_mask[:, None, None])
-
+        
         is_init = state.offsets[:, None, None] <= self.delays_cuda[:, None]
         is_init |= ~state.exec_mask[:, None, None]  # we also give init tokens if not executing to avoid crashing.
         positions = (state.offsets % CT)[:, None, None].expand_as(is_init)
         input_ = state.cache.gather(dim=2, index=positions)
+        
         input_ = torch.where(is_init, state.initial, input_)
-
         if self.check:
             # Check that we are not feeding in any value that is not generated yet.
             assert not (input_ == lm_model.ungenerated_token_id).any(), (
@@ -689,7 +718,6 @@ class LMGen(StreamingModule[_LMGenState]):
             if self.cfg_is_no_text:
                 # Zero out text stream if we want to have the CFG over it.
                 input_[B:, :1] = torch.where(is_init[:, :1], input_[B:, :1], zero)
-
         transformer_out, text_logits = state.graphed_main(input_, state.condition_sum, state.condition_cross)
         if self.cfg_coef != 1.:
             logits, logits_null = text_logits.chunk(2)
@@ -706,8 +734,9 @@ class LMGen(StreamingModule[_LMGenState]):
         )
         assert text_token.dim() == 3, text_token.shape
         assert text_token.shape[2] == 1
-        assert text_token.shape[1] == 1, "Only one text stream supported."
-        text_token = text_token[:, 0, 0]  # shape is [B]
+      
+        text_token = text_token[:, :, 0]  # shape is [B, K]
+        
         if self.on_text_hook is not None:
             self.on_text_hook(text_token)
         if state.graphed_depth is None:
@@ -719,16 +748,15 @@ class LMGen(StreamingModule[_LMGenState]):
         else:
             assert depformer_replace_tokens.dim() == 3
             audio_tokens = depformer_replace_tokens.squeeze(-1)
-
         state.offsets = torch.where(state.exec_mask, state.offsets + 1, state.offsets)
         state.offset_cpu += 1
         positions = (state.offsets % CT)[:, None, None]
-        scatter_with_mask_(state.cache[:, :1], -1, positions,
-                           text_token[:, None, None], state.exec_mask[:, None, None])
+        scatter_with_mask_(state.cache[:, :lm_model.text_depth], -1, positions.expand_as(text_token[:,:,None]),
+                           text_token[:, :, None], state.exec_mask[:, None, None])
         if audio_tokens is not None:
             audio_tokens = audio_tokens[:, :, None]
             scatter_with_mask_(
-                state.cache[:, 1 : lm_model.dep_q + 1, :],
+                state.cache[:, self.text_depth : lm_model.dep_q + 1, :],
                 -1,
                 positions.expand_as(audio_tokens),
                 audio_tokens,
@@ -739,7 +767,7 @@ class LMGen(StreamingModule[_LMGenState]):
             # When using out of sync exec, should not rely on this being None.
             return None
         B = state.cache.shape[0]
-        gen_delays_cuda = self.delays_cuda[: lm_model.dep_q + 1]
+        gen_delays_cuda = self.delays_cuda[: lm_model.dep_q + lm_model.text_depth]
         index = (state.offsets[:, None, None] - self.max_delay + gen_delays_cuda[:, None]) % CT
         out = state.cache.gather(dim=2, index=index)
         mask = (state.offsets <= self.max_delay) | ~state.exec_mask

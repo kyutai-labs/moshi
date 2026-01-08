@@ -29,8 +29,6 @@ def apply_rope(
         positions (torch.Tensor | None): optional tensor of positions of shape [B, T].
                                          Used instead of offset + arange(T).
     """
-    import math
-
     if time_before_heads:
         B, T, H, D = q.shape
     else:
@@ -48,11 +46,8 @@ def apply_rope(
     if positions is not None:
         ts = positions.float()
         valid_mask = ts != -1
-        
-        ts = torch.where(valid_mask, ts, 0.)
-        
-        
 
+        ts = torch.where(valid_mask, ts, 0.)
     else:
         base = offset.float().view(-1, 1)  # [B, 1]
         ts = base + torch.arange(T, device=q.device, dtype=torch.float32)  # [B, T]
@@ -88,14 +83,14 @@ def apply_rope(
     ko = torch.stack([kor.to(dtype), koi.to(dtype)], dim=-1)
     qo = qo.view(*dims, D)
     ko = ko.view(*dims, D)
-    
 
     if valid_mask is not None:
-        valid_mask = valid_mask.view(B,1,T,1).expand(B,1,T,D)
-        
+        valid_mask = valid_mask.view(B, 1, T, 1).expand(B, 1, T, D)
+
         qo = torch.where(valid_mask, qo, q.view(*dims, D))
         ko = torch.where(valid_mask, ko, k.view(*dims, D))
     return qo, ko
+
 
 class RotaryEmbedding(nn.Module):
     """Rotary positional embedding (RoPE) from [Su et al 2022](https://arxiv.org/abs/2104.09864).
@@ -114,7 +109,7 @@ class RotaryEmbedding(nn.Module):
         k: torch.Tensor,
         offset: torch.Tensor,
         time_before_heads: bool = False,
-        positions = None
+        positions: torch.Tensor | None = None
     ):
         """Apply rope rotation to query or key tensor."""
         return apply_rope(q, k, offset, self.max_period, time_before_heads, positions)
