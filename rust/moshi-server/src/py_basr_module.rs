@@ -558,6 +558,7 @@ impl M {
         };
         tracing::info!(?bidx, "batched-py channel");
         in_tx.send(InMsg::Init)?;
+        let expect_pcm16le = query.pcm16le;
         let recv_loop = task::spawn(async move {
             // There are two timeouts here:
             // - The short timeout handles the case where the client does not answer the regular pings.
@@ -589,7 +590,7 @@ impl M {
                     Message::Close(_) => break,
                 };
                 last_message_received = std::time::Instant::now();
-                let msg: InMsg = rmp_serde::from_slice(&msg)?;
+                let msg = InMsg::from_ws_payload(&msg, expect_pcm16le)?;
                 in_tx.send(msg)?;
             }
             Ok::<_, anyhow::Error>(())
