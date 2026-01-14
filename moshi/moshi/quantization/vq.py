@@ -139,7 +139,11 @@ class ResidualVectorQuantizer(BaseQuantizer):
         return codes
 
     def decode(self, codes: torch.Tensor) -> torch.Tensor:
-        """Decode the given codes to the quantized representation."""
+        """Decode the given codes to the quantized representation.
+
+        All elements must be 0 <= c < self.cardinality, otherwise a dramatic CUDA crash
+        occurs. We can't check this condition though, to avoid a synchronization point.
+        """
         # codes is [B, K, T], with T frames, K nb of codebooks, vq.decode expects [K, B, T].
         codes = codes.transpose(0, 1)
         quantized = self.vq.decode(codes)
@@ -309,7 +313,7 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         return self.rvq_rest
 
     def set_num_codebooks(self, n: int):
-        assert n >= self.n_q_semantic and n <= self.total_codebooks
+        assert n >= self.n_q_semantic and n <= self.total_codebooks, (n, self.n_q_semantic, self.total_codebooks)
         self.rvq_rest.set_num_codebooks(n - self.n_q_semantic)
 
     @property

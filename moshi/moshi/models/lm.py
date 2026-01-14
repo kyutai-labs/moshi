@@ -8,24 +8,22 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import logging
+import typing as tp
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from functools import partial
-import logging
-import typing as tp
+
 import torch
 from torch import nn
-from ..conditioners import ConditionProvider, ConditionFuser, ConditionTensors
-from ..utils.sampling import sample_token
+
+from ..conditioners import ConditionFuser, ConditionProvider, ConditionTensors
+from ..modules.streaming import State, StreamingContainer, StreamingModule
+from ..modules.transformer import StreamingTransformer, create_norm_fn
 from ..utils.compile import CUDAGraphed
 from ..utils.quantize import replace_linear_with_qlinear
-from ..modules.streaming import StreamingContainer, StreamingModule, State
-from ..modules.transformer import StreamingTransformer, create_norm_fn
-from .lm_utils import (_delay_sequence,
-                       _undelay_sequence,
-                       _init_layer,
-                       ScaledEmbedding)
-
+from ..utils.sampling import sample_token
+from .lm_utils import ScaledEmbedding, _delay_sequence, _init_layer, _undelay_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +95,11 @@ class LMModel(StreamingContainer):
         depformer_weights_per_step_schedule: list[int] | None = None,
         depformer_low_rank_embeddings: int | None = None,
         depformer_pos_emb: str = "sin",
+        depformer_norm: str | None = None,
         existing_text_padding_id: int = 3,
         existing_text_end_padding_id: int = 0,
+        extra_heads_num_heads: int = 0,
+        extra_heads_dim: int = 6,
         context: tp.Optional[int] = None,
         causal: bool = True,
         condition_provider: tp.Optional[ConditionProvider] = None,
@@ -183,29 +184,47 @@ class LMModel(StreamingContainer):
                 [nn.Linear(dim, depformer_dim, bias=False)]
             )
         EmbeddingFactory = partial(EmbeddingFactory, low_rank=depformer_low_rank_embeddings)
-        # Only using up to dep_q - 1 because the last codebook is never an input to Depformer.
-        self.depformer_emb = nn.ModuleList(
-            [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
+        if dep_q > 0:
+            # Only using up to dep_q - 1 because the last codebook is never an input to Depformer.
+            self.depformer_emb = nn.ModuleList(
+                [EmbeddingFactory(self.card + 1, depformer_dim) for _ in range(dep_q - 1)]
+            )
+            self.depformer_text_emb = EmbeddingFactory(
+                text_card + 1,
+                depformer_dim,
+                demux_second_stream=demux_second_text_stream,
+            )
+            if depformer_norm is None:
+                self.depformer_norms = nn.ModuleList([nn.Identity() for _ in range(dep_q)])
+            else:
+                self.depformer_norms = nn.ModuleList(
+                    [create_norm_fn(depformer_norm, depformer_dim) for _ in range(dep_q)])
+            if depformer_dim_feedforward is None:
+                depformer_dim_feedforward = int(hidden_scale * depformer_dim)
+            self.depformer = StreamingTransformer(
+                d_model=depformer_dim,
+                dim_feedforward=depformer_dim_feedforward,
+                norm=norm,
+                weights_per_step_schedule=depformer_weights_per_step_schedule,
+                causal=causal,
+                quantize=quantize,
+                checkpointing=gradient_checkpointing,
+                device=device,
+                dtype=dtype,
+                **kwargs_dep,
+            )
+            # Depformer follow its own cycle of streaming entirely contained in one time step
+            # and should not follow the streaming of the steps dimensions.
+            self.depformer.set_streaming_detached(True)
+        else:  # No-Depformer --- e.g., an ASR model
+            self.depformer_emb = None
+            self.depformer_text_emb = None
+            self.depformer = None
+
+        self.extra_heads = nn.ModuleList(
+            [nn.Linear(dim, extra_heads_dim, bias=False) for _ in range(extra_heads_num_heads)]
         )
-        self.depformer_text_emb = EmbeddingFactory(text_card + 1, depformer_dim,
-                                                   demux_second_stream=demux_second_text_stream)
-        if depformer_dim_feedforward is None:
-            depformer_dim_feedforward = int(hidden_scale * depformer_dim)
-        self.depformer = StreamingTransformer(
-            d_model=depformer_dim,
-            dim_feedforward=depformer_dim_feedforward,
-            norm=norm,
-            weights_per_step_schedule=depformer_weights_per_step_schedule,
-            causal=causal,
-            quantize=quantize,
-            checkpointing=gradient_checkpointing,
-            device=device,
-            dtype=dtype,
-            **kwargs_dep,
-        )
-        # Depformer follow its own cycle of streaming entirely contained in one time step
-        # and should not follow the streaming of the steps dimensions.
-        self.depformer.set_streaming_detached(True)
+
         dim = depformer_dim  # we will directly apply the next linears to the output of the Depformer.
 
         self.linears = nn.ModuleList(
@@ -277,6 +296,11 @@ class LMModel(StreamingContainer):
 
     @property
     def audio_offset(self) -> int:
+        """From which channel does audio start? Always 1 in practice.
+
+        The state has shape [B, text_channels + audio_channels, T] where text_channels=1
+        in practice, but in the future we might want to support >1.
+        """
         return 1
 
     def _get_initial_token(self) -> torch.Tensor:
@@ -388,11 +412,15 @@ class LMModel(StreamingContainer):
         sequence: torch.Tensor,
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
+        assert self.depformer_text_emb
+        assert self.depformer_emb
+        assert self.depformer
+
         B, K, T = sequence.shape
         Ka = self.dep_q
         assert (
             K == self.num_codebooks
-        ), f"Codebooks for Depformer training should be passed all at once, got {K,}."
+        ), f"Codebooks for Depformer training should be passed all at once, got {K}."
         depformer_inputs = []
         for cb_index in range(Ka):
             if self.depformer_multi_linear:
@@ -413,7 +441,7 @@ class LMModel(StreamingContainer):
         depformer_output = self.depformer(depformer_input)
         all_logits = []
         for cb_index in range(Ka):
-            logits = self.linears[cb_index](depformer_output[:, cb_index])
+            logits = self.linears[cb_index](self.depformer_norms[cb_index](depformer_output[:, cb_index]))
             all_logits.append(logits.view(B, T, -1))
         logits = torch.stack(all_logits, 1)
         assert logits.dim() == 4, logits.shape  # [B, Ka, T, card]
@@ -425,6 +453,9 @@ class LMModel(StreamingContainer):
         sequence: torch.Tensor,
         transformer_out: torch.Tensor,
     ) -> torch.Tensor:
+        assert self.depformer_text_emb is not None
+        assert self.depformer_emb is not None
+        assert self.depformer is not None
         B, K, S = sequence.shape
         assert (
             K == 1
@@ -456,7 +487,7 @@ class LMModel(StreamingContainer):
         # depformer_input is [B, 1, depformer_dim].
         # The streaming state of the depformer ensures that the proper layer is run.
         dep_output = self.depformer(depformer_input)
-        logits = self.linears[depformer_cb_index](dep_output)
+        logits = self.linears[depformer_cb_index](self.depformer_norms[depformer_cb_index](dep_output))
         logits = logits[:, None]
         assert logits.dim() == 4, logits.shape  # [B, Ka, S, card]
         return logits
@@ -473,10 +504,12 @@ class LMModel(StreamingContainer):
 
         for emb_layer in self.emb:
             _init_layer(emb_layer)
-        for emb_layer in self.depformer_emb:
-            _init_layer(emb_layer)
+        if self.depformer_emb is not None:
+            for emb_layer in self.depformer_emb:
+                _init_layer(emb_layer)
         _init_layer(self.text_emb)
-        _init_layer(self.depformer_text_emb)
+        if self.depformer_text_emb is not None:
+            _init_layer(self.depformer_text_emb)
         _init_layer(self.text_linear)
 
         for tr_layer in self.transformer.layers:
@@ -491,11 +524,12 @@ class _LMGenState(State):
     cache: torch.Tensor
     initial: torch.Tensor
     graphed_main: CUDAGraphed
-    graphed_depth: CUDAGraphed
+    graphed_depth: CUDAGraphed | None
     offsets: torch.Tensor
     offset_cpu: int = 0
     condition_sum: torch.Tensor | None = None
     condition_cross: torch.Tensor | None = None
+    cfg_is_masked_until: torch.Tensor | None = None
     exit_stack: ExitStack = field(default_factory=ExitStack)
     reset_callback: tp.Callable[[torch.Tensor], None] | None = None
     set_exec_mask_callback: tp.Callable[[torch.Tensor], None] | None = None
@@ -532,8 +566,10 @@ class LMGen(StreamingModule[_LMGenState]):
         check: bool = False,
         condition_tensors: ConditionTensors | None = None,
         on_text_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
+        on_text_logits_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         on_audio_hook: tp.Optional[tp.Callable[[torch.Tensor], None]] = None,
         support_out_of_sync: bool = False,
+        cfg_is_masked_until: list[int] | None = None,
         cfg_is_no_text: bool = False,
     ):
         assert not lm_model.training, "generation shouldn't be used in training mode."
@@ -556,11 +592,13 @@ class LMGen(StreamingModule[_LMGenState]):
         )
         self.condition_tensors = condition_tensors
         self.on_text_hook = on_text_hook
+        self.on_text_logits_hook = on_text_logits_hook
         self.on_audio_hook = on_audio_hook
         self.support_out_of_sync = support_out_of_sync
+        self.cfg_is_masked_until = cfg_is_masked_until
         self.cfg_is_no_text = cfg_is_no_text
         if self.cfg_coef != 1.:
-            if not self.cfg_is_no_text:
+            if not self.cfg_is_no_text and not self.cfg_is_masked_until:
                 assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
                 assert self.condition_tensors, "Missing condition tensors for CFG."
 
@@ -590,11 +628,20 @@ class LMGen(StreamingModule[_LMGenState]):
 
         disable = lm_model.device.type != 'cuda'
         graphed_main = CUDAGraphed(lm_model.forward_text, disable=disable)
-        graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
+        if lm_model.depformer is not None:
+            graphed_depth = CUDAGraphed(self.depformer_step, disable=disable)
+        else:
+            graphed_depth = None
+
+        if self.cfg_is_masked_until is None:
+            cfg_is_masked_until = None
+        else:
+            cfg_is_masked_until = torch.tensor(self.cfg_is_masked_until, dtype=torch.long, device=lm_model.device)
 
         state = _LMGenState(
             batch_size, lm_model.device, cache, initial, graphed_main, graphed_depth,
-            offsets, condition_sum=condition_sum, condition_cross=condition_cross)
+            offsets, condition_sum=condition_sum, condition_cross=condition_cross,
+            cfg_is_masked_until=cfg_is_masked_until)
 
         if self.cfg_coef != 1.:
             batch_size *= 2
@@ -619,8 +666,9 @@ class LMGen(StreamingModule[_LMGenState]):
         return state
 
     @torch.no_grad()
-    def step(self, input_tokens: torch.Tensor,
-             depformer_replace_tokens: torch.Tensor | None = None) -> torch.Tensor | None:
+    def _step(self, input_tokens: torch.Tensor,
+              depformer_replace_tokens: torch.Tensor | None = None
+              ) -> tuple[torch.Tensor, torch.Tensor] | None:
         state = self._streaming_state
         if state is None:
             raise RuntimeError(
@@ -662,12 +710,18 @@ class LMGen(StreamingModule[_LMGenState]):
             assert (input_[:, lm_model.audio_offset :] <= lm_model.card).all(), input_
             assert (input_[:, :1] <= lm_model.text_card).all()
 
+        zero = torch.full((1,), self.lm_model.zero_token_id, dtype=torch.long, device=input_.device)
         if self.cfg_coef != 1.:
-            zero = torch.full((1,), self.lm_model.zero_token_id, dtype=torch.long, device=input_.device)
-            input_ = input_.repeat(2, 1, 1)
+            if state.cfg_is_masked_until is not None:
+                limit = self.delays_cuda[:, None] + state.cfg_is_masked_until.view(-1, 1, 1)
+                is_zeroed = state.offsets[:, None, None] <= limit
+
+                masked = torch.where(is_zeroed & ~is_init, zero, input_)
+                input_ = torch.cat([input_, masked], dim=0)
+            else:
+                input_ = input_.repeat(2, 1, 1)
             if self.cfg_is_no_text:
-                # Zero out text stream if we want to have the CFG over it.
-                input_[B:, :1] = torch.where(is_init[:, :1], input_[B:, :1], zero)
+                input_[B:, :1] = torch.where(~is_init[:, :1], zero, input_[B:, :1])
 
         transformer_out, text_logits = state.graphed_main(input_, state.condition_sum, state.condition_cross)
         if self.cfg_coef != 1.:
@@ -677,6 +731,8 @@ class LMGen(StreamingModule[_LMGenState]):
             else:
                 text_logits = logits_null + (logits - logits_null) * self.cfg_coef
         # Shape of text_logits should be [B, K_text=1, T=1, Card_text]
+        if self.on_text_logits_hook:
+            self.on_text_logits_hook(text_logits)
         text_token = sample_token(
             text_logits.float(),
             self.use_sampling,
@@ -689,24 +745,31 @@ class LMGen(StreamingModule[_LMGenState]):
         text_token = text_token[:, 0, 0]  # shape is [B]
         if self.on_text_hook is not None:
             self.on_text_hook(text_token)
-        if depformer_replace_tokens is None:
-            audio_tokens = state.graphed_depth(text_token, transformer_out)
+        if state.graphed_depth is None:
+            audio_tokens = None
+        else:
+            if depformer_replace_tokens is None:
+                audio_tokens = state.graphed_depth(text_token, transformer_out)
+            else:
+                assert depformer_replace_tokens.dim() == 3
+                audio_tokens = depformer_replace_tokens.squeeze(-1)
             if self.on_audio_hook is not None:
                 self.on_audio_hook(audio_tokens)
-        else:
-            assert depformer_replace_tokens.dim() == 3
-            audio_tokens = depformer_replace_tokens.squeeze(-1)
 
         state.offsets = torch.where(state.exec_mask, state.offsets + 1, state.offsets)
         state.offset_cpu += 1
         positions = (state.offsets % CT)[:, None, None]
         scatter_with_mask_(state.cache[:, :1], -1, positions,
                            text_token[:, None, None], state.exec_mask[:, None, None])
-        audio_tokens = audio_tokens[:, :, None]
-        scatter_with_mask_(state.cache[:, 1: lm_model.dep_q + 1, :], -1,
-                           positions.expand_as(audio_tokens),
-                           audio_tokens,
-                           state.exec_mask[:, None, None])
+        if audio_tokens is not None:
+            audio_tokens = audio_tokens[:, :, None]
+            scatter_with_mask_(
+                state.cache[:, 1 : lm_model.dep_q + 1, :],
+                -1,
+                positions.expand_as(audio_tokens),
+                audio_tokens,
+                state.exec_mask[:, None, None],
+            )
 
         if not self.support_out_of_sync and state.offset_cpu <= self.max_delay:
             # When using out of sync exec, should not rely on this being None.
@@ -717,7 +780,31 @@ class LMGen(StreamingModule[_LMGenState]):
         out = state.cache.gather(dim=2, index=index)
         mask = (state.offsets <= self.max_delay) | ~state.exec_mask
         out[mask, :, :] = lm_model.ungenerated_token_id
-        return out
+        return out, transformer_out
+
+    @torch.no_grad()
+    def step(self, input_tokens: torch.Tensor,
+             depformer_replace_tokens: torch.Tensor | None = None) -> torch.Tensor | None:
+        out = self._step(input_tokens, depformer_replace_tokens)
+        if out is None:
+            return None
+        return out[0]
+
+    @torch.no_grad()
+    def step_with_extra_heads(
+        self,
+        input_tokens: torch.Tensor,
+        depformer_replace_tokens: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]] | None:
+        out = self._step(input_tokens, depformer_replace_tokens)
+        if out is None:
+            return None
+        out, transformer_out = out
+        extra_heads = [
+            torch.nn.functional.softmax(extra_head(transformer_out), dim=-1)
+            for extra_head in self.lm_model.extra_heads
+        ]
+        return out, extra_heads
 
     def depformer_step(
         self,
@@ -731,6 +818,7 @@ class LMGen(StreamingModule[_LMGenState]):
         prev_token = text_token
         lm_model = self.lm_model
         depformer_tokens: list[torch.Tensor] = []
+        assert lm_model.depformer
         assert not lm_model.depformer.is_streaming
         with lm_model.depformer.streaming(B_cfg):
             assert lm_model.depformer.is_streaming

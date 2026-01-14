@@ -112,9 +112,11 @@ class LUTConditioner(TextConditioner):
         output_dim (int): Output dim of the conditioner.
         pad_idx (int, optional): Index for padding token. Defaults to 0.
     """
-    def __init__(self, n_bins: int, tokenizer: str, possible_values: list[str] | None = None, **kwargs):
+    def __init__(self, n_bins: int, tokenizer: str, possible_values: list[str] | None = None,
+                 init_scale: float = 1., **kwargs):
         super().__init__(**kwargs)
         self.embed = nn.Embedding(n_bins + 1, self.dim)  # n_bins + 1 for padding.
+        self.embed.weight.data *= init_scale
         if tokenizer == 'noop':
             self.tokenizer = NoopTokenizer(n_bins, possible_values)
         else:

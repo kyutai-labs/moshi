@@ -7,5 +7,5 @@ sphn==0.1.4
 torch==2.2.0
 numpy==1.26.4
 aiohttp>=3.10.5, <3.11
-huggingface-hub==0.24.6
+huggingface-hub>=0.24, <0.34
 pytest==8.3.3

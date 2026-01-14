@@ -10,7 +10,6 @@ import mlx.core as mx
 
 
 class KVCache:
-
     def __init__(self, head_dim, n_kv_heads):
         self.n_kv_heads = n_kv_heads
         if isinstance(head_dim, int):
@@ -60,7 +59,6 @@ class KVCache:
 
 
 class RotatingKVCache:
-
     def __init__(self, head_dim, n_kv_heads, max_size, keep=0, step=256):
         self.n_kv_heads = n_kv_heads
         if isinstance(head_dim, int):

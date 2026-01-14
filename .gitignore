@@ -81,6 +81,7 @@ target-trunk/
 
 # IPython
 profile_default/
+profiler_data/
 ipython_config.py
 
 # pyenv
@@ -182,3 +183,5 @@ client/node_modules
 timings.json
 mlx-trace.json
 /scripts/token.txt
+uv.lock
+tts-outputs

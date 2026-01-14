@@ -115,7 +115,7 @@ def model_server(client_to_server, server_to_client, lm_config, args):
     model_file = args.moshi_weight
     tokenizer_file = args.tokenizer
     if model_file is None:
-        if "moshi_name" in lm_config:
+        if type(lm_config) is dict and "moshi_name" in lm_config:
             model_file = hf_hub_download(args.hf_repo, lm_config["moshi_name"])
         elif args.quantized == 8:
             model_file = hf_hub_download(args.hf_repo, "model.q8.safetensors")
@@ -127,7 +127,7 @@ def model_server(client_to_server, server_to_client, lm_config, args):
             model_file = hf_hub_download(args.hf_repo, "model.safetensors")
     model_file = hf_get(model_file)
     if tokenizer_file is None:
-        if "tokenizer_name" in lm_config:
+        if type(lm_config) is dict and "tokenizer_name" in lm_config:
             tokenizer_file = hf_hub_download(args.hf_repo, lm_config["tokenizer_name"])
         else:
             tokenizer_file = hf_hub_download(args.hf_repo, "tokenizer_spm_32k_3.model")
@@ -137,7 +137,8 @@ def model_server(client_to_server, server_to_client, lm_config, args):
     log("info", f"[SERVER] loading text tokenizer {tokenizer_file}")
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_file)  # type: ignore
     mx.random.seed(299792458)
-    lm_config = models.LmConfig.from_config_dict(lm_config)
+    if type(lm_config) is dict:
+        lm_config = models.LmConfig.from_config_dict(lm_config)
     model = models.Lm(lm_config)
     model.set_dtype(mx.bfloat16)
     if args.quantized is not None:
@@ -169,7 +170,7 @@ def model_server(client_to_server, server_to_client, lm_config, args):
     try:
         while True:
             data = client_to_server.get()
-            data = mx.array(data).transpose(1, 0)[:, :gen.main_codebooks]
+            data = mx.array(data).transpose(1, 0)[:, : gen.main_codebooks]
             text_token = gen.step(data, ct=ct)
             text_token = text_token[0].item()
             audio_tokens = gen.last_audio_tokens()
@@ -187,7 +188,7 @@ def model_server(client_to_server, server_to_client, lm_config, args):
 def web_server(client_to_server, server_to_client, lm_config, args):
     mimi_file = args.mimi_weight
     if mimi_file is None:
-        if "mimi_name" in lm_config:
+        if type(lm_config) is dict and "mimi_name" in lm_config:
             mimi_file = hf_hub_download(args.hf_repo, lm_config["mimi_name"])
         else:
             mimi_file = hf_hub_download(
@@ -197,13 +198,16 @@ def web_server(client_to_server, server_to_client, lm_config, args):
     input_queue = queue.Queue()
     output_queue = queue.Queue()
     text_queue = queue.Queue()
-    print(lm_config)
-    nc = lm_config.get("dep_q", 8)
+    if type(lm_config) is dict:
+        nc = lm_config.get("dep_q", 8)
+        max_delay = max(lm_config["delays"])
+    else:
+        nc = lm_config.depformer.num_slices
+        max_delay = max(lm_config.audio_delays)
     audio_tokenizer = rustymimi.StreamTokenizer(mimi_file, num_codebooks=nc)  # type: ignore
     start = server_to_client.get()
     log("info", f"[CLIENT] received '{start}' from server, starting...")
 
-    max_delay = max(lm_config["delays"])
     full_warmup(audio_tokenizer, client_to_server, server_to_client, max_delay)
 
     async def send_loop():
@@ -251,6 +255,7 @@ def web_server(client_to_server, server_to_client, lm_config, args):
 
         async def recv_loop():
             nonlocal close
+            all_pcm_data = None
             try:
                 async for message in ws:
                     if message.type == aiohttp.WSMsgType.ERROR:
@@ -271,47 +276,25 @@ def web_server(client_to_server, server_to_client, lm_config, args):
                     kind = message[0]
                     if kind == 1:  # audio
                         payload = message[1:]
-                        opus_reader.append_bytes(payload)
+                        pcm = opus_reader.append_bytes(payload)
+                        if pcm.shape[-1] == 0:
+                            continue
+                        if all_pcm_data is None:
+                            all_pcm_data = pcm
+                        else:
+                            all_pcm_data = np.concatenate((all_pcm_data, pcm))
+                        while all_pcm_data.shape[-1] >= FRAME_SIZE:
+                            chunk = all_pcm_data[:FRAME_SIZE]
+                            all_pcm_data = all_pcm_data[FRAME_SIZE:]
+                            input_queue.put_nowait(chunk)
+
                     else:
                         log("warning", f"unknown message kind {kind}")
             finally:
                 close = True
                 log("info", "connection closed")
 
-        async def opus_loop():
-            all_pcm_data = None
-
-            while True:
-                if close:
-                    return
-                await asyncio.sleep(0.001)
-                pcm = opus_reader.read_pcm()
-                if pcm.shape[-1] == 0:
-                    continue
-                if all_pcm_data is None:
-                    all_pcm_data = pcm
-                else:
-                    all_pcm_data = np.concatenate((all_pcm_data, pcm))
-                while all_pcm_data.shape[-1] >= FRAME_SIZE:
-                    chunk = all_pcm_data[:FRAME_SIZE]
-                    all_pcm_data = all_pcm_data[FRAME_SIZE:]
-                    input_queue.put_nowait(chunk)
-
         async def send_loop():
-            while True:
-                if close:
-                    return
-                await asyncio.sleep(0.001)
-                msg = opus_writer.read_bytes()
-                if len(msg) > 0:
-                    await ws.send_bytes(b"\x01" + msg)
-                try:
-                    _text = text_queue.get(block=False)
-                    await ws.send_bytes(b"\x02" + bytes(_text, encoding="utf8"))
-                except queue.Empty:
-                    continue
-
-        async def another_loop():
             while True:
                 if close:
                     return
@@ -319,18 +302,23 @@ def web_server(client_to_server, server_to_client, lm_config, args):
                 try:
                     pcm_data = output_queue.get(block=False)
                     assert pcm_data.shape == (1920,), pcm_data.shape
-                    opus_writer.append_pcm(pcm_data)
+                    msg = opus_writer.append_pcm(pcm_data)
+                    if len(msg) > 0:
+                        await ws.send_bytes(b"\x01" + msg)
+                    _text = text_queue.get(block=False)
+                    await ws.send_bytes(b"\x02" + bytes(_text, encoding="utf8"))
                 except queue.Empty:
                     continue
 
         log("info", "accepted connection")
         close = False
         async with lock:
+            log("info", "lock acquired")
             opus_writer = sphn.OpusStreamWriter(SAMPLE_RATE)
             opus_reader = sphn.OpusStreamReader(SAMPLE_RATE)
             # Send the handshake.
             await ws.send_bytes(b"\x00")
-            await asyncio.gather(opus_loop(), recv_loop(), send_loop(), another_loop())
+            await asyncio.gather(recv_loop(), send_loop())
         log("info", "done with connection")
         return ws
 

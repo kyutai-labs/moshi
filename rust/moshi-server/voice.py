@@ -20,8 +20,14 @@ from torch.nn import functional as F
 import torchaudio.transforms
 
 
-def normalize_loudness(wav: torch.Tensor, sample_rate: int, loudness_headroom_db: float = 22,
-                       energy_floor: float = 2e-3):
+def normalize_loudness(
+    wav: torch.Tensor,
+    sample_rate: int,
+    # The headroom is set more conservatively than in tts_make_voice.py, which is what
+    # we use for pre-made recordings.
+    loudness_headroom_db: float = 18,
+    energy_floor: float = 2e-3
+):
     """Normalize an input signal to a user loudness in dB LKFS.
     Audio loudness is defined according to the ITU-R BS.1770-4 recommendation.
 

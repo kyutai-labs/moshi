@@ -98,7 +98,7 @@ impl Logger {
         let audio_tokens = Tensor::cat(&audio_tokens, candle::D::Minus1)?;
         let since_epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
         let (secs, us) = (since_epoch.as_secs(), since_epoch.subsec_micros());
-        let base_path = log_dir.as_ref().join(format!("{}-tts-{secs}-{us}", instance_name));
+        let base_path = log_dir.as_ref().join(format!("{instance_name}-tts-{secs}-{us}"));
         let json_filename = base_path.with_extension("json");
         let query = QueryWithTexts { query, texts };
         let json_content = serde_json::to_string_pretty(&query)?;
@@ -246,7 +246,7 @@ impl Encoder {
 
 impl Model {
     pub fn new(tts: &crate::TtsConfig, config: &crate::Config, dev: &Device) -> Result<Self> {
-        let dtype = dev.bf16_default_to_f32();
+        let dtype = crate::utils::model_dtype(tts.dtype_override.as_deref(), dev)?;
         let model_config = &tts.model;
         let audio_codebooks = model_config.audio_codebooks;
         let audio_tokenizer =

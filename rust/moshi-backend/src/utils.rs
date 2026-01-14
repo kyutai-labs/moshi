@@ -33,20 +33,6 @@ impl BuildInfo {
     }
 }
 
-pub struct WrapJson<T>(pub anyhow::Result<T>);
-
-impl<T: serde::Serialize> axum::response::IntoResponse for WrapJson<T> {
-    fn into_response(self) -> axum::response::Response {
-        match self.0 {
-            Ok(v) => axum::Json(v).into_response(),
-            Err(err) => {
-                tracing::error!(?err, "returning internal server error 500");
-                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("{err}")).into_response()
-            }
-        }
-    }
-}
-
 pub fn replace_env_vars(input: &str) -> String {
     let re = regex::Regex::new(r"\$([A-Za-z_][A-Za-z0-9_]*)").unwrap();
     re.replace_all(input, |caps: &regex::Captures| {
@@ -54,18 +40,4 @@ pub fn replace_env_vars(input: &str) -> String {
         std::env::var(var_name).unwrap_or_else(|_| "".to_string())
     })
     .to_string()
-}
-
-pub struct WrapBincode<T>(pub anyhow::Result<T>);
-
-impl<T: serde::Serialize> axum::response::IntoResponse for WrapBincode<T> {
-    fn into_response(self) -> axum::response::Response {
-        match self.0.and_then(|v| Ok(bincode::serialize(&v)?)) {
-            Ok(v) => (axum::http::StatusCode::OK, v).into_response(),
-            Err(err) => {
-                tracing::error!(?err, "returning internal server error 500");
-                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("{err}")).into_response()
-            }
-        }
-    }
 }

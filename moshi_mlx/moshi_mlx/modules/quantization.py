@@ -20,11 +20,14 @@ class EuclideanCodebook(nn.Module):
         self._embedding = self.embedding_sum / cluster_usage
         self._c2 = self._embedding.square().sum(axis=-1) / 2
 
-    def update(self, parameters: dict) -> nn.Module:
-        super().update(parameters)
+    def update_in_place(self):
         cluster_usage = mx.maximum(self.cluster_usage, self._epsilon)[:, None]
         self._embedding = self.embedding_sum / cluster_usage
         self._c2 = self._embedding.square().sum(axis=-1) / 2
+
+    def update(self, parameters: dict) -> nn.Module:
+        super().update(parameters)
+        self.update_in_place()
         return self
 
     def encode(self, xs: mx.array) -> mx.array:
@@ -35,7 +38,8 @@ class EuclideanCodebook(nn.Module):
 
     def decode(self, xs: mx.array) -> mx.array:
         target_shape = list(xs.shape) + [self._dim]
-        return mx.take(self._embedding, xs.flatten(), axis=0).reshape(target_shape)
+        res = mx.take(self._embedding, xs.flatten(), axis=0).reshape(target_shape)
+        return res
 
 
 class VectorQuantization(nn.Module):
@@ -142,7 +146,7 @@ class SplitResidualVectorQuantizer(nn.Module):
         input_dim: int | None,
         output_dim: int | None,
         nq: int,
-        bins: int
+        bins: int,
     ):
         super().__init__()
         self._nq = nq
@@ -160,7 +164,7 @@ class SplitResidualVectorQuantizer(nn.Module):
             output_dim=output_dim,
             nq=nq - 1,
             bins=bins,
-            force_projection=True
+            force_projection=True,
         )
 
     def encode(self, xs: mx.array) -> mx.array:

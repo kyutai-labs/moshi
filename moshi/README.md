@@ -28,6 +28,10 @@ pip install -U -e "git+https://git@github.com/kyutai-labs/moshi#egg=moshi&subdir
 While we hope that the present codebase will work on Windows, we do not provide official support for it.
 At the moment, we do not support quantization for the PyTorch version, so you will need a GPU with a significant amount of memory (24GB).
 
+### About using Python 3.14
+
+If you want to use Python 3.14, you'll have to disable `torch.compile()` with the environment variable
+`NO_TORCH_COMPILE=1` because as the time of writing, `torch.compile()` does not support Python 3.14.
 
 ## Usage
 
