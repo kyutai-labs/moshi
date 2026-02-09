@@ -33,6 +33,15 @@ class LayerNormF32(nn.LayerNorm):
         return out_f32.to(input.dtype)
 
 
+def expand_repeated_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+    b, h, t, d = x.shape
+    return (
+        x[:, :, None, :, :]
+        .expand(b, h, n_rep, t, d)
+        .reshape(b, h * n_rep, t, d)
+    )
+
+
 @torch_compile_lazy
 def _rms_norm(
     x: torch.Tensor,
@@ -354,6 +363,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         causal: bool = False,
         context: tp.Optional[int] = None,
         rope: tp.Optional[RotaryEmbedding] = None,
+        kv_repeat: int = 1,
         weights_per_step: int = 0,
         weights_per_step_schedule: list[int] | None = None,
         cross_attention: bool = False,
@@ -373,14 +383,17 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         self.weights_per_step_schedule = weights_per_step_schedule
         self.cross_attention = cross_attention
         self.cache_cross_attention = cache_cross_attention
+        self.kv_repeat = kv_repeat
         if cross_attention:
             assert not weights_per_step, "weights_per_step not supported for cross attention."
             assert rope is None, "rope and cross_attention makes no sense."
             assert not causal, "causal and cross attention makes no sense."
             # We do not want to activate the streaming KVCache if we are a cross attention.
             # self.set_streaming_detached(True)
-
-        out_dim = 3 * embed_dim
+        out_dim = embed_dim
+        num_kv = num_heads // kv_repeat
+        kv_dim = (embed_dim // num_heads) * num_kv
+        out_dim += 2 * kv_dim
         mult = 1
         if weights_per_step:
             if weights_per_step_schedule:
@@ -461,7 +474,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
                 capacity = self.context
 
             kv_cache = RingKVCache(
-                batch_size, self.num_heads, dim_per_head, capacity,
+                batch_size, self.num_heads // self.kv_repeat, dim_per_head, capacity,
                 respect_exec_mask=not self.weights_per_step, device=device, dtype=dtype
             )
         return _MHAState(
@@ -540,14 +553,24 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         else:
             projected = apply_weights_per_step(
                 self.in_projs, self.weights_per_step_schedule, query, offset_cpu)
-
-            q, k, v = rearrange(
-                projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
-            )
+            if self.kv_repeat == 1:
+                q, k, v = rearrange(
+                    projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
+                )
+            else:
+                q = rearrange(projected[:, :, :self.embed_dim], "b t (h d) -> b h t d", h=self.num_heads)
+                k, v = rearrange(
+                    projected[:, :, self.embed_dim:],
+                    "b t (p kh d) -> p b kh t d", p=2, kh=self.num_heads // self.kv_repeat
+                )
         if self.rope:
             q, k = self.rope(q, k, offset, time_before_heads=False)
 
         k, v, pos_k = self._complete_kv(k, v)
+        if self.kv_repeat > 1:
+            k = expand_repeated_kv(k, self.kv_repeat)
+            v = expand_repeated_kv(v, self.kv_repeat)
+
         pos_k = pos_k[:, None]
         if self.causal:
             pos_q = offset.view(-1, 1, 1) + torch.arange(T, device=q.device, dtype=torch.long).view(
@@ -619,6 +642,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         norm: str = "layer_norm",
         layer_scale: tp.Optional[float] = None,
         gating: str = "none",
+        kv_repeat: int = 1,
         weights_per_step: int = 0,
         weights_per_step_schedule: list[int] | None = None,
         activation=F.gelu,
@@ -633,6 +657,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         attn_kwargs: tp.Dict[str, tp.Any] = {
             "embed_dim": d_model,
             "num_heads": num_heads,
+            "kv_repeat": kv_repeat
         }
         if not skip_self_attn:
             self.self_attn: StreamingMultiheadAttention = StreamingMultiheadAttention(
@@ -834,10 +859,11 @@ class StreamingTransformer(StreamingModule[_TransformerState]):
         self.positional_scale = positional_scale
         self.betas = betas
 
-        assert positional_embedding in {"sin", "rope", "sin_rope", "none"}
+        assert positional_embedding in {"sin", "rope", "sin_rope", "none", "rope_concat"}
         self.rope: tp.Optional[RotaryEmbedding] = None
-        if self.positional_embedding in {"rope", "sin_rope"}:
-            self.rope = RotaryEmbedding(max_period=max_period)
+        if self.positional_embedding in {"rope", "sin_rope", "rope_concat"}:
+            interleave = self.positional_embedding != "rope_concat"
+            self.rope = RotaryEmbedding(interleave=interleave, max_period=max_period)
 
         self.checkpointing = checkpointing
 

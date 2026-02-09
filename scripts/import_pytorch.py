@@ -45,7 +45,7 @@ def import_model(
         'depformer_dim', 'depformer_num_heads', 'depformer_num_layers', 'depformer_dim_feedforward',
         'depformer_layer_scale', 'depformer_multi_linear', 'depformer_norm',
         'depformer_max_period', 'depformer_gating', 'depformer_pos_emb', 'depformer_weights_per_step',
-        'depformer_low_rank_embeddings', 'demux_second_stream',
+        'depformer_low_rank_embeddings', 'demux_second_stream', 'kv_repeat', 'depformer_kv_repeat',
         'text_card_out']
     config: dict[str, tp.Any] = {}
     config['card'] = 2048
