@@ -120,14 +120,15 @@ _lm_kwargs = {
 
 
 def hf_get(filename: str | Path, hf_repo: str | None = None,
-           check_local_file_exists: bool = False) -> Path:
+           check_local_file_exists: bool = False,
+           revision: str | None = None) -> Path:
     if isinstance(filename, Path):
         return filename
     if filename.startswith("hf://"):
         parts = filename.removeprefix("hf://").split("/")
         repo_name = parts[0] + "/" + parts[1]
         filename = "/".join(parts[2:])
-        return Path(hf_hub_download(repo_name, filename))
+        return Path(hf_hub_download(repo_name, filename, revision=revision))
     elif filename.startswith("file://"):
         # Provide a way to force the read of a local file.
         filename = filename.removeprefix("file://")
@@ -136,7 +137,7 @@ def hf_get(filename: str | Path, hf_repo: str | None = None,
         if check_local_file_exists:
             if Path(filename).exists():
                 return Path(filename)
-        return Path(hf_hub_download(hf_repo, filename))
+        return Path(hf_hub_download(hf_repo, filename, revision=revision))
     else:
         return Path(filename)
 
@@ -185,6 +186,7 @@ class CheckpointInfo:
         config_path: Path | str | None = None,
         mimi_config_path: Path | str | None = None,
         lora_weights: Path | str | None = None,
+        revision: str | None = None,
     ) -> "CheckpointInfo":
         """Downloads the checkpoints from the given repo, along with its config.
 
@@ -196,7 +198,7 @@ class CheckpointInfo:
         """
         if config_path is None:
             try:
-                config_path = hf_hub_download(hf_repo, "config.json")
+                config_path = hf_hub_download(hf_repo, "config.json", revision=revision)
             except EntryNotFoundError:
                 # No config.json, which might indicate legacy repository.
                 warnings.warn(
@@ -232,33 +234,33 @@ class CheckpointInfo:
             model_id = lm_config.pop("model_id", {})
 
         if moshi_weights is None:
-            moshi_weights_final = hf_get(moshi_name, hf_repo)
+            moshi_weights_final = hf_get(moshi_name, hf_repo, revision=revision)
         else:
-            moshi_weights_final = hf_get(moshi_weights)
+            moshi_weights_final = hf_get(moshi_weights, revision=revision)
 
         if mimi_weights is None:
-            mimi_weights_final = hf_get(mimi_name, hf_repo)
+            mimi_weights_final = hf_get(mimi_name, hf_repo, revision=revision)
         else:
-            mimi_weights_final = hf_get(mimi_weights)
+            mimi_weights_final = hf_get(mimi_weights, revision=revision)
 
         if tokenizer is None:
-            tokenizer_final = hf_get(tokenizer_name, hf_repo)
+            tokenizer_final = hf_get(tokenizer_name, hf_repo, revision=revision)
         else:
-            tokenizer_final = hf_get(tokenizer)
+            tokenizer_final = hf_get(tokenizer, revision=revision)
 
         if mimi_config_path is None and mimi_config_name is not None:
-            mimi_config_path = hf_get(mimi_config_name, hf_repo)
+            mimi_config_path = hf_get(mimi_config_name, hf_repo, revision=revision)
         elif mimi_config_path is not None:
-            mimi_config_path = hf_get(mimi_config_path)
+            mimi_config_path = hf_get(mimi_config_path, revision=revision)
         if mimi_config_path is None:
             mimi_config = None
         else:
             mimi_config = json.loads(mimi_config_path.read_text())
 
         if lora_weights is None and lora_name:
-            lora_weights_final = hf_get(lora_name, hf_repo)
+            lora_weights_final = hf_get(lora_name, hf_repo, revision=revision)
         elif lora_weights is not None:
-            lora_weights_final = hf_get(lora_weights)
+            lora_weights_final = hf_get(lora_weights, revision=revision)
         else:
             lora_weights_final = None
 
