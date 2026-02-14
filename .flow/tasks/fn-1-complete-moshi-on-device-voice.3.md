@@ -37,9 +37,8 @@ Create an idiomatic Swift wrapper (`MoshiFFI.swift`) that wraps the C FFI functi
 - [ ] Swift file compiles when imported alongside MoshiFFI.xcframework
 - [ ] No force-unwraps (`!`) — all optionals handled safely
 ## Done summary
-TBD
-
+Created MoshiFFI.swift and MoshiError.swift providing an idiomatic Swift wrapper around the Moshi C FFI layer. The MoshiSession class wraps the opaque pointer with ARC-based cleanup (deinit calls moshi_destroy), enforces thread safety via a serial DispatchQueue, bridges errors through moshi_get_last_error() to a Swift MoshiError enum, and wraps 14 of 16 C functions with safe memory management (defer-based moshi_free_string for returned strings, withCString for input strings).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 30a3b4b62bc1ceb52b20c87fa7b4be52f3870123
+- Tests: swift syntax review - no force-unwraps, all optionals handled
 - PRs:

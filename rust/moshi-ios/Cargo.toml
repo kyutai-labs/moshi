@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "moshi_ios"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 moshi = { path = "../moshi-core" }
