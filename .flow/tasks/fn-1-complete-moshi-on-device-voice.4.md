@@ -36,9 +36,8 @@ Write a macOS test harness that verifies end-to-end Moshi inference works before
 - [ ] Test marked `#[ignore]` by default (opt-in via `--ignored`)
 - [ ] Test passes on macOS with downloaded models: `MOSHI_TEST_LM_PATH=... cargo test --package moshi-ios --test inference_test -- --ignored --nocapture`
 ## Done summary
-TBD
-
+Added macOS integration test harness at rust/moshi-ios/tests/inference_test.rs that verifies end-to-end Moshi inference via the C FFI. The test exercises the full lifecycle (create, load, process 10+ frames, verify output, destroy) with model paths configurable via environment variables and all tests ignored by default.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: f94ffd1640b20f0387e0ce54ee6283f82ce873b9
+- Tests: cargo test --package moshi-ios --test inference_test --no-run, cargo test --package moshi-ios --test inference_test, cargo test --package moshi-ios
 - PRs:
