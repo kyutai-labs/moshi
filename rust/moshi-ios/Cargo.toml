@@ -1,0 +1,24 @@
+[package]
+name = "moshi-ios"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "moshi_ios"
+crate-type = ["staticlib"]
+
+[dependencies]
+moshi = { path = "../moshi-core" }
+candle = { version = "0.9.1", package = "candle-core" }
+candle-nn = "0.9.1"
+candle-transformers = "0.9.1"
+anyhow = "1"
+log = "0.4"
+sentencepiece = "0.11.2"
+
+[features]
+default = ["metal"]
+metal = ["moshi/metal", "candle/metal", "candle-nn/metal"]
+
+[build-dependencies]
+cbindgen = "0.26"
