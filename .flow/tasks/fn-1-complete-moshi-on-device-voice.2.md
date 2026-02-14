@@ -34,9 +34,8 @@ Rebuild the MoshiFFI XCFramework with the current source header (all 16 C functi
 - [ ] Build script updated to use stripped release profile
 - [ ] Existing `cargo test` in workspace still passes
 ## Done summary
-TBD
-
+Rebuilt MoshiFFI XCFramework with all 17 C functions in header (was missing 5), optimized binary size from ~128MB to ~46MB per slice by using release-no-debug profile with strip="symbols", and fixed sentencepiece cross-compilation for CMake 4.x via iOS toolchain shim.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 721126a6ece690d2802b97c8211e0fcfe26524e3
+- Tests: cargo test --package moshi-ios, cargo test --package moshi, ./rust/scripts/build-xcframework.sh
 - PRs:
