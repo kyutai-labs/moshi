@@ -412,11 +412,12 @@ class TTSModel:
         machine = StateMachine(
             token_ids=token_ids, second_stream_ahead=second_stream_ahead,
             max_padding=max_padding, initial_padding=initial_padding)
+        max_speakers = checkpoint_info.tts_config.get('max_speakers', DEFAULT_MAX_SPEAKERS)
         tts_model = TTSModel(
             lm=lm, mimi=mimi, tokenizer=tokenizer,
             voice_suffix=voice_suffix, voice_repo=voice_repo,
             machine=machine, delay_steps=delay_steps, multistream=multistream,
-            max_speakers=checkpoint_info.raw_config.get('max_speakers', DEFAULT_MAX_SPEAKERS),
+            max_speakers=max_speakers,
             **kwargs)
         mimi_n_q = tts_model.n_q
 
