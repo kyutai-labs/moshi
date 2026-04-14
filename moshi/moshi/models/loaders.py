@@ -377,6 +377,8 @@ def get_moshi_lm(
     lm_kwargs = dict(lm_kwargs)
     assert lm_kwargs is not None
 
+    lm_kwargs.pop("max_speakers", None)
+
     if "conditioners" in lm_kwargs:
         lm_kwargs["condition_provider"] = get_conditioner_provider(
             lm_kwargs["dim"], device, lm_kwargs
