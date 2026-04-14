@@ -33,6 +33,7 @@ DEFAULT_DSM_TTS_VOICE_REPO = 'kyutai/tts-voices'
 PUBLIC_DATA_DSM_TTS_REPO = 'kyutai/tts-0.75b-en-public'
 DEFAULT_MAX_SPEAKERS = 5
 
+
 @dataclass
 class TokenIds:
     """
