@@ -31,6 +31,7 @@ from .lm_utils import ScaledEmbedding
 DEFAULT_DSM_TTS_REPO = 'kyutai/tts-1.6b-en_fr'
 DEFAULT_DSM_TTS_VOICE_REPO = 'kyutai/tts-voices'
 PUBLIC_DATA_DSM_TTS_REPO = 'kyutai/tts-0.75b-en-public'
+DEFAULT_MAX_SPEAKERS = 5
 
 
 @dataclass
@@ -377,7 +378,7 @@ class TTSModel:
     # The delay of the audio streams compared to the text stream.
     # Note that in addition, the acoustic tokens are delayed wrt the semantic ones.
     delay_steps: int
-    max_speakers: int = 5
+    max_speakers: int = DEFAULT_MAX_SPEAKERS
     multistream: bool = False
 
     # The following params can be overriden to customize generation.
@@ -411,10 +412,12 @@ class TTSModel:
         machine = StateMachine(
             token_ids=token_ids, second_stream_ahead=second_stream_ahead,
             max_padding=max_padding, initial_padding=initial_padding)
+        max_speakers = checkpoint_info.tts_config.get('max_speakers', DEFAULT_MAX_SPEAKERS)
         tts_model = TTSModel(
             lm=lm, mimi=mimi, tokenizer=tokenizer,
             voice_suffix=voice_suffix, voice_repo=voice_repo,
             machine=machine, delay_steps=delay_steps, multistream=multistream,
+            max_speakers=max_speakers,
             **kwargs)
         mimi_n_q = tts_model.n_q
 
@@ -646,7 +649,7 @@ class TTSModel:
         if voices:
             voice_tensor = None
             mask = None
-            for idx in range(5):
+            for idx in range(self.max_speakers):
                 if idx < len(voices):
                     if voices[idx].suffix != ".safetensors":
                         raise ValueError(f"Voice file must be a .safetensors file, got {voices[idx]}")
