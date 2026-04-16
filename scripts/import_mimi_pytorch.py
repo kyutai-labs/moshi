@@ -20,7 +20,7 @@ def import_model(
     args.out_folder.mkdir(exist_ok=True, parents=True)
     out_config = args.out_folder / 'mimi_config.json'
     out_file = args.out_folder / 'mimi.safetensors'
-    pkg = torch.load(args.checkpoint, map_location=torch.device("cpu"), weights_only=False)
+    pkg = torch.load(args.checkpoint, map_location=torch.device("cpu"), weights_only=True)
     if 'xp.cfg' in pkg:
         cfg = pkg['xp.cfg']
     else:
