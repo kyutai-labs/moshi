@@ -122,12 +122,17 @@ def init(batch_size: int, config_override: dict) -> 'TTSService':
         for file in voice_folder.glob(f'**/*{voice_suffix}'):
             relative = file.relative_to(voice_folder)
             name = str(relative.with_name(relative.name.removesuffix(voice_suffix)))
+            # Normalize path separators for Windows compatibility
+            name_normalized = name.replace('\\', '/')
             try:
                 attributes = tts_model.make_condition_attributes([file, file], cfg_coef=cfg_condition)
             except Exception:
-                print(f"[WARNING] failed to load voice {name}")
+                print(f"[WARNING] failed to load voice {name_normalized}")
             else:
                 all_attributes[name] = attributes
+                # Also add with forward slashes for cross-platform config compatibility
+                if name != name_normalized:
+                    all_attributes[name_normalized] = attributes
 
         if not all_attributes:
             raise RuntimeError(
