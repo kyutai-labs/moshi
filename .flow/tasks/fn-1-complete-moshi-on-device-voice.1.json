@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-14T13:52:33.468958Z",
+  "depends_on": [],
+  "epic": "fn-1-complete-moshi-on-device-voice",
+  "id": "fn-1-complete-moshi-on-device-voice.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-1-complete-moshi-on-device-voice.1.md",
+  "status": "todo",
+  "title": "Create model download script for HuggingFace models",
+  "updated_at": "2026-02-14T15:52:23.210717Z"
+}
