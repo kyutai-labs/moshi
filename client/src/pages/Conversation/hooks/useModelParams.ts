@@ -65,7 +65,7 @@ export const useModelParams = (params?: useModelParamsArgs) => {
   ]);
 
   const setTextTemperature = useCallback((value: number) => {
-    if (value <= 1.2 && value >= 0.2) {
+    if (value <= 1.2 && value >= 0.0) {
       setTextTemperatureBase(value);
     }
   }, []);

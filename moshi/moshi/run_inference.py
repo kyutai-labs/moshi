@@ -58,6 +58,24 @@ def get_condition_tensors(
         condition_tensors = lm.condition_provider(prepared)
     return condition_tensors
 
+class _StepHook:
+        def __init__(self):
+            self.step = 0
+
+        def __call__(self, t):
+            if self.step <= 1:
+                t[:,1] = 4000
+            if self.step < 24:
+                t[:] = torch.where(
+                    t == 4000,
+                    t,
+                    -1
+                )
+            self.step += 1
+                
+            
+
+
 
 @dataclass
 class InferenceState:
@@ -82,8 +100,9 @@ class InferenceState:
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
         condition_tensors = get_condition_tensors(model_type, lm, batch_size, cfg_coef)
+        on_text_hook = _StepHook()
         self.lm_gen = LMGen(
-            lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors, **kwargs
+            lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors,**kwargs, #on_text_hook=on_text_hook
         )
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
@@ -120,12 +139,12 @@ class InferenceState:
         start_time = time.time()
         ntokens = 0
         first_frame = True
-        if self.model_type == "stt":
+        if self.model_type == "stt" or self.model_type == "multi": 
             stt_config = self.checkpoint_info.stt_config
             pad_right = stt_config.get("audio_delay_seconds", 0.0)
             pad_left = stt_config.get("audio_silence_prefix_seconds", 0.0)
-            pad_left = int(pad_left * 24000)
-            pad_right = int((pad_right + 1.0) * 24000)
+            pad_left = int((pad_left + 4.0)  * 24000)
+            pad_right = int((pad_right + 5.0) * 24000)
             in_pcms = torch.nn.functional.pad(in_pcms, (pad_left, pad_right), mode="constant")
         # We keep only fully frames.
         chunks = deque(
@@ -137,6 +156,9 @@ class InferenceState:
         )
 
         self.printer.print_header()
+        if self.lm_gen.lm_model.text_depth > 1:
+            curr_spk = None
+            out_texts = [[] for i in range(self.lm_gen.lm_model.text_depth)]
         while not all(eos_reached):
             if chunks:
                 chunk = chunks.popleft()
@@ -173,7 +195,7 @@ class InferenceState:
             tokens = self.lm_gen.step(codes)
             if tokens is None:
                 continue
-            assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
+            assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + self.lm_gen.lm_model.text_depth
             if self.lm_gen.lm_model.dep_q > 0:
                 out_pcm = self.mimi.decode(tokens[:, 1:]).cpu()
                 for b, (one_text, one_pcm) in enumerate(
@@ -196,11 +218,30 @@ class InferenceState:
                             text = text.replace("▁", " ")
                             self.printer.print_token(text)
             else:
-                one_text = tokens[0, 0].cpu()
-                if one_text.item() not in [0, 3]:
-                    text = self.text_tokenizer.id_to_piece(one_text.item())  # pyright: ignore
-                    text = text.replace("▁", " ")
-                    self.printer.print_token(text)
+                if self.lm_gen.lm_model.text_depth <= 1:
+                    one_text = tokens[0, 0].cpu()
+                    if one_text.item() not in [0, 3]:
+                        text = self.text_tokenizer.id_to_piece(one_text.item())  # pyright: ignore
+                        text = text.replace("▁", " ")
+                        self.printer.print_token(text)
+                else:
+                    text_tokens = tokens[0, :self.lm_gen.lm_model.text_depth].cpu()
+                    for i, one_text in enumerate(text_tokens):
+                        if one_text.item() not in [-1, 0, 3, 4,4000]:
+                            text = self.text_tokenizer.id_to_piece(one_text.item())
+                            text = text.replace("▁"," ")
+                            if curr_spk is None:
+                                curr_spk = i
+                                self.printer.print_token(f"SPEAKER_{i}: {text}")    
+                            elif curr_spk == i:
+                                self.printer.print_token(f"{text}")    
+                            else:
+                                curr_spk = i
+                                self.printer.print_token(f" SPEAKER_{i}: {text}")    
+                            out_texts[curr_spk].append(text)
+                            
+                            
+                    
             ntokens += 1
         dt = time.time() - start_time
         self.printer.log(
@@ -216,7 +257,7 @@ class InferenceState:
             ]
             return out
         else:
-            return []
+            return out_texts
 
 
 def main():
@@ -252,6 +293,8 @@ def main():
         dest="dtype",
         help="Run inference with float16, not bfloat16, better for old GPUs.",
     )
+
+
     parser.add_argument(
         "--config",
         "--lm-config",
@@ -276,6 +319,7 @@ def main():
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
         args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer, args.config
     )
+    
     log("info", "loading mimi")
     mimi = checkpoint_info.get_mimi(device=args.device)
     log("info", "mimi loaded")
@@ -304,17 +348,26 @@ def main():
     out_items = state.run(in_pcms)
 
     if args.outfile:
-        outfile = Path(args.outfile)
-        for index, (_, out_pcm) in enumerate(out_items):
-            if len(out_items) > 1:
-                outfile_ = outfile.with_name(f"{outfile.stem}-{index}{outfile.suffix}")
-            else:
-                outfile_ = outfile
-            duration = out_pcm.shape[1] / mimi.sample_rate
-            log("info", f"writing {outfile_} with duration {duration:.1f} sec.")
-            sphn.write_wav(
-                str(outfile_), out_pcm[0].numpy(), sample_rate=mimi.sample_rate
-            )
+        if state.lm_gen.lm_model.dep_q > 0:
+            outfile = Path(args.outfile)
+            for index, (_, out_pcm) in enumerate(out_items):
+                if len(out_items) > 1:
+                    outfile_ = outfile.with_name(f"{outfile.stem}-{index}{outfile.suffix}")
+                else:
+                    outfile_ = outfile
+                duration = out_pcm.shape[1] / mimi.sample_rate
+                log("info", f"writing {outfile_} with duration {duration:.1f} sec.")
+                sphn.write_wav(
+                    str(outfile_), out_pcm[0].numpy(), sample_rate=mimi.sample_rate
+                )
+        else:
+            
+            import json
+            res = {}
+            for i in range(state.lm_gen.lm_model.text_depth):
+                res[f"SPEAKER_{i}"] = "".join(out_items[i])
+            with open(args.outfile,"w") as out:
+                json.dump(res, out)
 
 
 if __name__ == "__main__":

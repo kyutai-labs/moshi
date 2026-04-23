@@ -14,6 +14,15 @@ dependencies = [
     "torch >= 2.2.0, < 2.7",
     "aiohttp>=3.10.5, <3.12",
     "pytest >= 8.3.3",
+    "gradio>=5.34.1",
+    "omegaconf>=2.3.0",
+    "jiwer<3.1.0",
+    "julius>=0.2.7",
+    "whisper>=1.1.10",
+    "openai-whisper>=20250625",
+    "datasets==2.15.*",
+    "librosa>=0.11.0",
+    "soundfile>=0.13.1",
 ]
 authors = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]
 maintainers = [{name="Laurent Mazaré", email="laurent@kyutai.org"}]

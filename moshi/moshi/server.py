@@ -36,6 +36,8 @@ def seed_all(seed):
     torch.backends.cudnn.benchmark = False
 
 
+
+
 @dataclass
 class ServerState:
     model_type: str
@@ -67,7 +69,7 @@ class ServerState:
                 tokens = self.lm_gen.step(codes[:, :, c: c + 1])
                 if tokens is None:
                     continue
-                _ = self.mimi.decode(tokens[:, 1:])
+                #_ = self.mimi.decode(tokens[:, 1:])
 
         torch.cuda.synchronize()
 
@@ -81,18 +83,23 @@ class ServerState:
                 async for message in ws:
                     if message.type == aiohttp.WSMsgType.ERROR:
                         log("error", f"{ws.exception()}")
+                        log("info", "The1 connection was closed")
                         break
                     elif message.type == aiohttp.WSMsgType.CLOSED:
+                        log("info", "The connection was closed")
                         break
                     elif message.type != aiohttp.WSMsgType.BINARY:
                         log("error", f"unexpected message type {message.type}")
+                        log("info", "The connection was closed2")
                         continue
                     message = message.data
                     if not isinstance(message, bytes):
                         log("error", f"unsupported message type {type(message)}")
+                        log("info", "The connection was closed3")
                         continue
                     if len(message) == 0:
                         log("warning", "empty message")
+                        log("info", "The connection was closed4")
                         continue
                     kind = message[0]
                     if kind == 1:  # audio
@@ -107,8 +114,9 @@ class ServerState:
         async def opus_loop():
             all_pcm_data = None
             skip_frames = 1
-
+            curr_spk = None
             while True:
+                
                 if close:
                     return
                 await asyncio.sleep(0.001)
@@ -121,9 +129,11 @@ class ServerState:
                     all_pcm_data = np.concatenate((all_pcm_data, pcm))
                 while all_pcm_data.shape[-1] >= self.frame_size:
                     be = time.time()
+                    
                     chunk = all_pcm_data[: self.frame_size]
                     all_pcm_data = all_pcm_data[self.frame_size:]
                     chunk = torch.from_numpy(chunk)
+                    
                     chunk = chunk.to(device=self.device)[None, None]
                     codes = self.mimi.encode(chunk)
                     if skip_frames:
@@ -135,19 +145,34 @@ class ServerState:
                         skip_frames -= 1
                     for c in range(codes.shape[-1]):
                         tokens = self.lm_gen.step(codes[:, :, c: c + 1])
+                        
                         if tokens is None:
                             continue
-                        assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
-                        main_pcm = self.mimi.decode(tokens[:, 1:])
-                        main_pcm = main_pcm.cpu()
-                        opus_writer.append_pcm(main_pcm[0, 0].numpy())
-                        text_token = tokens[0, 0, 0].item()
-                        if text_token not in (0, 3):
-                            _text = self.text_tokenizer.id_to_piece(text_token)  # type: ignore
-                            _text = _text.replace("▁", " ")
-                            msg = b"\x02" + bytes(_text, encoding="utf8")
-                            log("info", f"text token '{_text}'")
-                            await ws.send_bytes(msg)
+                        #assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
+                        #main_pcm = self.mimi.decode(codes[:, :, c:c+1])
+                        #main_pcm = main_pcm.cpu()
+                        #opus_writer.append_pcm(main_pcm[0, 0].numpy())
+                        text_tokens = tokens[0,:,0].cpu()
+                        
+                        for i, text_token in enumerate(text_tokens):
+                            
+                            if text_token.item() not in [-1, 0, 3, 4]:
+                                text = self.text_tokenizer.id_to_piece(text_token.item())
+                                text = text.replace("▁"," ")
+                                if curr_spk is None:
+                                    curr_spk = i
+                                    _text = text #f"SPEAKER_{i}: {text}"    
+                                elif curr_spk == i:
+                                    _text = f"{text}"
+                                else:
+                                    curr_spk = i
+                                    #_text = f" \nSPEAKER_{i}: {text}"
+                                    _text = text
+                                # should print the text in color but it is not 
+                                msg = b"\x07" + i.to_bytes(1,"big") + bytes(_text, encoding="utf8")
+                                log("info", f"text token '{_text}'")
+                                await ws.send_bytes(msg)
+                        
                     log("info", f"frame handled in {1000 * (time.time() - be):.1f}ms")
 
         async def send_loop():
@@ -155,14 +180,14 @@ class ServerState:
                 if close:
                     return
                 await asyncio.sleep(0.001)
-                msg = opus_writer.read_bytes()
-                if len(msg) > 0:
-                    await ws.send_bytes(b"\x01" + msg)
+                #msg = opus_writer.read_bytes()
+                #if len(msg) > 0:
+                #    await ws.send_bytes(b"\x01" + msg)
 
         log("info", "accepted connection")
         close = False
         async with self.lock:
-            opus_writer = sphn.OpusStreamWriter(self.mimi.sample_rate)
+            #opus_writer = sphn.OpusStreamWriter(self.mimi.sample_rate)
             opus_reader = sphn.OpusStreamReader(self.mimi.sample_rate)
             self.mimi.reset_streaming()
             self.lm_gen.reset_streaming()
@@ -176,7 +201,7 @@ class ServerState:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="localhost", type=str)
-    parser.add_argument("--port", default=8998, type=int)
+    parser.add_argument("--port", default=8999, type=int)
     parser.add_argument("--static", type=str)
     parser.add_argument("--gradio-tunnel", action='store_true', help='Activate a gradio tunnel.')
     parser.add_argument("--gradio-tunnel-token",
@@ -234,7 +259,7 @@ def main():
     text_tokenizer = checkpoint_info.get_text_tokenizer()
 
     log("info", "loading moshi")
-    lm = checkpoint_info.get_moshi(device=args.device, dtype=args.dtype, fuse_lora=args.fuse_lora)
+    lm = checkpoint_info.get_moshi(device=args.device, dtype=args.dtype, fuse_lora=args.fuse_lora )
     log("info", "moshi loaded")
 
     state = ServerState(checkpoint_info.model_type, mimi, text_tokenizer, lm, args.cfg_coef, args.device,
@@ -285,6 +310,7 @@ def main():
         log("info", f"Tunnel started, if executing on a remote GPU, you can use {tunnel}.")
         log("info", "Note that this tunnel goes through the US and you might experience high latency in Europe.")
     web.run_app(app, host=args.host , port=args.port, ssl_context=ssl_context)
+    
 
 
 with torch.no_grad():

@@ -36,7 +36,7 @@ export const ModelParams: FC<ModelParamsProps> = ({
           <tr>
             <td>Text temperature:</td>
             <td className="w-12 text-center">{textTemperature}</td>
-            <td className="p-2"><input className="range align-middle" disabled={isConnected} type="range" id="text-temperature" name="text-temperature" step="0.01" min="0.2" max="1.2" value={textTemperature} onChange={e => setTextTemperature(parseFloat(e.target.value))} /></td>
+            <td className="p-2"><input className="range align-middle" disabled={isConnected} type="range" id="text-temperature" name="text-temperature" step="0.01" min="0.0" max="1.2" value={textTemperature} onChange={e => setTextTemperature(parseFloat(e.target.value))} /></td>
           </tr>
           <tr>
             <td>Text topk:</td>
