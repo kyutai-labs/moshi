@@ -1,5 +1,6 @@
 """Testing exec_mask feature of the streaming module, where each batch entry
 can advance at its own pace, while retaining full compat with CUDA Graph."""
+
 import sys
 import sphn
 import torch
@@ -8,9 +9,8 @@ from moshi.models import loaders
 from moshi.models.lm import LMGen
 from moshi.conditioners import ConditionAttributes
 
-device = 'cuda'
-wnp, sr = sphn.read(sys.argv[1],
-                    start_sec=0, duration_sec=8, sample_rate=24000)
+device = "cuda"
+wnp, sr = sphn.read(sys.argv[1], start_sec=0, duration_sec=8, sample_rate=24000)
 wav = torch.from_numpy(wnp)
 ci = loaders.CheckpointInfo.from_hf_repo("kyutai/hibiki-2b-pytorch-bf16")
 mimi = ci.get_mimi(device=device)
@@ -31,7 +31,13 @@ assert lm.condition_provider is not None
 conditions = [ConditionAttributes(text={"description": "very_good"}, tensor={})] * B
 prepared = lm.condition_provider.prepare(conditions)
 condition_tensors = lm.condition_provider(prepared)
-lm_gen = LMGen(lm, temp=0., temp_text=0., support_out_of_sync=True, condition_tensors=condition_tensors)
+lm_gen = LMGen(
+    lm,
+    temp=0.0,
+    temp_text=0.0,
+    support_out_of_sync=True,
+    condition_tensors=condition_tensors,
+)
 print("Going streaming")
 with torch.no_grad(), lm_gen.streaming(B):
     while any(o < T for o in offsets):

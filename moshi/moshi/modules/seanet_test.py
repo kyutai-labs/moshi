@@ -12,38 +12,54 @@ torch.backends.cudnn.enabled = False  # Disable cuDNN for deterministic behavior
 SEANET_RESNET_DATA = [
     # batch_size, dim, res_layer_index, seq_len, kernel_size
     pytest.param(
-        3, 4, 1, 10, 6,
-        id='small resnet test 1',
+        3,
+        4,
+        1,
+        10,
+        6,
+        id="small resnet test 1",
     ),
     pytest.param(
-        4, 5, 2, 10, 7,
-        id='small resnet test 2',
+        4,
+        5,
+        2,
+        10,
+        7,
+        id="small resnet test 2",
     ),
     pytest.param(
-        5, 6, 4, 10, 2,
-        id='small resnet test 3',
+        5,
+        6,
+        4,
+        10,
+        2,
+        id="small resnet test 3",
     ),
     pytest.param(
-        1, 512, 2, 256, 7,
-        id='large resnet test 1',
+        1,
+        512,
+        2,
+        256,
+        7,
+        id="large resnet test 1",
     ),
 ]
 NUM_TIMESTEPS_DATA = [
     pytest.param(
         1,
-        id='length 1',
+        id="length 1",
     ),
     pytest.param(
         2,
-        id='length 2',
+        id="length 2",
     ),
     pytest.param(
         10,
-        id='length 10',
+        id="length 10",
     ),
     pytest.param(
         100,
-        id='length 100',
+        id="length 100",
     ),
 ]
 
@@ -69,9 +85,8 @@ SEANET_KWARGS_DATA = [
             "ratios": [5],
             "true_skip": True,
         },
-        id='Tiny SEANet',
+        id="Tiny SEANet",
     ),
-
     pytest.param(
         {
             "channels": 1,
@@ -93,7 +108,7 @@ SEANET_KWARGS_DATA = [
             "ratios": [8, 6, 5, 4],
             "true_skip": True,
         },
-        id='Large SEANet',
+        id="Large SEANet",
     ),
 ]
 
@@ -120,15 +135,22 @@ def test_resnet(batch_size, dim, res_layer_index, seq_len, kernel_size):
     generator = generator.manual_seed(41)
     layer.apply(functools.partial(_init_weights, generator=generator))
 
-    shape = (batch_size, dim, seq_len,)
+    shape = (
+        batch_size,
+        dim,
+        seq_len,
+    )
     input_hidden_states = torch.rand(shape)
 
     expected_output = layer(input_hidden_states)
 
     for end_index in range(kernel_size, seq_len + 1):
         actual_output = layer(input_hidden_states[..., :end_index])
-        torch.testing.assert_close(actual_output, expected_output[..., :actual_output.shape[-1]],
-                                   msg=lambda original_msg: f"Failed at end_index={end_index}: \n{original_msg}")
+        torch.testing.assert_close(
+            actual_output,
+            expected_output[..., : actual_output.shape[-1]],
+            msg=lambda original_msg: f"Failed at end_index={end_index}: \n{original_msg}",
+        )
 
 
 @pytest.mark.parametrize("batch_size, dim, res_layer_index, seq_len, kernel_size", SEANET_RESNET_DATA)
@@ -143,7 +165,11 @@ def test_resnet_streaming(batch_size, dim, res_layer_index, seq_len, kernel_size
     generator = generator.manual_seed(41)
     layer.apply(functools.partial(_init_weights, generator=generator))
 
-    shape = (batch_size, dim, seq_len,)
+    shape = (
+        batch_size,
+        dim,
+        seq_len,
+    )
     input_hidden_states = torch.rand(shape)
 
     expected_output = layer(input_hidden_states)
@@ -165,7 +191,7 @@ def test_resnet_streaming(batch_size, dim, res_layer_index, seq_len, kernel_size
 def test_nonstreaming_causal_decode(num_timesteps, seanet_kwargs):
     """Test that the SEANetDecoder does not depend on future inputs."""
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     decoder = SEANetDecoder(**seanet_kwargs).to(device=device)
 
     generator = torch.Generator(device=device)
@@ -176,12 +202,15 @@ def test_nonstreaming_causal_decode(num_timesteps, seanet_kwargs):
     rand_generator.manual_seed(2147483647)
     with torch.no_grad():
         # [B, K = 8, T]
-        codes = torch.randn(1, seanet_kwargs['dimension'], num_timesteps, generator=rand_generator, device=device)
+        codes = torch.randn(1, seanet_kwargs["dimension"], num_timesteps, generator=rand_generator, device=device)
         expected_decoded = decoder(codes)
 
         num_timesteps = codes.shape[-1]
         for t in range(num_timesteps):
-            current_codes = codes[..., :t + 1]
+            current_codes = codes[..., : t + 1]
             actual_decoded = decoder(current_codes)
-            torch.testing.assert_close(expected_decoded[..., :actual_decoded.shape[-1]], actual_decoded,
-                                       msg=lambda original_msg: f"Failed at t={t}: \n{original_msg}")
+            torch.testing.assert_close(
+                expected_decoded[..., : actual_decoded.shape[-1]],
+                actual_decoded,
+                msg=lambda original_msg: f"Failed at t={t}: \n{original_msg}",
+            )

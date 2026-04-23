@@ -32,7 +32,7 @@ def apply_rope(
     else:
         B, H, T, D = q.shape
 
-    assert q.shape[0] == k.shape[0]   # B
+    assert q.shape[0] == k.shape[0]  # B
     if time_before_heads:
         assert q.shape[1] == k.shape[1]  # T
         assert q.shape[3] == k.shape[3]  # D

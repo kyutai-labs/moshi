@@ -8,6 +8,7 @@ to fully deactivate it easily with a context manager.
 Provides a simple activation checkpointing that is compatible with FSDP and torch compile.
 Finally, provides some utilities for CUDA graphing functions.
 """
+
 from contextlib import contextmanager
 from functools import wraps
 import inspect
@@ -231,15 +232,11 @@ class CUDAGraphed:
 
         def _match_values_copy_tensors(args: tuple, target_args: tuple) -> None:
             if len(args) != len(target_args):
-                raise ValueError(
-                    f"Expected {len(target_args)}, but got {args} for CUDA Graphed function."
-                )
+                raise ValueError(f"Expected {len(target_args)}, but got {args} for CUDA Graphed function.")
             for idx, (source, target) in enumerate(zip(args, target_args)):
                 if isinstance(target, torch.Tensor):
                     if not isinstance(source, torch.Tensor):
-                        raise ValueError(
-                            f"Argument #{idx} was a tensor, and is no longer (now {source})."
-                        )
+                        raise ValueError(f"Argument #{idx} was a tensor, and is no longer (now {source}).")
                     if source.shape != target.shape:
                         raise ValueError(
                             f"Argument #{idx} had shape {target.shape}, but got shape {source.shape}"
@@ -250,13 +247,9 @@ class CUDAGraphed:
                     target.copy_(source)
                 else:
                     if isinstance(source, torch.Tensor):
-                        raise ValueError(
-                            f"Argument #{idx} was not a tensor {target}, but is now one."
-                        )
+                        raise ValueError(f"Argument #{idx} was not a tensor {target}, but is now one.")
                     if source is not target and source != target:
-                        raise ValueError(
-                            f"Argument #{idx} changed value from {target} to {source}."
-                        )
+                        raise ValueError(f"Argument #{idx} changed value from {target} to {source}.")
 
         with _set_in_cuda_graph():
             # Prevent any one under us to try and CUDA Graph things.

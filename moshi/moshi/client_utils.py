@@ -1,8 +1,7 @@
 # Copyright (c) Kyutai, all rights reserved.
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-"""Utilities for the command line client, in particular for handling interactions with the terminal.
-"""
+"""Utilities for the command line client, in particular for handling interactions with the terminal."""
 
 from dataclasses import dataclass
 import sys

@@ -19,12 +19,12 @@ from ..modules.transformer import create_sin_embedding
 
 logger = logging.getLogger(__name__)
 TextCondition = tp.Optional[str]  # a text condition can be a string or None (if doesn't exist)
-ConditionTensors = dict[str, 'ConditionType']
+ConditionTensors = dict[str, "ConditionType"]
 
 
 class ConditionType(tp.NamedTuple):
-    """Return type for a conditioner: both a condition tensor, and a mask indicating valid positions.
-    """
+    """Return type for a conditioner: both a condition tensor, and a mask indicating valid positions."""
+
     condition: torch.Tensor
     mask: torch.Tensor
 
@@ -34,6 +34,7 @@ class TensorCondition:
     """Looks quite similar to ConditionType, but represents the input to TensorConditioners.
     `tensor` should be [B | 1, T, D], and `mask` should be `[B | 1, T]`.
     """
+
     tensor: torch.Tensor
     mask: torch.Tensor
 
@@ -44,7 +45,7 @@ class TensorCondition:
         return TensorCondition(tensor, mask)
 
     @staticmethod
-    def cat(conditions: tp.Sequence['TensorCondition']) -> 'TensorCondition':
+    def cat(conditions: tp.Sequence["TensorCondition"]) -> "TensorCondition":
         assert conditions, "Cannot cat empty list."
         ref_tensor = conditions[0].tensor
         B, _, D = ref_tensor.shape
@@ -54,8 +55,8 @@ class TensorCondition:
         mask = torch.zeros(B, T, dtype=torch.bool, device=ref_tensor.device)
         tensor = torch.zeros(B, T, D, dtype=ref_tensor.dtype, device=ref_tensor.device)
         for b, condition in enumerate(conditions):
-            tensor[b, :condition.tensor.shape[1], :] = condition.tensor[0]
-            mask[b, :condition.mask.shape[1]] = condition.mask[0]
+            tensor[b, : condition.tensor.shape[1], :] = condition.tensor[0]
+            mask[b, : condition.mask.shape[1]] = condition.mask[0]
         return TensorCondition(tensor, mask)
 
 
@@ -68,6 +69,7 @@ class ConditionAttributes:
     There are two kinds of conditionings: text (or None), or raw torch tensors (with a mask).
 
     """
+
     text: tp.Dict[str, tp.Optional[str]] = field(default_factory=dict)
     tensor: tp.Dict[str, TensorCondition] = field(default_factory=dict)
 
@@ -83,11 +85,11 @@ class ConditionAttributes:
     def condition_types() -> tp.FrozenSet[str]:
         return frozenset(["text", "tensor"])
 
-    def copy(self) -> 'ConditionAttributes':
+    def copy(self) -> "ConditionAttributes":
         return ConditionAttributes(dict(self.text), dict(self.tensor))
 
 
-Prepared = tp.TypeVar('Prepared')  # represents the prepared condition input type.
+Prepared = tp.TypeVar("Prepared")  # represents the prepared condition input type.
 
 
 class BaseConditioner(nn.Module, tp.Generic[Prepared]):
@@ -102,13 +104,16 @@ class BaseConditioner(nn.Module, tp.Generic[Prepared]):
         learn_padding (bool): if True, the padding value will be learnt, zero otherwise.
     """
 
-    def __init__(self, dim: int,
-                 output_dim: int,
-                 device: tp.Union[torch.device, str],
-                 force_linear: bool = True,
-                 pad_empty: bool = True,
-                 output_bias: bool = False,
-                 learn_padding: bool = True):
+    def __init__(
+        self,
+        dim: int,
+        output_dim: int,
+        device: tp.Union[torch.device, str],
+        force_linear: bool = True,
+        pad_empty: bool = True,
+        output_bias: bool = False,
+        learn_padding: bool = True,
+    ):
         super().__init__()
         self.dim = dim
         self.output_dim = output_dim
@@ -122,8 +127,7 @@ class BaseConditioner(nn.Module, tp.Generic[Prepared]):
             self.output_proj = nn.Identity()
         self.learnt_padding: tp.Optional[torch.Tensor]
         if learn_padding:
-            self.learnt_padding = nn.Parameter(
-                torch.randn(1, 1, output_dim, device=device), requires_grad=True)
+            self.learnt_padding = nn.Parameter(torch.randn(1, 1, output_dim, device=device), requires_grad=True)
             self.learnt_padding.data *= 0.2
         else:
             self.learnt_padding = None
@@ -174,11 +178,8 @@ class _BaseTensorConditioner(BaseConditioner[Prepared]):
 
 
 def dropout_tensor(condition: TensorCondition) -> TensorCondition:
-    """Utility function for nullifying a WavCondition object.
-    """
-    return TensorCondition(
-        tensor=torch.zeros_like(condition.tensor),
-        mask=torch.zeros_like(condition.mask))
+    """Utility function for nullifying a WavCondition object."""
+    return TensorCondition(tensor=torch.zeros_like(condition.tensor), mask=torch.zeros_like(condition.mask))
 
 
 def dropout_condition_(sample: ConditionAttributes, condition_type: str, condition: str) -> None:
@@ -189,7 +190,8 @@ def dropout_condition_(sample: ConditionAttributes, condition_type: str, conditi
     if condition_type not in valid_conditions:
         raise ValueError(
             "dropout_condition got an unexpected condition type!"
-            f" expected one of {valid_conditions} but got '{condition_type}'")
+            f" expected one of {valid_conditions} but got '{condition_type}'"
+        )
 
     if condition not in getattr(sample, condition_type):
         raise ValueError(
@@ -198,10 +200,10 @@ def dropout_condition_(sample: ConditionAttributes, condition_type: str, conditi
             f" but got '{condition}' of type '{condition_type}'!"
         )
 
-    if condition_type == 'tensor':
+    if condition_type == "tensor":
         tensor_condition = sample.tensor[condition]
         sample.tensor[condition] = dropout_tensor(tensor_condition)
-    elif condition_type == 'text':
+    elif condition_type == "text":
         sample.text[condition] = None
     else:
         assert False
@@ -301,7 +303,7 @@ class ConditionProvider(nn.Module):
         """
         assert all([isinstance(x, ConditionAttributes) for x in inputs]), (
             "Got unexpected types input for conditioner! should be tp.List[ConditionAttributes]",
-            f" but types were {set([type(x) for x in inputs])}"
+            f" but types were {set([type(x) for x in inputs])}",
         )
 
         output = {}
@@ -310,7 +312,7 @@ class ConditionProvider(nn.Module):
 
         assert set(text.keys() | tensors.keys()).issubset(set(self.conditioners.keys())), (
             f"Got an unexpected attribute! Expected {self.conditioners.keys()}, ",
-            f"got {text.keys(), tensors.keys()}"
+            f"got {text.keys(), tensors.keys()}",
         )
 
         missing_inputs = set(self.conditioners.keys()) - (set(text.keys()) | set(tensors.keys()))
@@ -361,14 +363,19 @@ class ConditionFuser(nn.Module):
         cross_attention_pos_emb (bool, optional): Use positional embeddings in cross attention.
         cross_attention_pos_emb_scale (int): Scale for positional embeddings in cross attention if used.
     """
+
     FUSING_METHODS = ["sum", "prepend", "cross"]
 
-    def __init__(self, fuse2cond: tp.Dict[str, tp.List[str]], cross_attention_pos_emb: bool = False,
-                 cross_attention_pos_emb_scale: float = 1.0):
+    def __init__(
+        self,
+        fuse2cond: tp.Dict[str, tp.List[str]],
+        cross_attention_pos_emb: bool = False,
+        cross_attention_pos_emb_scale: float = 1.0,
+    ):
         super().__init__()
-        assert all(
-            [k in self.FUSING_METHODS for k in fuse2cond.keys()]
-        ), f"Got invalid fuse method, allowed methods: {self.FUSING_METHODS}"
+        assert all([k in self.FUSING_METHODS for k in fuse2cond.keys()]), (
+            f"Got invalid fuse method, allowed methods: {self.FUSING_METHODS}"
+        )
         self.cross_attention_pos_emb = cross_attention_pos_emb
         self.cross_attention_pos_emb_scale = cross_attention_pos_emb_scale
         self.fuse2cond: tp.Dict[str, tp.List[str]] = fuse2cond
@@ -376,9 +383,10 @@ class ConditionFuser(nn.Module):
         for fuse_method, conditions in fuse2cond.items():
             for condition in conditions:
                 self.cond2fuse[condition] = fuse_method
-                if fuse_method not in ['cross', 'sum']:
-                    raise RuntimeError("only `sum` and `cross` conditionings are supported "
-                                       f"for now, got {fuse_method}.")
+                if fuse_method not in ["cross", "sum"]:
+                    raise RuntimeError(
+                        f"only `sum` and `cross` conditionings are supported for now, got {fuse_method}."
+                    )
 
     @property
     def has_conditions(self) -> bool:
@@ -387,12 +395,12 @@ class ConditionFuser(nn.Module):
     @property
     def has_prepend(self) -> bool:
         """Is there a conditioning that needs to be prepending to the Transformer sequence."""
-        return bool(self.fuse2cond['prepend'])
+        return bool(self.fuse2cond["prepend"])
 
     def get_cross(self, conditions: ConditionTensors) -> torch.Tensor | None:
         """Return the tensor to be provided for the cross attention."""
         cross = None
-        for name in self.fuse2cond['cross']:
+        for name in self.fuse2cond["cross"]:
             cond, _ = conditions[name]
             if cross is None:
                 cross = cond
@@ -400,10 +408,7 @@ class ConditionFuser(nn.Module):
                 cross = torch.cat([cross, cond], dim=1)
 
         if self.cross_attention_pos_emb and cross is not None:
-            positions = torch.arange(
-                cross.shape[1],
-                device=cross.device
-            ).view(1, -1, 1)
+            positions = torch.arange(cross.shape[1], device=cross.device).view(1, -1, 1)
             pos_emb = create_sin_embedding(positions, cross.shape[-1]).to(cross.dtype)
             cross = cross + self.cross_attention_pos_emb_scale * pos_emb
         return cross
@@ -411,7 +416,7 @@ class ConditionFuser(nn.Module):
     def get_sum(self, conditions: ConditionTensors) -> torch.Tensor | None:
         """Return the tensor to be provided as an extra sum offset shared for each step."""
         sum = None
-        for name in self.fuse2cond['sum']:
+        for name in self.fuse2cond["sum"]:
             cond, _ = conditions[name]
             assert cond.shape[1] == 1, cond.shape
             if sum is None:
@@ -423,7 +428,7 @@ class ConditionFuser(nn.Module):
     def get_prepend(self, conditions: ConditionTensors) -> torch.Tensor | None:
         """Return the tensor to be prepended to the transformer."""
         prepend = None
-        for name in self.fuse2cond['prepend']:
+        for name in self.fuse2cond["prepend"]:
             cond, _ = conditions[name]
             if prepend is None:
                 prepend = cond

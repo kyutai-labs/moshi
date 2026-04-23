@@ -23,7 +23,9 @@ def run():
     print(pcm_in.shape)
 
     if args.model_file is None:
-        model_file = hf_hub_download(args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors")
+        model_file = hf_hub_download(
+            args.hf_repo, "tokenizer-e351c8d8-checkpoint125.safetensors"
+        )
     else:
         model_file = args.model_file
     cfg = moshi_mlx.models.mimi.mimi_202407(32)
@@ -56,6 +58,7 @@ def run():
         pcm_out = model.decode(codes)
     print("writing output file with audio shape", pcm_out.shape)
     sphn.write_wav("out.wav", np.array(pcm_out[0]), sample_rate=24000)
+
 
 if __name__ == "__main__":
     run()

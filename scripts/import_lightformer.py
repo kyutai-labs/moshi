@@ -17,10 +17,10 @@ def import_model(
     out_path: str,
 ) -> None:
     pkg = torch.load(in_path, map_location=torch.device("cpu"))
-    if 'xp.cfg' in pkg:
-        cfg = pkg['xp.cfg']
+    if "xp.cfg" in pkg:
+        cfg = pkg["xp.cfg"]
     else:
-        cfg = omegaconf.OmegaConf.load(Path(in_path).parent / '.hydra/config.yaml')
+        cfg = omegaconf.OmegaConf.load(Path(in_path).parent / ".hydra/config.yaml")
 
     model = pkg["fsdp_best_state"]["model"]
 
@@ -28,7 +28,7 @@ def import_model(
     in_n_q = cfg.compression_model_n_q * 2
     out_n_q = cfg.compression_model_n_q
     print(f"in_n_q: {in_n_q}, out_n_q: {out_n_q}")
-    schedule = cfg.transformer_lm.get('depformer_weights_per_step_schedule', None)
+    schedule = cfg.transformer_lm.get("depformer_weights_per_step_schedule", None)
     if schedule is None:
         schedule = list(range(in_n_q))
 
@@ -41,16 +41,20 @@ def import_model(
         in_proj_key = f"depformer.layers.{idx}.self_attn.in_proj_weight"
         in_proj = model[in_proj_key]
         in_proj = in_proj.view(num_weights, -1, *in_proj.shape[1:])
-        model[in_proj_key] = in_proj[:kept_weights].view(-1, *in_proj.shape[2:]).contiguous()
+        model[in_proj_key] = (
+            in_proj[:kept_weights].view(-1, *in_proj.shape[2:]).contiguous()
+        )
         out_proj_key = f"depformer.layers.{idx}.self_attn.out_proj.weight"
         out_proj = model[out_proj_key]
         out_proj = out_proj.view(num_weights, -1, *out_proj.shape[1:])
-        model[out_proj_key] = out_proj[:kept_weights].view(-1, *out_proj.shape[2:]).contiguous()
+        model[out_proj_key] = (
+            out_proj[:kept_weights].view(-1, *out_proj.shape[2:]).contiguous()
+        )
 
     # For mimi inference, we trim the depformer layer that are unused.
     for dep_idx in range(out_n_q - 1, in_n_q - 1):
         del model[f"depformer_emb.{dep_idx}.weight"]
-        if cfg.transformer_lm.get('depformer_low_rank_embeddings'):
+        if cfg.transformer_lm.get("depformer_low_rank_embeddings"):
             del model[f"depformer_emb.{dep_idx}.low_rank.weight"]
     for dep_idx in range(out_n_q, in_n_q):
         del model[f"linears.{dep_idx}.weight"]

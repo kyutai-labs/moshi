@@ -12,40 +12,76 @@ torch.backends.cudnn.enabled = False  # Disable cuDNN for deterministic behavior
 CONV1D_DATA = [
     # batch_size, in_channels, out_channels, seq_len, kernel_size
     pytest.param(
-        3, 4, 5, 10, 6,
-        id='small conv1d test 1',
+        3,
+        4,
+        5,
+        10,
+        6,
+        id="small conv1d test 1",
     ),
     pytest.param(
-        4, 5, 6, 10, 7,
-        id='small conv1d test 2',
+        4,
+        5,
+        6,
+        10,
+        7,
+        id="small conv1d test 2",
     ),
     pytest.param(
-        5, 6, 7, 10, 2,
-        id='small conv1d test 3',
+        5,
+        6,
+        7,
+        10,
+        2,
+        id="small conv1d test 3",
     ),
     pytest.param(
-        1, 512, 512, 256, 7,
-        id='large conv1d test 1',
+        1,
+        512,
+        512,
+        256,
+        7,
+        id="large conv1d test 1",
     ),
 ]
 
 CONV1D_TRANSPOSE_DATA = [
     # batch_size, in_channels, out_channels, seq_len, kernel_size, stride
     pytest.param(
-        3, 4, 5, 10, 6, 1,
-        id='small conv1d transpose test 1',
+        3,
+        4,
+        5,
+        10,
+        6,
+        1,
+        id="small conv1d transpose test 1",
     ),
     pytest.param(
-        4, 5, 6, 10, 7, 2,
-        id='small conv1d transpose test 2',
+        4,
+        5,
+        6,
+        10,
+        7,
+        2,
+        id="small conv1d transpose test 2",
     ),
     pytest.param(
-        5, 6, 7, 10, 4, 3,
-        id='small conv1d transpose test 3',
+        5,
+        6,
+        7,
+        10,
+        4,
+        3,
+        id="small conv1d transpose test 3",
     ),
     pytest.param(
-        1, 512, 512, 256, 7, 2,
-        id='large conv1d transpose test 1',
+        1,
+        512,
+        512,
+        256,
+        7,
+        2,
+        id="large conv1d transpose test 1",
     ),
 ]
 
@@ -71,15 +107,22 @@ def test_conv1d(batch_size, in_channels, out_channels, seq_len, kernel_size):
     generator = generator.manual_seed(41)
     layer.apply(functools.partial(_init_weights, generator=generator))
 
-    shape = (batch_size, in_channels, seq_len,)
+    shape = (
+        batch_size,
+        in_channels,
+        seq_len,
+    )
     input_hidden_states = torch.rand(shape)
 
     expected_output = layer(input_hidden_states)
 
     for end_index in range(kernel_size, seq_len + 1):
         actual_output = layer(input_hidden_states[..., :end_index])
-        torch.testing.assert_close(actual_output, expected_output[..., :actual_output.shape[-1]],
-                                   msg=lambda original_msg: f"Failed at end_index={end_index}: \n{original_msg}")
+        torch.testing.assert_close(
+            actual_output,
+            expected_output[..., : actual_output.shape[-1]],
+            msg=lambda original_msg: f"Failed at end_index={end_index}: \n{original_msg}",
+        )
 
 
 @pytest.mark.parametrize("batch_size, in_channels, out_channels, seq_len, kernel_size", CONV1D_DATA)
@@ -93,7 +136,11 @@ def test_conv1d_streaming(batch_size, in_channels, out_channels, seq_len, kernel
     generator = generator.manual_seed(41)
     layer.apply(functools.partial(_init_weights, generator=generator))
 
-    shape = (batch_size, in_channels, seq_len,)
+    shape = (
+        batch_size,
+        in_channels,
+        seq_len,
+    )
     input_hidden_states = torch.rand(shape)
     expected_output = layer(input_hidden_states)
 
@@ -120,14 +167,21 @@ def test_conv1d_transpose(batch_size, in_channels, out_channels, seq_len, kernel
     generator = generator.manual_seed(41)
     layer.apply(functools.partial(_init_weights, generator=generator))
 
-    shape = (batch_size, in_channels, seq_len,)
+    shape = (
+        batch_size,
+        in_channels,
+        seq_len,
+    )
     input_hidden_states = torch.rand(shape)
     expected_output = layer(input_hidden_states)
 
     for end_index in range(kernel_size, seq_len + 1):
         actual_output = layer(input_hidden_states[..., :end_index])
-        torch.testing.assert_close(actual_output, expected_output[..., :actual_output.shape[-1]],
-                                   msg=lambda original_msg: f"Failed at end_index={end_index}: \n{original_msg}")
+        torch.testing.assert_close(
+            actual_output,
+            expected_output[..., : actual_output.shape[-1]],
+            msg=lambda original_msg: f"Failed at end_index={end_index}: \n{original_msg}",
+        )
 
 
 @pytest.mark.parametrize("batch_size, in_channels, out_channels, seq_len, kernel_size, stride", CONV1D_TRANSPOSE_DATA)
@@ -141,7 +195,11 @@ def test_conv1d_transpose_streaming(batch_size, in_channels, out_channels, seq_l
     generator = generator.manual_seed(41)
     layer.apply(functools.partial(_init_weights, generator=generator))
 
-    shape = (batch_size, in_channels, seq_len,)
+    shape = (
+        batch_size,
+        in_channels,
+        seq_len,
+    )
     input_hidden_states = torch.rand(shape)
     expected_output = layer(input_hidden_states)
 

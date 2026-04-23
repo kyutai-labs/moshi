@@ -68,7 +68,7 @@ class BaseQuantizer(nn.Module):
         raise NotImplementedError()
 
     @property
-    def semantic_quantizer(self) -> 'BaseQuantizer':
+    def semantic_quantizer(self) -> "BaseQuantizer":
         """This returns the quantizer that models the first level of the hierarchy (typically semantic).
 
         In this case, it's the quantizer itself.
@@ -76,7 +76,7 @@ class BaseQuantizer(nn.Module):
         return self
 
     @property
-    def acoustic_quantizer(self) -> 'BaseQuantizer':
+    def acoustic_quantizer(self) -> "BaseQuantizer":
         """This returns the quantizer that models the higher levels of the hierarchy (typically acoustic).
 
         In this case, it's the quantizer itself.
@@ -115,22 +115,16 @@ class DummyQuantizer(BaseQuantizer):
         if self.input_dimension == self.dimension:
             self.input_proj = torch.nn.Identity()
         else:
-            self.input_proj = torch.nn.Conv1d(
-                self.input_dimension, self.dimension, 1, bias=False
-            )
+            self.input_proj = torch.nn.Conv1d(self.input_dimension, self.dimension, 1, bias=False)
         if self.input_dimension == self.dimension:
             self.output_proj = torch.nn.Identity()
         else:
-            self.output_proj = torch.nn.Conv1d(
-                self.dimension, self.output_dimension, 1, bias=False
-            )
+            self.output_proj = torch.nn.Conv1d(self.dimension, self.output_dimension, 1, bias=False)
 
     def forward(self, x: torch.Tensor, frame_rate: int):
         q = x.unsqueeze(1)
         x = self.output_proj(self.input_proj(x))
-        return QuantizedResult(
-            x, q, torch.tensor(q.numel() * 32 * frame_rate / 1000 / len(x)).to(x)
-        )
+        return QuantizedResult(x, q, torch.tensor(q.numel() * 32 * frame_rate / 1000 / len(x)).to(x))
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         """Encode a given input tensor with the specified sample rate at the given bandwidth.
@@ -160,9 +154,7 @@ class DummyQuantizer(BaseQuantizer):
 
     def set_num_codebooks(self, n: int):
         """Set the number of active codebooks."""
-        raise AttributeError(
-            "Cannot override the number of codebooks for the dummy quantizer"
-        )
+        raise AttributeError("Cannot override the number of codebooks for the dummy quantizer")
 
     @property
     def cardinality(self) -> int:

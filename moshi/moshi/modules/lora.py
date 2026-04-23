@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 def replace_all_linear_with_lora(module, rank: int, scaling: float, device=None, dtype=None):
-    """ Recursively replace all Linear layers with LoRALinear layers."""
+    """Recursively replace all Linear layers with LoRALinear layers."""
     for name, child in module.named_children():
         if isinstance(child, nn.Linear):
             if device is None:
@@ -14,8 +14,9 @@ def replace_all_linear_with_lora(module, rank: int, scaling: float, device=None,
                 this_dtype = child.weight.dtype
             else:
                 this_dtype = dtype
-            lora = LoRALinear(child.in_features, child.out_features,
-                              rank, scaling, device=this_device, dtype=this_dtype)
+            lora = LoRALinear(
+                child.in_features, child.out_features, rank, scaling, device=this_device, dtype=this_dtype
+            )
             lora.frozen_W = child
             setattr(module, name, lora)
         else:
@@ -27,15 +28,18 @@ def replace_lora_with_linear(module):
     for name, child in module.named_children():
         if isinstance(child, LoRALinear):
             # Compute merged weights: W' = W + scaling * B @ A
-            merged_weight = child.frozen_W.weight.data + \
-                child.scaling * (child.lora_B.weight @ child.lora_A.weight)
+            merged_weight = child.frozen_W.weight.data + child.scaling * (child.lora_B.weight @ child.lora_A.weight)
             # Create a standard Linear layer with the same in/out features
-            new_linear = nn.Linear(child.frozen_W.in_features,
-                                   child.frozen_W.out_features, bias=False,
-                                   device=torch.device('meta'),
-                                   dtype=merged_weight.dtype)
+            new_linear = nn.Linear(
+                child.frozen_W.in_features,
+                child.frozen_W.out_features,
+                bias=False,
+                device=torch.device("meta"),
+                dtype=merged_weight.dtype,
+            )
             new_linear.weight = nn.Parameter(
-                merged_weight, requires_grad=merged_weight.requires_grad)  # Transfer merged weights
+                merged_weight, requires_grad=merged_weight.requires_grad
+            )  # Transfer merged weights
             setattr(module, name, new_linear)  # Replace the module
         else:
             replace_lora_with_linear(child)  # Recursively process submodules
@@ -88,11 +92,7 @@ class LoRALinear(nn.Module):
             dtype=dtype,
         )
 
-        self.frozen_W = nn.Linear(self.in_features,
-                                  self.out_features,
-                                  bias=self.bias,
-                                  device=device,
-                                  dtype=dtype)
+        self.frozen_W = nn.Linear(self.in_features, self.out_features, bias=self.bias, device=device, dtype=dtype)
 
         self._register_load_state_dict_pre_hook(LoRALinear._load_hook, with_module=True)
 
@@ -111,7 +111,7 @@ class LoRALinear(nn.Module):
         key_name = prefix + "weight"
         if key_name in state_dict:
             w_ref = state_dict.pop(key_name)
-            state_dict[prefix + 'frozen_W.weight'] = w_ref
+            state_dict[prefix + "frozen_W.weight"] = w_ref
 
     def forward(self, x: torch.Tensor):
         lora = self.lora_B(self.lora_A(x))
@@ -119,4 +119,5 @@ class LoRALinear(nn.Module):
 
     def __repr__(self) -> str:
         return "{}Linear(in_features={}, out_features={}, r={})".format(
-            "LoRA", self.in_features, self.out_features, self.rank)
+            "LoRA", self.in_features, self.out_features, self.rank
+        )

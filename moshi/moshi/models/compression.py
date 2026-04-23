@@ -167,17 +167,13 @@ class MimiModel(CompressionModel[_MimiState]):
             self.quantizer.ema_frozen_(True)
         self.freeze_quantizer = freeze_quantizer
         self.freeze_quantizer_level = (
-            freeze_quantizer_level
-            if freeze_quantizer_level > 0
-            else self.quantizer.num_codebooks
+            freeze_quantizer_level if freeze_quantizer_level > 0 else self.quantizer.num_codebooks
         )
 
         # We will need the dimension for the resampling. In general the encoder will be a SeanetEncoder
         # which exposes a `dimension` attribute.
         dimension = encoder.dimension
-        assert isinstance(
-            dimension, int
-        ), f"Dimension should be int, got {dimension} of type {type(dimension)}."
+        assert isinstance(dimension, int), f"Dimension should be int, got {dimension} of type {type(dimension)}."
         self.dimension = dimension
 
         assert resample_method in [
@@ -187,17 +183,13 @@ class MimiModel(CompressionModel[_MimiState]):
         ], f"Invalid resample_method {resample_method}"
         self.resample_method = resample_method
         if encoder_frame_rate != frame_rate:
-            assert not (
-                causal and resample_method == "interpolate"
-            ), "Cannot interpolate with causal model."
+            assert not (causal and resample_method == "interpolate"), "Cannot interpolate with causal model."
             if resample_method in ["conv", "avg_pool"]:
-                assert (
-                    self.encoder_frame_rate > self.frame_rate
-                ), "Cannot upsample with conv."
+                assert self.encoder_frame_rate > self.frame_rate, "Cannot upsample with conv."
                 downsample_stride = self.encoder_frame_rate / self.frame_rate
-                assert downsample_stride == int(
-                    downsample_stride
-                ), f"Only integer strides are supported, got {downsample_stride}"
+                assert downsample_stride == int(downsample_stride), (
+                    f"Only integer strides are supported, got {downsample_stride}"
+                )
                 learnt = resample_method == "conv"
                 self.downsample = ConvDownsample1d(
                     int(downsample_stride),
@@ -218,7 +210,7 @@ class MimiModel(CompressionModel[_MimiState]):
 
     def _init_streaming_state(self, batch_size: int) -> _MimiState:
         device = next(self.parameters()).device
-        disable = device.type != 'cuda'
+        disable = device.type != "cuda"
         graphed_tr_dec = None
         graphed_tr_enc = None
         if self.encoder_transformer is not None:
@@ -298,9 +290,7 @@ class MimiModel(CompressionModel[_MimiState]):
         if self.freeze_quantizer:
             if isinstance(self.quantizer, SplitResidualVectorQuantizer):
                 self.quantizer.rvq_first.eval()
-                for i in range(
-                    self.freeze_quantizer_level - self.quantizer.n_q_semantic
-                ):
+                for i in range(self.freeze_quantizer_level - self.quantizer.n_q_semantic):
                     self.quantizer.rvq_rest.vq.layers[i].eval()
             elif isinstance(self.quantizer, ResidualVectorQuantizer):
                 for i in range(self.freeze_quantizer_level):
@@ -344,9 +334,9 @@ class MimiModel(CompressionModel[_MimiState]):
         Returns:
             Unquantized embeddings.
         """
-        assert (
-            x.dim() == 3
-        ), f"CompressionModel._encode_to_unquantized_latent expects audio of shape [B, C, T] but got {x.shape}"
+        assert x.dim() == 3, (
+            f"CompressionModel._encode_to_unquantized_latent expects audio of shape [B, C, T] but got {x.shape}"
+        )
 
         state = self._streaming_state
         frame_size = self.frame_size
@@ -362,7 +352,8 @@ class MimiModel(CompressionModel[_MimiState]):
                 raise RuntimeError(
                     f"Invalid input x of length {x.shape[-1]}. The length must be "
                     f"a positive multiple of the frame size {frame_size}. "
-                    "You are responsible for buffering accordingly before feeding audio to Mimi.")
+                    "You are responsible for buffering accordingly before feeding audio to Mimi."
+                )
             emb = state.graphed_encoder(x).clone()
         if self.encoder_transformer is not None:
             if state is None:

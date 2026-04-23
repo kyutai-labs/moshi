@@ -8,6 +8,7 @@ from pathlib import Path
 import torch
 from safetensors.torch import save_file
 
+
 def import_model(
     tch_model,
     out_path: Path,
@@ -73,25 +74,33 @@ def import_model(
         tch_idx = idx
 
         base = f"depformer.slices.{idx}."
-        model[base + "linear_in.weight"] = tch_model[f"depformer_in.{tch_idx}.weight"].clone()
+        model[base + "linear_in.weight"] = tch_model[
+            f"depformer_in.{tch_idx}.weight"
+        ].clone()
         model[base + "linear_out.weight"] = tch_model[f"linears.{idx}.weight"]
         if idx == 0:
             model[base + "emb.weight"] = tch_model["depformer_text_emb.weight"]
             if "depformer_text_emb.low_rank.weight" in tch_model:
-                model[base + "emb.low_rank.weight"] = tch_model["depformer_text_emb.low_rank.weight"].clone()
+                model[base + "emb.low_rank.weight"] = tch_model[
+                    "depformer_text_emb.low_rank.weight"
+                ].clone()
         else:
-            model[base + "emb.weight"] = tch_model[f"depformer_emb.{idx-1}.weight"].clone()
-            if f"depformer_emb.{tch_idx-1}.low_rank.weight" in tch_model:
-                model[base + "emb.low_rank.weight"] = tch_model[f"depformer_emb.{idx-1}.low_rank.weight"].clone()
+            model[base + "emb.weight"] = tch_model[
+                f"depformer_emb.{idx - 1}.weight"
+            ].clone()
+            if f"depformer_emb.{tch_idx - 1}.low_rank.weight" in tch_model:
+                model[base + "emb.low_rank.weight"] = tch_model[
+                    f"depformer_emb.{idx - 1}.low_rank.weight"
+                ].clone()
 
         for layer_idx in range(depformer_layers):
             layer = base + f"transformer.layers.{layer_idx}."
-            model[layer + "self_attn.in_proj.weight"] = (
-                tch_model[f"depformer.layers.{layer_idx}.self_attn.in_projs.{tch_idx}.weight"]
-            )
-            model[layer + "self_attn.out_proj.weight"] = (
-                tch_model[f"depformer.layers.{layer_idx}.self_attn.out_projs.{tch_idx}.weight"]
-            )
+            model[layer + "self_attn.in_proj.weight"] = tch_model[
+                f"depformer.layers.{layer_idx}.self_attn.in_projs.{tch_idx}.weight"
+            ]
+            model[layer + "self_attn.out_proj.weight"] = tch_model[
+                f"depformer.layers.{layer_idx}.self_attn.out_projs.{tch_idx}.weight"
+            ]
             model[layer + "norm1.weight"] = tch_model[
                 f"depformer.layers.{layer_idx}.norm1.alpha"
             ][0, 0].clone()
@@ -111,13 +120,28 @@ def import_model(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
-    parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
-    parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
-    parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO,
-                        help="HF repo to look into, defaults Moshiko. "
-                             "Use this to select a different pre-trained model.")
-    parser.add_argument("--lora-weight", type=str, help="Path to a local checkpoint file for LoRA.", default=None)
-    parser.add_argument("--config-path", type=str, help="Path to a local config file.", default=None)
+    parser.add_argument(
+        "--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi."
+    )
+    parser.add_argument(
+        "--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi."
+    )
+    parser.add_argument(
+        "--hf-repo",
+        type=str,
+        default=loaders.DEFAULT_REPO,
+        help="HF repo to look into, defaults Moshiko. "
+        "Use this to select a different pre-trained model.",
+    )
+    parser.add_argument(
+        "--lora-weight",
+        type=str,
+        help="Path to a local checkpoint file for LoRA.",
+        default=None,
+    )
+    parser.add_argument(
+        "--config-path", type=str, help="Path to a local config file.", default=None
+    )
     parser.add_argument(
         "-s", "--silent", action="store_true", help="only prints the checkpoint name"
     )
@@ -130,13 +154,21 @@ def main():
 
     args = parser.parse_args()
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
-        args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer,
-        lora_weights=args.lora_weight, config_path=args.config_path) 
+        args.hf_repo,
+        args.moshi_weight,
+        args.mimi_weight,
+        args.tokenizer,
+        lora_weights=args.lora_weight,
+        config_path=args.config_path,
+    )
     lm = checkpoint_info.get_moshi(device="cpu", dtype=torch.bfloat16, fuse_lora=True)
     for key, value in lm.state_dict().items():
         print(key, value.shape)
     out_path = Path(args.out)
-    import_model(lm.state_dict(), out_path, silent=args.silent, max_out_n_q=args.max_out_n_q)
+    import_model(
+        lm.state_dict(), out_path, silent=args.silent, max_out_n_q=args.max_out_n_q
+    )
+
 
 if __name__ == "__main__":
     main()

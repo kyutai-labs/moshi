@@ -45,17 +45,16 @@ def hash_trick(word: str, vocab_size: int) -> int:
 
 
 class TokenizedText(tp.NamedTuple):
-    tokens: torch.Tensor   # should be long tensor.
-    mask: torch.Tensor     # should be bool tensor.
+    tokens: torch.Tensor  # should be long tensor.
+    mask: torch.Tensor  # should be bool tensor.
 
 
-class TextConditioner(_BaseTextConditioner[TokenizedText]):
-    ...
+class TextConditioner(_BaseTextConditioner[TokenizedText]): ...
 
 
 class Tokenizer:
-    """Base tokenizer implementation
-    """
+    """Base tokenizer implementation"""
+
     def __call__(self, texts: tp.List[tp.Optional[str]]) -> TokenizedText:
         raise NotImplementedError()
 
@@ -73,6 +72,7 @@ class NoopTokenizer(Tokenizer):
     When all possible values are known, one can use `possible_values` to provide the list
     of possible tokens. If a token doesn't exist, `pad_idx` will be used instead.
     """
+
     def __init__(self, n_bins: int, possible_values: list[str] | None = None):
         self.n_bins = n_bins
         self.pad_idx = n_bins
@@ -112,12 +112,14 @@ class LUTConditioner(TextConditioner):
         output_dim (int): Output dim of the conditioner.
         pad_idx (int, optional): Index for padding token. Defaults to 0.
     """
-    def __init__(self, n_bins: int, tokenizer: str, possible_values: list[str] | None = None,
-                 init_scale: float = 1., **kwargs):
+
+    def __init__(
+        self, n_bins: int, tokenizer: str, possible_values: list[str] | None = None, init_scale: float = 1.0, **kwargs
+    ):
         super().__init__(**kwargs)
         self.embed = nn.Embedding(n_bins + 1, self.dim)  # n_bins + 1 for padding.
         self.embed.weight.data *= init_scale
-        if tokenizer == 'noop':
+        if tokenizer == "noop":
             self.tokenizer = NoopTokenizer(n_bins, possible_values)
         else:
             raise ValueError(f"unrecognized tokenizer `{tokenizer}`.")

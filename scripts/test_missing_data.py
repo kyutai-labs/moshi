@@ -1,14 +1,14 @@
 """Testing exec_mask feature of the streaming module, where each batch entry
 can advance at its own pace, while retaining full compat with CUDA Graph."""
+
 import sys
 import sphn
 import torch
 
 from moshi.models import loaders
 
-device = 'cuda'
-wnp, sr = sphn.read(sys.argv[1],
-                    start_sec=0, duration_sec=8, sample_rate=24000)
+device = "cuda"
+wnp, sr = sphn.read(sys.argv[1], start_sec=0, duration_sec=8, sample_rate=24000)
 wav = torch.from_numpy(wnp)
 ci = loaders.CheckpointInfo.from_hf_repo("kyutai/moshiko-pytorch-bf16")
 mimi = ci.get_mimi(device=device)
@@ -18,7 +18,7 @@ frame = int(mimi.sample_rate / mimi.frame_rate)
 
 total = wav.shape[-1] // frame
 B = 4
-wav = wav[..., :total * frame][None]
+wav = wav[..., : total * frame][None]
 remaining = [total for _ in range(B)]
 
 print("Ref computation")
@@ -38,7 +38,7 @@ with mimi.streaming(B), torch.no_grad():
         for b, this_remaining in enumerate(remaining):
             offset = min(total - this_remaining, total - 1)
             offsets.append(offset)
-            inputs.append(wav[0, :, offset * frame: offset * frame + frame])
+            inputs.append(wav[0, :, offset * frame : offset * frame + frame])
         input_ = torch.stack(inputs)
         mimi.set_exec_mask(exec_mask)
         codes = mimi.encode(input_.to(device=device))
@@ -51,8 +51,8 @@ with mimi.streaming(B), torch.no_grad():
                 continue
             remaining[b] = max(0, remaining[b] - 1)
             offset = offsets[b]
-            out_codes[b, :, offset: offset + 1] = codes[b]
-            out_audio[b, :, offset * frame: offset * frame + frame] = w[b]
+            out_codes[b, :, offset : offset + 1] = codes[b]
+            out_audio[b, :, offset * frame : offset * frame + frame] = w[b]
 
 print(ref_codes[0, :, -1])
 print(out_codes[0, :, -1])

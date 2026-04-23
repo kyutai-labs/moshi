@@ -7,7 +7,7 @@ from moshi.utils.utils import cross_entropy
 
 
 def _get_assets() -> Path:
-    return Path(__file__).parent / 'assets'
+    return Path(__file__).parent / "assets"
 
 
 def _get_lm(device=None, dtype=torch.float32) -> lm.LMModel:
@@ -28,7 +28,7 @@ def _get_lm(device=None, dtype=torch.float32) -> lm.LMModel:
         depformer_weights_per_step_schedule=[0, 1, 1],
         depformer_low_rank_embeddings=8,
         depformer_num_heads=1,
-        depformer_gating='silu',
+        depformer_gating="silu",
         context=4,
         device=device,
         dtype=dtype,
@@ -45,9 +45,9 @@ def test_init():
 @torch.no_grad
 def test_forward():
     model = _get_lm()
-    state = load_file(_get_assets() / 'test_lm_model.safetensors')
+    state = load_file(_get_assets() / "test_lm_model.safetensors")
     model.load_state_dict(state)
-    codes = load_file(_get_assets() / 'test_lm_codes.safetensors')['codes']
+    codes = load_file(_get_assets() / "test_lm_codes.safetensors")["codes"]
     out = model(codes)
     assert out.logits is not None
     assert out.text_logits is not None
@@ -57,15 +57,15 @@ def test_forward():
     assert out.logits.shape[-1] == model.card
     assert out.text_logits.shape[-1] == model.text_card
 
-    ref_out = load_file(_get_assets() / 'test_lm_out.safetensors')
-    assert (ref_out['mask'] == out.mask).all()
-    assert (ref_out['text_mask'] == out.text_mask).all()
+    ref_out = load_file(_get_assets() / "test_lm_out.safetensors")
+    assert (ref_out["mask"] == out.mask).all()
+    assert (ref_out["text_mask"] == out.text_mask).all()
     ce = cross_entropy(out.logits, codes[:, 1:], out.mask)
-    ce_ref = cross_entropy(ref_out['logits'], codes[:, 1:], out.mask)
+    ce_ref = cross_entropy(ref_out["logits"], codes[:, 1:], out.mask)
     delta = (ce.mean(dim=(0, 2)) - ce_ref.mean(dim=(0, 2))).abs() / ce_ref.mean(dim=(0, 2))
     assert delta.amax() <= 1e-6, delta.amax()
 
     ce = cross_entropy(out.text_logits, codes[:, :1], out.text_mask)
-    ce_ref = cross_entropy(ref_out['text_logits'], codes[:, :1], out.text_mask)
+    ce_ref = cross_entropy(ref_out["text_logits"], codes[:, :1], out.text_mask)
     delta = (ce.mean(dim=(0, 2)) - ce_ref.mean(dim=(0, 2))).abs() / ce_ref.mean(dim=(0, 2))
     assert delta.amax() <= 1e-6, delta.amax()

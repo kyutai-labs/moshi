@@ -50,9 +50,7 @@ class SEANetResnetBlock(StreamingContainer):
         true_skip: bool = True,
     ):
         super().__init__()
-        assert len(kernel_sizes) == len(
-            dilations
-        ), "Number of kernel sizes should match number of dilations"
+        assert len(kernel_sizes) == len(dilations), "Number of kernel sizes should match number of dilations"
         act = getattr(nn, activation)
         hidden = dim // compress
         block = []
@@ -157,9 +155,7 @@ class SEANetEncoder(StreamingContainer):
         self.hop_length = int(np.prod(self.ratios))
         self.n_blocks = len(self.ratios) + 2  # first and last conv + residual blocks
         self.disable_norm_outer_blocks = disable_norm_outer_blocks
-        assert (
-            self.disable_norm_outer_blocks >= 0 and self.disable_norm_outer_blocks <= self.n_blocks
-        ), (
+        assert self.disable_norm_outer_blocks >= 0 and self.disable_norm_outer_blocks <= self.n_blocks, (
             "Number of blocks for which to disable norm is invalid."
             "It should be lower or equal to the actual number of blocks in the network and greater or equal to 0."
         )
@@ -224,9 +220,7 @@ class SEANetEncoder(StreamingContainer):
                 mult * n_filters,
                 dimension,
                 last_kernel_size,
-                norm=(
-                    "none" if self.disable_norm_outer_blocks == self.n_blocks else norm
-                ),
+                norm=("none" if self.disable_norm_outer_blocks == self.n_blocks else norm),
                 norm_kwargs=norm_params,
                 causal=causal,
                 pad_mode=pad_mode,
@@ -303,9 +297,7 @@ class SEANetDecoder(StreamingContainer):
         self.hop_length = int(np.prod(self.ratios))
         self.n_blocks = len(self.ratios) + 2  # first and last conv + residual blocks
         self.disable_norm_outer_blocks = disable_norm_outer_blocks
-        assert (
-            self.disable_norm_outer_blocks >= 0 and self.disable_norm_outer_blocks <= self.n_blocks
-        ), (
+        assert self.disable_norm_outer_blocks >= 0 and self.disable_norm_outer_blocks <= self.n_blocks, (
             "Number of blocks for which to disable norm is invalid."
             "It should be lower or equal to the actual number of blocks in the network and greater or equal to 0."
         )
@@ -317,9 +309,7 @@ class SEANetDecoder(StreamingContainer):
                 dimension,
                 mult * n_filters,
                 kernel_size,
-                norm=(
-                    "none" if self.disable_norm_outer_blocks == self.n_blocks else norm
-                ),
+                norm=("none" if self.disable_norm_outer_blocks == self.n_blocks else norm),
                 norm_kwargs=norm_params,
                 causal=causal,
                 pad_mode=pad_mode,
@@ -328,11 +318,7 @@ class SEANetDecoder(StreamingContainer):
 
         # Upsample to raw audio scale
         for i, ratio in enumerate(self.ratios):
-            block_norm = (
-                "none"
-                if self.disable_norm_outer_blocks >= self.n_blocks - (i + 1)
-                else norm
-            )
+            block_norm = "none" if self.disable_norm_outer_blocks >= self.n_blocks - (i + 1) else norm
             # Add upsampling layers
             model += [
                 act(**activation_params),

@@ -65,6 +65,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
     This also automatically propagates to all streaming children module.
     When the streaming state is set, modules should store whatever state they need in there.
     """
+
     def __init__(self) -> None:
         super().__init__()
         self._streaming_state: StateT | None = None
@@ -142,9 +143,7 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
         def _reset(name: str, module: StreamingModule):
             state = module._streaming_state
             if state is None:
-                raise ValueError(
-                    f"Trying to reset streaming, but {name} wasn't streaming."
-                )
+                raise ValueError(f"Trying to reset streaming, but {name} wasn't streaming.")
             state.reset(reset_mask)
 
         state = self._streaming_state
@@ -202,10 +201,11 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
                 state = module._streaming_state
                 assert state is not None
                 state.set_exec_mask(exec_mask)
+
             self._apply_named_streaming(_set_exec_mask_fn)
 
         if state._set_exec_mask_graphed is None:
-            disable = state.device.type != 'cuda'
+            disable = state.device.type != "cuda"
             state._set_exec_mask_graphed = CUDAGraphed(_set_exec_mask, disable=disable)
 
         state._set_exec_mask_graphed(exec_mask)

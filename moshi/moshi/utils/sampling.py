@@ -12,9 +12,7 @@
 import torch
 
 
-def multinomial(
-    input: torch.Tensor, num_samples: int, replacement=False, *, generator=None
-):
+def multinomial(input: torch.Tensor, num_samples: int, replacement=False, *, generator=None):
     """torch.multinomial with arbitrary number of dimensions, and number of candidates on the last dimension.
 
     Args:

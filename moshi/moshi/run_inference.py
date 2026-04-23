@@ -31,27 +31,19 @@ def seed_all(seed):
     torch.backends.cudnn.benchmark = False
 
 
-def get_condition_tensors(
-    model_type: str, lm: LMModel, batch_size: int, cfg_coef: float
-) -> ConditionTensors:
+def get_condition_tensors(model_type: str, lm: LMModel, batch_size: int, cfg_coef: float) -> ConditionTensors:
     condition_tensors = {}
     if lm.condition_provider is not None and lm.condition_provider.conditioners:
         conditions: list[ConditionAttributes] | None = None
         if model_type == "hibiki":
-            conditions = [
-                ConditionAttributes(text={"description": "very_good"}, tensor={})
-                for _ in range(batch_size)
-            ]
+            conditions = [ConditionAttributes(text={"description": "very_good"}, tensor={}) for _ in range(batch_size)]
             if cfg_coef != 1.0:
                 # Extending the conditions with the negatives for the CFG.
                 conditions += [
-                    ConditionAttributes(text={"description": "very_bad"}, tensor={})
-                    for _ in range(batch_size)
+                    ConditionAttributes(text={"description": "very_bad"}, tensor={}) for _ in range(batch_size)
                 ]
         else:
-            raise RuntimeError(
-                f"Model expects conditioning but model type {model_type} is not supported."
-            )
+            raise RuntimeError(f"Model expects conditioning but model type {model_type} is not supported.")
         assert conditions is not None
         return lm.condition_provider.prepare_and_provide(conditions)
     return condition_tensors
@@ -80,9 +72,7 @@ class InferenceState:
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
         condition_tensors = get_condition_tensors(model_type, lm, batch_size, cfg_coef)
-        self.lm_gen = LMGen(
-            lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors, **kwargs
-        )
+        self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors, **kwargs)
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
         self.batch_size = batch_size
@@ -96,12 +86,8 @@ class InferenceState:
 
     def run(self, in_pcms: torch.Tensor) -> list[tuple[torch.Tensor, torch.Tensor]]:
         """Returns a list of tupel `(text_tokens, audio_tokens)`"""
-        out_pcms_per_item: list[list[torch.Tensor]] = [
-            [] for _ in range(self.batch_size)
-        ]
-        out_text_tokens_per_item: list[list[torch.Tensor]] = [
-            [] for _ in range(self.batch_size)
-        ]
+        out_pcms_per_item: list[list[torch.Tensor]] = [[] for _ in range(self.batch_size)]
+        out_text_tokens_per_item: list[list[torch.Tensor]] = [[] for _ in range(self.batch_size)]
         # For the Hibiki translation model, we feed a special token for the end of the input stream,
         # which corresponds to `2048` on all the codebooks of the audio stream, and wait
         # for the EOS on the output text stream to be emitted, as indication that the model is done.
@@ -126,13 +112,7 @@ class InferenceState:
             pad_right = int((pad_right + 1.0) * 24000)
             in_pcms = torch.nn.functional.pad(in_pcms, (pad_left, pad_right), mode="constant")
         # We keep only fully frames.
-        chunks = deque(
-            [
-                chunk
-                for chunk in in_pcms.split(self.frame_size, dim=2)
-                if chunk.shape[-1] == self.frame_size
-            ]
-        )
+        chunks = deque([chunk for chunk in in_pcms.split(self.frame_size, dim=2) if chunk.shape[-1] == self.frame_size])
 
         self.printer.print_header()
         while not all(eos_reached):
@@ -174,9 +154,7 @@ class InferenceState:
             assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
             if self.lm_gen.lm_model.dep_q > 0:
                 out_pcm = self.mimi.decode(tokens[:, 1:]).cpu()
-                for b, (one_text, one_pcm) in enumerate(
-                    zip(tokens[:, 0].cpu(), out_pcm)
-                ):
+                for b, (one_text, one_pcm) in enumerate(zip(tokens[:, 0].cpu(), out_pcm)):
                     if eos_reached[b]:
                         continue
                     elif one_text.item() == self.text_tokenizer.eos_id():
@@ -208,9 +186,7 @@ class InferenceState:
         if self.lm_gen.lm_model.dep_q > 0:
             out = [
                 (torch.cat(one_texts, dim=0), torch.cat(one_pcms, dim=1))
-                for one_texts, one_pcms in zip(
-                    out_text_tokens_per_item, out_pcms_per_item
-                )
+                for one_texts, one_pcms in zip(out_text_tokens_per_item, out_pcms_per_item)
             ]
             return out
         else:
@@ -220,22 +196,15 @@ class InferenceState:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
-    parser.add_argument(
-        "--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi."
-    )
-    parser.add_argument(
-        "--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi."
-    )
+    parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
+    parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
     parser.add_argument(
         "--hf-repo",
         type=str,
         default=loaders.DEFAULT_REPO,
-        help="HF repo to look into, defaults Moshiko. "
-        "Use this to select a different pre-trained model.",
+        help="HF repo to look into, defaults Moshiko. Use this to select a different pre-trained model.",
     )
-    parser.add_argument(
-        "--batch-size", type=int, default=8, help="Batch size to be used for inference."
-    )
+    parser.add_argument("--batch-size", type=int, default=8, help="Batch size to be used for inference.")
     parser.add_argument(
         "--device",
         type=str,
@@ -310,9 +279,7 @@ def main():
                 outfile_ = outfile
             duration = out_pcm.shape[1] / mimi.sample_rate
             log("info", f"writing {outfile_} with duration {duration:.1f} sec.")
-            sphn.write_wav(
-                str(outfile_), out_pcm[0].numpy(), sample_rate=mimi.sample_rate
-            )
+            sphn.write_wav(str(outfile_), out_pcm[0].numpy(), sample_rate=mimi.sample_rate)
 
 
 if __name__ == "__main__":

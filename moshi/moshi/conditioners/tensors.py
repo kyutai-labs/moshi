@@ -5,8 +5,7 @@ from .base import _BaseTensorConditioner, TensorCondition, ConditionType
 
 
 class TensorConditioner(_BaseTensorConditioner[TensorCondition]):
-    """Does basically nothing.
-    """
+    """Does basically nothing."""
 
     def prepare(self, tensor: TensorCondition) -> TensorCondition:
         device = next(iter(self.parameters())).device

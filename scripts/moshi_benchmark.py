@@ -16,16 +16,36 @@ from moshi.models import loaders, LMGen
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
-parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
-parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
-parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO,
-                    help="HF repo to look into, defaults Moshiko. "
-                         "Use this to select a different pre-trained model.")
-parser.add_argument("--lora-weight", type=str, help="Path to a local checkpoint file for LoRA.", default=None)
-parser.add_argument("--config-path", type=str, help="Path to a local config file.", default=None)
+parser.add_argument(
+    "--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi."
+)
+parser.add_argument(
+    "--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi."
+)
+parser.add_argument(
+    "--hf-repo",
+    type=str,
+    default=loaders.DEFAULT_REPO,
+    help="HF repo to look into, defaults Moshiko. "
+    "Use this to select a different pre-trained model.",
+)
+parser.add_argument(
+    "--lora-weight",
+    type=str,
+    help="Path to a local checkpoint file for LoRA.",
+    default=None,
+)
+parser.add_argument(
+    "--config-path", type=str, help="Path to a local config file.", default=None
+)
 parser.add_argument("--steps", default=100, type=int)
-parser.add_argument("--no_fuse_lora", action="store_false", dest="fuse_lora", default=True,
-                    help="Do not fuse LoRA layers intot Linear layers.")
+parser.add_argument(
+    "--no_fuse_lora",
+    action="store_false",
+    dest="fuse_lora",
+    default=True,
+    help="Do not fuse LoRA layers intot Linear layers.",
+)
 parser.add_argument("--profile", action="store_true")
 parser.add_argument("--device", type=str, default="cuda")
 args = parser.parse_args()
@@ -46,8 +66,13 @@ seed_all(42424242)
 
 print("retrieving checkpoint")
 checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
-    args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer,
-    lora_weights=args.lora_weight, config_path=args.config_path)
+    args.hf_repo,
+    args.moshi_weight,
+    args.mimi_weight,
+    args.tokenizer,
+    lora_weights=args.lora_weight,
+    config_path=args.config_path,
+)
 print("loading mimi")
 mimi = checkpoint_info.get_mimi(device=args.device)
 print("mimi loaded")
@@ -55,9 +80,12 @@ print("mimi loaded")
 text_tokenizer = checkpoint_info.get_text_tokenizer()
 
 print("loading moshi")
-lm = checkpoint_info.get_moshi(device=args.device, dtype=torch.bfloat16, fuse_lora=args.fuse_lora)
+lm = checkpoint_info.get_moshi(
+    device=args.device, dtype=torch.bfloat16, fuse_lora=args.fuse_lora
+)
 lm_gen = LMGen(lm)
 print("moshi loaded")
+
 
 def cb(step, total):
     print(f"{step:06d} / {total:06d}", end="\r")

@@ -23,7 +23,7 @@ from .streaming import StreamingModule, State
 
 
 CONV_NORMALIZATIONS = frozenset(["none", "weight_norm"])
-M = tp.TypeVar('M', bound=nn.Module)
+M = tp.TypeVar("M", bound=nn.Module)
 
 
 class TransposedLayerNorm(nn.Module):
@@ -49,9 +49,7 @@ def apply_parametrization_norm(module: M, norm: str = "none") -> M:
         return module
 
 
-def get_extra_padding_for_conv1d(
-    x: torch.Tensor, kernel_size: int, stride: int, padding_total: int = 0
-) -> int:
+def get_extra_padding_for_conv1d(x: torch.Tensor, kernel_size: int, stride: int, padding_total: int = 0) -> int:
     """See `pad_for_conv1d`."""
     length = x.shape[-1]
     n_frames = (length - kernel_size + padding_total) / stride + 1
@@ -59,9 +57,7 @@ def get_extra_padding_for_conv1d(
     return ideal_length - length
 
 
-def pad_for_conv1d(
-    x: torch.Tensor, kernel_size: int, stride: int, padding_total: int = 0
-):
+def pad_for_conv1d(x: torch.Tensor, kernel_size: int, stride: int, padding_total: int = 0):
     """Pad for a convolution to make sure that the last window is full.
     Extra padding is added at the end. This is required to ensure that we can rebuild
     an output of the same length, as otherwise, even with padding, some time steps
@@ -124,9 +120,7 @@ class NormConv1d(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        self.conv = apply_parametrization_norm(
-            nn.Conv1d(*args, **kwargs), norm
-        )
+        self.conv = apply_parametrization_norm(nn.Conv1d(*args, **kwargs), norm)
         self.norm_type = norm
 
     def forward(self, x):
@@ -148,9 +142,7 @@ class NormConvTranspose1d(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        self.convtr = apply_parametrization_norm(
-            nn.ConvTranspose1d(*args, **kwargs), norm
-        )
+        self.convtr = apply_parametrization_norm(nn.ConvTranspose1d(*args, **kwargs), norm)
         self.norm_type = norm
 
     def forward(self, x):
@@ -189,7 +181,7 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
         pad_mode: str = "constant",
     ):
         super().__init__()
-        assert pad_mode in ['constant', 'replicate'], pad_mode
+        assert pad_mode in ["constant", "replicate"], pad_mode
         self.pad_mode = pad_mode
         assert causal
         # warn user on unusual setup between dilation and stride
@@ -222,9 +214,7 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
     @property
     def _effective_kernel_size(self) -> int:
         dilation = self.conv.conv.dilation[0]
-        return (
-            self._kernel_size - 1
-        ) * dilation + 1  # effective kernel size with dilations
+        return (self._kernel_size - 1) * dilation + 1  # effective kernel size with dilations
 
     @property
     def _padding_total(self) -> int:
@@ -237,8 +227,7 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
         param = next(iter(self.parameters()))
         dtype = param.dtype
         device = param.device
-        previous = torch.zeros(batch_size, self.conv.conv.in_channels, kernel - stride,
-                               dtype=dtype, device=device)
+        previous = torch.zeros(batch_size, self.conv.conv.in_channels, kernel - stride, dtype=dtype, device=device)
         first = torch.ones(batch_size, device=device, dtype=torch.bool)
         return _StreamingConv1dState(batch_size, device, previous, first)
 
@@ -250,22 +239,18 @@ class StreamingConv1d(StreamingModule[_StreamingConv1dState]):
         if state is None:
             state = self._init_streaming_state(B)
         TP = state.previous.shape[-1]
-        if TP and self.pad_mode == 'replicate':
+        if TP and self.pad_mode == "replicate":
             assert T >= TP, "Not enough content to pad streaming."
             init = x[..., :1]
             state.previous[:] = torch.where(
-                state.first.view(-1, 1, 1) & state.exec_mask.view(-1, 1, 1),
-                init,
-                state.previous)
+                state.first.view(-1, 1, 1) & state.exec_mask.view(-1, 1, 1), init, state.previous
+            )
         if TP:
             x = torch.cat([state.previous, x], dim=-1)
         y = self.conv(x)
         if TP:
-            state.previous[:] = torch.where(
-                state.exec_mask.view(-1, 1, 1),
-                x[..., -TP:],
-                state.previous)
-            if self.pad_mode == 'replicate':
+            state.previous[:] = torch.where(state.exec_mask.view(-1, 1, 1), x[..., -TP:], state.previous)
+            if self.pad_mode == "replicate":
                 state.first = torch.where(
                     state.exec_mask,
                     torch.zeros_like(state.first),
@@ -280,10 +265,7 @@ class _StreamingConvTr1dState(State):
 
     def reset(self, reset_mask: torch.Tensor):
         super().reset(reset_mask)
-        self.partial[:] = torch.where(
-            reset_mask.view(-1, 1, 1),
-            torch.zeros_like(self.partial),
-            self.partial)
+        self.partial[:] = torch.where(reset_mask.view(-1, 1, 1), torch.zeros_like(self.partial), self.partial)
 
 
 class StreamingConvTranspose1d(StreamingModule[_StreamingConvTr1dState]):
@@ -305,7 +287,7 @@ class StreamingConvTranspose1d(StreamingModule[_StreamingConvTr1dState]):
         norm_kwargs: tp.Dict[str, tp.Any] = {},
     ):
         super().__init__()
-        assert trim_right_ratio == 1.
+        assert trim_right_ratio == 1.0
         assert causal
         self.convtr = NormConvTranspose1d(
             in_channels,
@@ -333,8 +315,7 @@ class StreamingConvTranspose1d(StreamingModule[_StreamingConvTr1dState]):
         device = param.device
         K = self._kernel_size
         S = self._stride
-        partial = torch.zeros(batch_size, self.convtr.convtr.out_channels, K - S,
-                              device=device, dtype=dtype)
+        partial = torch.zeros(batch_size, self.convtr.convtr.out_channels, K - S, device=device, dtype=dtype)
         return _StreamingConvTr1dState(batch_size, device, partial)
 
     def forward(self, x):
@@ -354,10 +335,7 @@ class StreamingConvTranspose1d(StreamingModule[_StreamingConvTr1dState]):
                 for_partial = y[..., -PT:]
                 if bias is not None:
                     for_partial -= bias[:, None]
-                state.partial[:] = torch.where(
-                    state.exec_mask.view(-1, 1, 1),
-                    for_partial,
-                    state.partial)
+                state.partial[:] = torch.where(state.exec_mask.view(-1, 1, 1), for_partial, state.partial)
                 y = y[..., :-PT]
         return y
 

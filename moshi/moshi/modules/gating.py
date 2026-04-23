@@ -11,9 +11,7 @@ from ..utils.compile import torch_compile_lazy, no_compile
 
 
 @torch_compile_lazy
-def gating_forward_kernel(
-    weight_in: torch.Tensor, weight_out: torch.Tensor, activation, x: torch.Tensor
-):
+def gating_forward_kernel(weight_in: torch.Tensor, weight_out: torch.Tensor, activation, x: torch.Tensor):
     x = F.linear(x, weight_in)
     B, T, _ = x.shape
     x = x.view(B, T, 2, -1)
@@ -22,12 +20,7 @@ def gating_forward_kernel(
     return x
 
 
-def gating_forward_generic(
-    linear_in: nn.Module,
-    linear_out: nn.Module,
-    activation,
-    x: torch.Tensor
-):
+def gating_forward_generic(linear_in: nn.Module, linear_out: nn.Module, activation, x: torch.Tensor):
     x = linear_in(x)
     B, T, _ = x.shape
     x = x.view(B, T, 2, -1)
@@ -70,16 +63,9 @@ class ActivationGating(nn.Module):
             with ExitStack() as stack:
                 if self.training:
                     stack.enter_context(no_compile())
-                return gating_forward_kernel(
-                    self.linear_in.weight, self.linear_out.weight, self.activation, x
-                )
+                return gating_forward_kernel(self.linear_in.weight, self.linear_out.weight, self.activation, x)
         else:
-            return gating_forward_generic(
-                self.linear_in,
-                self.linear_out,
-                self.activation,
-                x
-            )
+            return gating_forward_generic(self.linear_in, self.linear_out, self.activation, x)
 
 
 def _get_activation(name: str):
@@ -93,23 +79,14 @@ def _get_activation(name: str):
         raise ValueError(f"Unknown activation {name}")
 
 
-def _make_gating(
-    name: str, dim: int, dim_feedforward: int,
-    **factory_kwargs
-) -> nn.Module:
-    return ActivationGating(
-        dim, dim_feedforward, _get_activation(name), **factory_kwargs
-    )
+def _make_gating(name: str, dim: int, dim_feedforward: int, **factory_kwargs) -> nn.Module:
+    return ActivationGating(dim, dim_feedforward, _get_activation(name), **factory_kwargs)
 
 
-def make_gating(
-    name: str, dim: int, dim_feedforward: int, **factory_kwargs
-) -> nn.Module:
+def make_gating(name: str, dim: int, dim_feedforward: int, **factory_kwargs) -> nn.Module:
     gating = _make_gating(name, dim, dim_feedforward, **factory_kwargs)
     if isinstance(gating.linear_in, nn.Linear):
         max_params = 2 * dim * dim_feedforward
         params = sum(p.numel() for p in gating.parameters())
-        assert (
-            params <= max_params
-        ), f"{name} gating has {params} params, max is {max_params}"
+        assert params <= max_params, f"{name} gating has {params} params, max is {max_params}"
     return gating

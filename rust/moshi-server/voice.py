@@ -26,7 +26,7 @@ def normalize_loudness(
     # The headroom is set more conservatively than in tts_make_voice.py, which is what
     # we use for pre-made recordings.
     loudness_headroom_db: float = 18,
-    energy_floor: float = 2e-3
+    energy_floor: float = 2e-3,
 ):
     """Normalize an input signal to a user loudness in dB LKFS.
     Audio loudness is defined according to the ITU-R BS.1770-4 recommendation.
@@ -63,13 +63,13 @@ def sinc(t: torch.Tensor) -> torch.Tensor:
 
     :param t: the input tensor
     """
-    return torch.where(t == 0, torch.ones(1, device=t.device, dtype=t.dtype), torch.sin(t) / t)
+    return torch.where(
+        t == 0, torch.ones(1, device=t.device, dtype=t.dtype), torch.sin(t) / t
+    )
 
 
 def kernel_upsample2(zeros=56, device=None):
-    """kernel_upsample2.
-
-    """
+    """kernel_upsample2."""
     win = torch.hann_window(4 * zeros + 1, periodic=False, device=device)
     winodd = win[1::2]
     t = torch.linspace(-zeros + 0.5, zeros - 0.5, 2 * zeros, device=device)
@@ -87,15 +87,15 @@ def upsample2(x, zeros=56):
     """
     *other, time = x.shape
     kernel = kernel_upsample2(zeros, x.device).to(x)
-    out = F.conv1d(x.view(-1, 1, time), kernel, padding=zeros)[..., 1:].view(*other, time)
+    out = F.conv1d(x.view(-1, 1, time), kernel, padding=zeros)[..., 1:].view(
+        *other, time
+    )
     y = torch.stack([x, out], dim=-1)
     return y.view(*other, -1)
 
 
 def kernel_downsample2(zeros=56, device=None):
-    """kernel_downsample2.
-
-    """
+    """kernel_downsample2."""
     win = torch.hann_window(4 * zeros + 1, periodic=False, device=device)
     winodd = win[1::2]
     t = torch.linspace(-zeros + 0.5, zeros - 0.5, 2 * zeros, device=device)
@@ -117,8 +117,9 @@ def downsample2(x, zeros=56):
     xodd = x[..., 1::2]
     *other, time = xodd.shape
     kernel = kernel_downsample2(zeros, x.device).to(x)
-    out = xeven + F.conv1d(xodd.view(-1, 1, time), kernel, padding=zeros)[..., :-1].view(
-        *other, time)
+    out = xeven + F.conv1d(xodd.view(-1, 1, time), kernel, padding=zeros)[
+        ..., :-1
+    ].view(*other, time)
     return out.view(*other, -1).mul(0.5)
 
 
@@ -126,7 +127,9 @@ class BLSTM(nn.Module):
     def __init__(self, dim, layers=2, bi=True):
         super().__init__()
         klass = nn.LSTM
-        self.lstm = klass(bidirectional=bi, num_layers=layers, hidden_size=dim, input_size=dim)
+        self.lstm = klass(
+            bidirectional=bi, num_layers=layers, hidden_size=dim, input_size=dim
+        )
         self.linear = None
         if bi:
             self.linear = nn.Linear(2 * dim, dim)
@@ -140,7 +143,7 @@ class BLSTM(nn.Module):
 
 def rescale_conv(conv, reference):
     std = conv.weight.std().detach()
-    scale = (std / reference)**0.5
+    scale = (std / reference) ** 0.5
     conv.weight.data /= scale
     if conv.bias is not None:
         conv.bias.data /= scale
@@ -176,22 +179,25 @@ class Demucs(nn.Module):
         - sample_rate (float): sample_rate used for training the model.
 
     """
-    def __init__(self,
-                 chin=1,
-                 chout=1,
-                 hidden=48,
-                 depth=5,
-                 kernel_size=8,
-                 stride=4,
-                 causal=True,
-                 resample=4,
-                 growth=2,
-                 max_hidden=10_000,
-                 normalize=True,
-                 glu=True,
-                 rescale=0.1,
-                 floor=1e-3,
-                 sample_rate=16_000):
+
+    def __init__(
+        self,
+        chin=1,
+        chout=1,
+        hidden=48,
+        depth=5,
+        kernel_size=8,
+        stride=4,
+        causal=True,
+        resample=4,
+        growth=2,
+        max_hidden=10_000,
+        normalize=True,
+        glu=True,
+        rescale=0.1,
+        floor=1e-3,
+        sample_rate=16_000,
+    ):
 
         super().__init__()
         if resample not in [1, 2, 4]:
@@ -219,13 +225,15 @@ class Demucs(nn.Module):
             encode += [
                 nn.Conv1d(chin, hidden, kernel_size, stride),
                 nn.ReLU(),
-                nn.Conv1d(hidden, hidden * ch_scale, 1), activation,
+                nn.Conv1d(hidden, hidden * ch_scale, 1),
+                activation,
             ]
             self.encoder.append(nn.Sequential(*encode))
 
             decode = []
             decode += [
-                nn.Conv1d(hidden, ch_scale * hidden, 1), activation,
+                nn.Conv1d(hidden, ch_scale * hidden, 1),
+                activation,
                 nn.ConvTranspose1d(hidden, chout, kernel_size, stride),
             ]
             if index > 0:
@@ -259,7 +267,7 @@ class Demucs(nn.Module):
 
     @property
     def total_stride(self):
-        return self.stride ** self.depth // self.resample
+        return self.stride**self.depth // self.resample
 
     def forward(self, mix):
         if mix.dim() == 2:
@@ -288,7 +296,7 @@ class Demucs(nn.Module):
         x = x.permute(1, 2, 0)
         for decode in self.decoder:
             skip = skips.pop(-1)
-            x = x + skip[..., :x.shape[-1]]
+            x = x + skip[..., : x.shape[-1]]
             x = decode(x)
         if self.resample == 2:
             x = downsample2(x)
@@ -310,14 +318,12 @@ def fast_conv(conv, x):
     assert batch == 1
     if kernel == 1:
         x = x.view(chin, length)
-        out = torch.addmm(
-            conv.bias.view(-1, 1),
-            conv.weight.view(chout, chin), x)
+        out = torch.addmm(conv.bias.view(-1, 1), conv.weight.view(chout, chin), x)
     elif length == kernel:
         x = x.view(chin * kernel, 1)
         out = torch.addmm(
-            conv.bias.view(-1, 1),
-            conv.weight.view(chout, chin * kernel), x)
+            conv.bias.view(-1, 1), conv.weight.view(chout, chin * kernel), x
+        )
     else:
         out = conv(x)
     return out.view(batch, chout, -1)
@@ -340,12 +346,16 @@ class DemucsStreamer:
         - resample_buffer (int): size of the buffer of previous inputs/outputs
             kept for resampling.
     """
-    def __init__(self, demucs,
-                 dry=0,
-                 num_frames=1,
-                 resample_lookahead=64,
-                 resample_buffer=256,
-                 mean_decay_duration: float = 10.):
+
+    def __init__(
+        self,
+        demucs,
+        dry=0,
+        num_frames=1,
+        resample_lookahead=64,
+        resample_buffer=256,
+        mean_decay_duration: float = 10.0,
+    ):
         device = next(iter(demucs.parameters())).device
         self.demucs = demucs
         self.lstm_state = None
@@ -354,7 +364,9 @@ class DemucsStreamer:
         self.resample_lookahead = resample_lookahead
         resample_buffer = min(demucs.total_stride, resample_buffer)
         self.resample_buffer = resample_buffer
-        self.frame_length = demucs.valid_length(1) + demucs.total_stride * (num_frames - 1)
+        self.frame_length = demucs.valid_length(1) + demucs.total_stride * (
+            num_frames - 1
+        )
         self.total_length = self.frame_length + self.resample_lookahead
         self.stride = demucs.total_stride * num_frames
         self.resample_in = torch.zeros(demucs.chin, resample_buffer, device=device)
@@ -362,10 +374,12 @@ class DemucsStreamer:
 
         self.frames = 0
         self.total_time = 0
-        self.mean_variance = 0.
-        self.mean_total = 0.
+        self.mean_variance = 0.0
+        self.mean_total = 0.0
         mean_receptive_field_in_samples = mean_decay_duration * demucs.sample_rate
-        mean_receptive_field_in_frames = mean_receptive_field_in_samples / demucs.total_stride
+        mean_receptive_field_in_frames = (
+            mean_receptive_field_in_samples / demucs.total_stride
+        )
         self.mean_decay = 1 - 1 / mean_receptive_field_in_frames
 
         self.pending = torch.zeros(demucs.chin, 0, device=device)
@@ -397,7 +411,9 @@ class DemucsStreamer:
         self.lstm_state = None
         self.conv_state = None
         pending_length = self.pending.shape[1]
-        padding = torch.zeros(self.demucs.chin, self.total_length, device=self.pending.device)
+        padding = torch.zeros(
+            self.demucs.chin, self.total_length, device=self.pending.device
+        )
         out = self.feed(padding)
         return out[:, :pending_length]
 
@@ -422,24 +438,31 @@ class DemucsStreamer:
         outs = []
         while self.pending.shape[1] >= self.total_length:
             self.frames += 1
-            frame = self.pending[:, :self.total_length]
+            frame = self.pending[:, : self.total_length]
             dry_signal = frame[:, :stride]
             if demucs.normalize:
                 mono = frame.mean(0)
                 variance = (mono**2).mean()
-                self.mean_variance = self.mean_variance * self.mean_decay + (1 - self.mean_decay) * variance
-                self.mean_total = self.mean_total * self.mean_decay + (1 - self.mean_decay)
+                self.mean_variance = (
+                    self.mean_variance * self.mean_decay
+                    + (1 - self.mean_decay) * variance
+                )
+                self.mean_total = self.mean_total * self.mean_decay + (
+                    1 - self.mean_decay
+                )
                 frame = frame / (demucs.floor + torch.sqrt(self.variance))
             padded_frame = torch.cat([self.resample_in, frame], dim=-1)
-            self.resample_in[:] = frame[:, stride - resample_buffer:stride]
+            self.resample_in[:] = frame[:, stride - resample_buffer : stride]
             frame = padded_frame
 
             if resample == 4:
                 frame = upsample2(upsample2(frame))
             elif resample == 2:
                 frame = upsample2(frame)
-            frame = frame[:, resample * resample_buffer:]  # remove pre sampling buffer
-            frame = frame[:, :resample * self.frame_length]  # remove extra samples after window
+            frame = frame[:, resample * resample_buffer :]  # remove pre sampling buffer
+            frame = frame[
+                :, : resample * self.frame_length
+            ]  # remove extra samples after window
 
             out, extra = self._separate_frame(frame)
             padded_out = torch.cat([self.resample_out, out, extra], 1)
@@ -451,7 +474,7 @@ class DemucsStreamer:
             else:
                 out = padded_out
 
-            out = out[:, resample_buffer // resample:]
+            out = out[:, resample_buffer // resample :]
             out = out[:, :stride]
 
             if demucs.normalize:
@@ -509,25 +532,25 @@ class DemucsStreamer:
         extra = None
         for idx, decode in enumerate(demucs.decoder):
             skip = skips.pop(-1)
-            x += skip[..., :x.shape[-1]]
+            x += skip[..., : x.shape[-1]]
             x = fast_conv(decode[0], x)
             x = decode[1](x)
 
             if extra is not None:
-                skip = skip[..., x.shape[-1]:]
-                extra += skip[..., :extra.shape[-1]]
+                skip = skip[..., x.shape[-1] :]
+                extra += skip[..., : extra.shape[-1]]
                 extra = decode[2](decode[1](decode[0](extra)))
             x = decode[2](x)
-            next_state.append(x[..., -demucs.stride:] - decode[2].bias.view(-1, 1))
+            next_state.append(x[..., -demucs.stride :] - decode[2].bias.view(-1, 1))
             if extra is None:
-                extra = x[..., -demucs.stride:]
+                extra = x[..., -demucs.stride :]
             else:
-                extra[..., :demucs.stride] += next_state[-1]
-            x = x[..., :-demucs.stride]
+                extra[..., : demucs.stride] += next_state[-1]
+            x = x[..., : -demucs.stride]
 
             if not first:
                 prev = self.conv_state.pop(0)
-                x[..., :demucs.stride] += prev
+                x[..., : demucs.stride] += prev
             if idx != demucs.depth - 1:
                 x = decode[3](x)
                 extra = decode[3](extra)
@@ -538,15 +561,18 @@ class DemucsStreamer:
 def get_demucs():
     model = Demucs(hidden=64)
     url = "https://dl.fbaipublicfiles.com/adiyoss/denoiser/dns64-a7761ff99a7d5bb6.th"
-    state_dict = torch.hub.load_state_dict_from_url(url, map_location='cpu')
+    state_dict = torch.hub.load_state_dict_from_url(url, map_location="cpu")
     model.load_state_dict(state_dict)
     return model
 
 
 class Config(BaseModel):
-    log_folder: Path = Path.home() / 'tmp/tts-service'
+    log_folder: Path = Path.home() / "tmp/tts-service"
     hf_repo: str = loaders.DEFAULT_REPO
-    mimi_weight: Path = Path.home() / 'models/moshi/moshi_e9d43d50@500/e9d43d50_500_mimi_voice.safetensors'
+    mimi_weight: Path = (
+        Path.home()
+        / "models/moshi/moshi_e9d43d50@500/e9d43d50_500_mimi_voice.safetensors"
+    )
     config_path: Path | None = None
     device: str = "cpu"
     dry_fraction: float = 0.02
@@ -559,7 +585,9 @@ class Processor:
         config = Config(**config_override)
         torch.set_num_threads(config.num_cpu_threads)
         checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
-            config.hf_repo, mimi_weights=config.mimi_weight, config_path=config.config_path,
+            config.hf_repo,
+            mimi_weights=config.mimi_weight,
+            config_path=config.config_path,
         )
         self.dry_fraction = config.dry_fraction
         loaders._quantizer_kwargs["n_q"] = 16
@@ -575,7 +603,7 @@ class Processor:
     @torch.no_grad()
     def run_one(self, pcm: np.ndarray):
         print(pcm.shape)
-        wav = torch.from_numpy(pcm[None, None, :self._length]).float()
+        wav = torch.from_numpy(pcm[None, None, : self._length]).float()
         assert wav.shape[-1] == self._length
 
         low = self._lowpass(wav)

@@ -13,7 +13,11 @@ import numpy as np
 from safetensors.torch import load_file
 import torch
 
-from moshi.conditioners import ConditionAttributes, dropout_all_conditions, TensorCondition
+from moshi.conditioners import (
+    ConditionAttributes,
+    dropout_all_conditions,
+    TensorCondition,
+)
 from moshi.models import loaders
 from moshi.models.lm import _LMGenState, LMGen
 from moshi.models.tts import TTSModel, Entry, State, StateMachine, DEFAULT_DSM_TTS_REPO
@@ -38,26 +42,30 @@ def flags_out_from_mask_(flags_out: np.ndarray, mask: torch.Tensor, value: int):
     flags_out[mask.numpy()] |= value
 
 
-def split_at_specific_separator(text: str, separator: str, index_of_separator: int) -> tuple[str, str]:
-    """ kyutai/tts-voices/unmute-prod-website/*.safetensors
+def split_at_specific_separator(
+    text: str, separator: str, index_of_separator: int
+) -> tuple[str, str]:
+    """kyutai/tts-voices/unmute-prod-website/*.safetensors
     becomes
     ('kyutai/tts-voices', 'unmute-prod-website/*.safetensors)
     with index_of_separator=1.
     """
     if text.count(separator) <= index_of_separator:
-        raise ValueError(f"Separator '{separator}' not found {index_of_separator + 1} times in `{text}`.")
+        raise ValueError(
+            f"Separator '{separator}' not found {index_of_separator + 1} times in `{text}`."
+        )
     parts = text.split(separator, index_of_separator + 1)
     return separator.join(parts[:-1]), parts[-1]
 
 
 class Config(BaseModel):
-    log_folder: Path = Path.home() / 'tmp/tts-service'
+    log_folder: Path = Path.home() / "tmp/tts-service"
     hf_repo: str = DEFAULT_DSM_TTS_REPO
     mimi_weight: Path | None = None
     moshi_weight: Path | None = None
     config_path: Path | None = None
     tokenizer: Path | None = None
-    device: str = 'cuda'
+    device: str = "cuda"
 
     n_q: int = 24
     # This can have multiple formats:
@@ -65,40 +73,51 @@ class Config(BaseModel):
     # - A huggingface snapshot, e.g. `hf-snapshot://kyutai/tts-voices`
     # - A huggingface snapshot with a pattern,
     #     e.g. `hf-snapshot://kyutai/tts-voices/unmute-prod-website/*.safetensors`
-    voice_folder: str = str(Path.home() / 'models/tts-voices')
+    voice_folder: str = str(Path.home() / "models/tts-voices")
     default_voice: str = "barack_demo.wav"
 
     temp: float = 0.6
-    cfg_coef: float = 2.
+    cfg_coef: float = 2.0
 
     max_padding: int = 8
     initial_padding: int = 2
     final_padding: int = 4
     padding_between: int = 1
-    padding_bonus: float = 0.
+    padding_bonus: float = 0.0
 
     interleaved_text_only: int = 2
     debug: bool = False
 
 
-def init(batch_size: int, config_override: dict) -> 'TTSService':
+def init(batch_size: int, config_override: dict) -> "TTSService":
     config = Config(**config_override)
     config.log_folder.mkdir(parents=True, exist_ok=True)
 
     print("retrieving checkpoint")
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
-        config.hf_repo, moshi_weights=config.moshi_weight, mimi_weights=config.mimi_weight,
-        config_path=config.config_path, tokenizer=config.tokenizer)
+        config.hf_repo,
+        moshi_weights=config.moshi_weight,
+        mimi_weights=config.mimi_weight,
+        config_path=config.config_path,
+        tokenizer=config.tokenizer,
+    )
 
     cfg_condition = None
     tts_model = TTSModel.from_checkpoint_info(
-        checkpoint_info, n_q=config.n_q, temp=config.temp, cfg_coef=config.cfg_coef,
-        max_padding=config.max_padding, initial_padding=config.initial_padding, final_padding=config.final_padding,
-        device=config.device, padding_bonus=config.padding_bonus)
+        checkpoint_info,
+        n_q=config.n_q,
+        temp=config.temp,
+        cfg_coef=config.cfg_coef,
+        max_padding=config.max_padding,
+        initial_padding=config.initial_padding,
+        final_padding=config.final_padding,
+        device=config.device,
+        padding_bonus=config.padding_bonus,
+    )
     if tts_model.valid_cfg_conditionings:
         # Model was trained with CFG distillation.
         cfg_condition = tts_model.cfg_coef
-        tts_model.cfg_coef = 1.
+        tts_model.cfg_coef = 1.0
         cfg_is_no_text = False
     else:
         cfg_is_no_text = True
@@ -111,19 +130,23 @@ def init(batch_size: int, config_override: dict) -> 'TTSService':
         voice_folder = voice_folder.removeprefix("hf-snapshot://")
         # We detect if there is a pattern in the voice folder.
         if voice_folder.count("/") > 1:
-            voice_folder, pattern = split_at_specific_separator(voice_folder, '/', 1)
+            voice_folder, pattern = split_at_specific_separator(voice_folder, "/", 1)
         else:
             pattern = None
         print(f"retrieving voices from {voice_folder}")
-        voice_folder = huggingface_hub.snapshot_download(voice_folder, allow_patterns=pattern)
+        voice_folder = huggingface_hub.snapshot_download(
+            voice_folder, allow_patterns=pattern
+        )
     voice_folder = Path(voice_folder)
 
     if tts_model.multi_speaker:
-        for file in voice_folder.glob(f'**/*{voice_suffix}'):
+        for file in voice_folder.glob(f"**/*{voice_suffix}"):
             relative = file.relative_to(voice_folder)
             name = str(relative.with_name(relative.name.removesuffix(voice_suffix)))
             try:
-                attributes = tts_model.make_condition_attributes([file, file], cfg_coef=cfg_condition)
+                attributes = tts_model.make_condition_attributes(
+                    [file, file], cfg_coef=cfg_condition
+                )
             except Exception:
                 print(f"[WARNING] failed to load voice {name}")
             else:
@@ -142,7 +165,8 @@ def init(batch_size: int, config_override: dict) -> 'TTSService':
             )
 
     service = TTSService(
-        batch_size=batch_size, default_attribute_name=config.default_voice,
+        batch_size=batch_size,
+        default_attribute_name=config.default_voice,
         all_attributes=all_attributes,
         tts_model=tts_model,
         cfg_condition=cfg_condition,
@@ -150,7 +174,8 @@ def init(batch_size: int, config_override: dict) -> 'TTSService':
         padding_between=config.padding_between,
         padding_bonus=config.padding_bonus,
         debug=config.debug,
-        interleaved_text_only=config.interleaved_text_only)
+        interleaved_text_only=config.interleaved_text_only,
+    )
 
     return service
 
@@ -230,7 +255,9 @@ class TTSService:
         if tts_model.multi_speaker:
             print("Filling cross attention cache.")
             for name, attributes in self.all_attributes.items():
-                self.cross_attention_cache[name] = self._get_cross_attention_source([attributes])
+                self.cross_attention_cache[name] = self._get_cross_attention_source(
+                    [attributes]
+                )
             assert lm.condition_provider is not None
 
             cas = [self.all_attributes[self.default_attribute_name]] * self.batch_size
@@ -243,24 +270,40 @@ class TTSService:
             condition_tensors = {}
 
         for module in lm.modules():
-            if isinstance(module, StreamingMultiheadAttention) and module.cross_attention:
+            if (
+                isinstance(module, StreamingMultiheadAttention)
+                and module.cross_attention
+            ):
                 self.cross_attentions.append(module)
 
         self.lm_gen = LMGen(
-            lm, temp=tts_model.temp, temp_text=tts_model.temp, cfg_coef=tts_model.cfg_coef,
-            condition_tensors=condition_tensors, on_text_hook=self._on_text_hook,
-            on_audio_hook=self._on_audio_hook, cfg_is_no_text=self.cfg_is_no_text,
-            support_out_of_sync=True, on_text_logits_hook=self._on_text_logits_hook)
+            lm,
+            temp=tts_model.temp,
+            temp_text=tts_model.temp,
+            cfg_coef=tts_model.cfg_coef,
+            condition_tensors=condition_tensors,
+            on_text_hook=self._on_text_hook,
+            on_audio_hook=self._on_audio_hook,
+            cfg_is_no_text=self.cfg_is_no_text,
+            support_out_of_sync=True,
+            on_text_logits_hook=self._on_text_logits_hook,
+        )
         self.lm_gen.streaming_forever(self.batch_size)
         mimi.streaming_forever(self.batch_size)
 
         missing = lm.n_q - lm.dep_q
         self.input_tokens = torch.full(
-            (self.batch_size, missing, 1), machine.token_ids.zero,
-            dtype=torch.long, device=self.device)
+            (self.batch_size, missing, 1),
+            machine.token_ids.zero,
+            dtype=torch.long,
+            device=self.device,
+        )
         self.no_depformer_tokens = torch.full(
-            (self.batch_size, lm.dep_q, 1), machine.token_ids.zero,
-            dtype=torch.long, device=self.device)
+            (self.batch_size, lm.dep_q, 1),
+            machine.token_ids.zero,
+            dtype=torch.long,
+            device=self.device,
+        )
         self.last_actives: list[bool] = [False] * self.batch_size
         print("warming up.")
         for _ in range(3):
@@ -271,7 +314,9 @@ class TTSService:
             mimi.decode(frame[:, 1:].clamp(min=0))
         print("ready to roll.")
 
-    def _get_cross_attention_source(self, all_attributes: list[ConditionAttributes]) -> torch.Tensor:
+    def _get_cross_attention_source(
+        self, all_attributes: list[ConditionAttributes]
+    ) -> torch.Tensor:
         lm = self.tts_model.lm
         assert lm.condition_provider is not None
         assert lm.fuser is not None
@@ -287,7 +332,7 @@ class TTSService:
         return self.lm_gen._streaming_state
 
     def _on_audio_hook(self, audio_tokens: torch.Tensor) -> None:
-        delays = self.lm_gen.delays_cuda[1: 1 + self.tts_model.lm.dep_q]
+        delays = self.lm_gen.delays_cuda[1 : 1 + self.tts_model.lm.dep_q]
         mask = self._lm_gen_state.offsets[:, None] < delays + self.tts_model.delay_steps
         audio_tokens.masked_fill_(mask, self.tts_model.machine.token_ids.zero)
 
@@ -304,20 +349,29 @@ class TTSService:
                 out_tokens.append(token)
                 continue
             assert client.state is not None
-            out_token, consumed_new_word = self.tts_model.machine.process(client.offset, client.state, token)
+            out_token, consumed_new_word = self.tts_model.machine.process(
+                client.offset, client.state, token
+            )
 
             if self.flags_out is not None and consumed_new_word:
                 self.flags_out[b] |= MaskFlags.WORD_FINISHED.value
             out_tokens.append(out_token)
-        text_tokens[:] = torch.tensor(out_tokens, dtype=torch.long, device=text_tokens.device)
+        text_tokens[:] = torch.tensor(
+            out_tokens, dtype=torch.long, device=text_tokens.device
+        )
 
     def _print(self, *args, **kwargs):
         if self.debug:
             print(*args, **kwargs)
 
     @torch.no_grad()
-    def step(self, updates: list[tuple[int, list[int], np.ndarray | str | None]], pcm_out: np.ndarray,
-             flags_out: np.ndarray, code_out: np.ndarray) -> None:
+    def step(
+        self,
+        updates: list[tuple[int, list[int], np.ndarray | str | None]],
+        pcm_out: np.ndarray,
+        flags_out: np.ndarray,
+        code_out: np.ndarray,
+    ) -> None:
         mimi = self.tts_model.mimi
         machine = self.tts_model.machine
         delay_steps = self.tts_model.delay_steps
@@ -348,9 +402,11 @@ class TTSService:
                         new_voice_indexes.append(b)
                         new_voice_sources.append(torch.from_numpy(voice))
                     else:
-                        cross_source = self.cross_attention_cache.get(voice or '', None)
+                        cross_source = self.cross_attention_cache.get(voice or "", None)
                         if cross_source is None:
-                            cross_source = self.cross_attention_cache[self.default_attribute_name]
+                            cross_source = self.cross_attention_cache[
+                                self.default_attribute_name
+                            ]
                         new_cross_sources.append(cross_source)
                         new_cross_indexes.append(b)
                 self._print(f"[{b}] Reset, voice is {voice}.")
@@ -362,13 +418,13 @@ class TTSService:
             elif new_entry[0] == pad:
                 self._print(f"[{b}] Pushing pause {new_entry}.")
                 padding = len(new_entry)
-                client.state.entries.append(Entry([], '', padding=padding))
+                client.state.entries.append(Entry([], "", padding=padding))
             else:
                 self._print(f"[{b}] Pushing {new_entry}.")
                 padding = 0
                 if self.padding_between > 0:
                     padding = max(0, self.padding_between + len(new_entry) - 1)
-                client.state.entries.append(Entry(new_entry, '', padding=padding))
+                client.state.entries.append(Entry(new_entry, "", padding=padding))
 
         actives = []
         mimi_actives = []
@@ -420,13 +476,21 @@ class TTSService:
         reset_mask = reset_mask.to(self.device)
 
         if new_voice_sources:
-            all_attributes = [make_condition_attributes([voice_source], cfg_condition=self.cfg_condition)
-                              for voice_source in new_voice_sources]
-            new_cross_sources += self._get_cross_attention_source(all_attributes).split(1)
+            all_attributes = [
+                make_condition_attributes(
+                    [voice_source], cfg_condition=self.cfg_condition
+                )
+                for voice_source in new_voice_sources
+            ]
+            new_cross_sources += self._get_cross_attention_source(all_attributes).split(
+                1
+            )
             new_cross_indexes += new_voice_indexes
         if new_cross_sources:
             cross_source = torch.cat(new_cross_sources)
-            cross_indexes = torch.tensor(new_cross_indexes, dtype=torch.long, device=self.device)
+            cross_indexes = torch.tensor(
+                new_cross_indexes, dtype=torch.long, device=self.device
+            )
             for attention in self.cross_attentions:
                 k, v = attention._compute_cross_attention(cross_source, cross_source)
                 state = attention._streaming_state
@@ -447,8 +511,12 @@ class TTSService:
         self.lm_gen.set_exec_mask(exec_mask)
         mimi.set_exec_mask(mimi_exec_mask)
 
-        depformer_replace_tokens = self.no_depformer_tokens if run_in_text_only else None
-        frame = self.lm_gen.step(self.input_tokens, depformer_replace_tokens=depformer_replace_tokens)
+        depformer_replace_tokens = (
+            self.no_depformer_tokens if run_in_text_only else None
+        )
+        frame = self.lm_gen.step(
+            self.input_tokens, depformer_replace_tokens=depformer_replace_tokens
+        )
         assert frame is not None
         audio_frame = frame[:, 1:]
         audio_frame.clamp_(min=0)
@@ -463,34 +531,39 @@ class TTSService:
             if actives[b]:
                 assert client.state is not None
                 client.offset += 1
-                self._print(f"[{b}] Offset {client.offset: 3d}, pendings={len(client.state.entries): 3d}.")
+                self._print(
+                    f"[{b}] Offset {client.offset: 3d}, pendings={len(client.state.entries): 3d}."
+                )
                 if client.is_complete and client.state.end_step is not None:
                     # We were waiting for the end of the generation.
                     real_end = (
-                        client.state.end_step + delay_steps + self.tts_model.final_padding + self.lm_gen.max_delay)
+                        client.state.end_step
+                        + delay_steps
+                        + self.tts_model.final_padding
+                        + self.lm_gen.max_delay
+                    )
                     if client.offset >= real_end:
                         self._print(f"[{b}] Done.")
                         client.reset(machine)
                         flags_out[b] |= MaskFlags.IS_EOS.value
         if pcm is not None:
             pcm_out[:] = pcm[:, 0].cpu().numpy()
-        code_out[:, :frame.shape[1]] = frame[:, :, 0].int().cpu().numpy()
-        code_out[:, frame.shape[1]:] = 0
+        code_out[:, : frame.shape[1]] = frame[:, :, 0].int().cpu().numpy()
+        code_out[:, frame.shape[1] :] = 0
         self.flags_out = None
 
 
 class Profiler:
-    """Context manager wrapper for xformers profiler.
-    """
+    """Context manager wrapper for xformers profiler."""
+
     def __init__(self, enabled: bool = False):
         self.profiler: tp.Optional[tp.Any] = None
         if enabled:
             from xformers.profiler import profile
             from xformers.profiler.api import PyTorchProfiler
-            output_dir = './profiler_data'
-            schedule = (
-                (PyTorchProfiler, 6, 12),
-            )
+
+            output_dir = "./profiler_data"
+            schedule = ((PyTorchProfiler, 6, 12),)
             self.profiler = profile(output_dir=output_dir, schedule=schedule)
 
     def step(self):
@@ -506,9 +579,11 @@ class Profiler:
             return self.profiler.__exit__(exc_type, exc_value, exc_tb)  # type: ignore
 
 
-def make_condition_attributes(voices: list[Path | torch.Tensor],
-                              max_speakers: int = 5,
-                              cfg_condition: float | None = None) -> ConditionAttributes:
+def make_condition_attributes(
+    voices: list[Path | torch.Tensor],
+    max_speakers: int = 5,
+    cfg_condition: float | None = None,
+) -> ConditionAttributes:
     assert voices
     voice_tensor = None
     mask = None
@@ -516,58 +591,64 @@ def make_condition_attributes(voices: list[Path | torch.Tensor],
         if idx < len(voices):
             voice = voices[idx]
             if isinstance(voice, Path):
-                emb = load_file(voice, device='cuda')['speaker_wavs']
+                emb = load_file(voice, device="cuda")["speaker_wavs"]
             else:
                 emb = voice
             assert emb.dim() == 3
             if voice_tensor is None:
-                voice_tensor = torch.zeros(1, max_speakers, emb.shape[2], emb.shape[1], device='cuda')
+                voice_tensor = torch.zeros(
+                    1, max_speakers, emb.shape[2], emb.shape[1], device="cuda"
+                )
             if mask is None:
-                mask = torch.zeros(1, max_speakers, emb.shape[2], dtype=torch.bool, device='cuda')
+                mask = torch.zeros(
+                    1, max_speakers, emb.shape[2], dtype=torch.bool, device="cuda"
+                )
             voice_tensor[:, idx, :, :] = emb.transpose(1, 2)
             mask[:, idx, :] = True
     assert voice_tensor is not None
     assert mask is not None
     voice_tensor = voice_tensor.view(1, -1, voice_tensor.shape[-1])
     mask = mask.view(1, -1)
-    tensors = {
-        'speaker_wavs': TensorCondition(voice_tensor, mask)
-    }
+    tensors = {"speaker_wavs": TensorCondition(voice_tensor, mask)}
     text: dict[str, str | None] = {
-        'control': 'ok',
+        "control": "ok",
     }
     if cfg_condition is None:
-        text['cfg'] = None
+        text["cfg"] = None
     else:
-        text['cfg'] = format(cfg_condition, '.1f')
+        text["cfg"] = format(cfg_condition, ".1f")
     return ConditionAttributes(text=dict(text), tensor=tensors)
 
 
-def make_null(all_attributes: tp.Sequence[ConditionAttributes]) -> list[ConditionAttributes]:
+def make_null(
+    all_attributes: tp.Sequence[ConditionAttributes],
+) -> list[ConditionAttributes]:
     return dropout_all_conditions(all_attributes)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     rng = random.Random(1234)
     parser = argparse.ArgumentParser()
-    parser.add_argument('-p', '--profile', action='store_true')
-    parser.add_argument('-b', '--batch_size', default=32, type=int)
-    parser.add_argument('-c', '--cfg_coef', default=2., type=float)
-    parser.add_argument('-r', '--hf-repo', default=DEFAULT_DSM_TTS_REPO)
+    parser.add_argument("-p", "--profile", action="store_true")
+    parser.add_argument("-b", "--batch_size", default=32, type=int)
+    parser.add_argument("-c", "--cfg_coef", default=2.0, type=float)
+    parser.add_argument("-r", "--hf-repo", default=DEFAULT_DSM_TTS_REPO)
     args = parser.parse_args()
     bs = args.batch_size
     config_override = {
-        'hf_repo': args.hf_repo,
-        'cfg_coef': args.cfg_coef,
-        'voice_folder': 'hf-snapshot://kyutai/tts-voices/unmute-prod-website/*.safetensors',
-        'default_voice': 'unmute-prod-website/default_voice.wav',
+        "hf_repo": args.hf_repo,
+        "cfg_coef": args.cfg_coef,
+        "voice_folder": "hf-snapshot://kyutai/tts-voices/unmute-prod-website/*.safetensors",
+        "default_voice": "unmute-prod-website/default_voice.wav",
     }
     service = init(batch_size=bs, config_override=config_override)
     print("Service initialized")
     pcm_out = np.zeros((bs, 1920))
     flags_out = np.zeros(bs, dtype=np.int32)
     code_out = np.zeros((bs, 33), dtype=np.int32)
-    service.step([(0, [-1, 32, 21], '')], pcm_out=pcm_out, flags_out=flags_out, code_out=code_out)
+    service.step(
+        [(0, [-1, 32, 21], "")], pcm_out=pcm_out, flags_out=flags_out, code_out=code_out
+    )
     profiler = Profiler(enabled=args.profile)
     with profiler:
         for _ in range(100):

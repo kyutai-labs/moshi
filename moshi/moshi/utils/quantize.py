@@ -14,6 +14,7 @@ class QLinear(nn.Module):
     def __init__(self, linear: nn.Linear):
         super().__init__()
         from bitsandbytes import functional as bnbF  # type: ignore
+
         weight = linear.weight
         assert weight.data.dtype.is_floating_point
         assert linear.bias is None
@@ -23,6 +24,7 @@ class QLinear(nn.Module):
 
     def forward(self, x):
         import bitsandbytes as bnb  # type: ignore
+
         state = bnb.MatmulLtState()  # pyright: ignore
         state.CB = self.weight  # type: ignore
         assert isinstance(state.CB, torch.Tensor)
@@ -32,7 +34,8 @@ class QLinear(nn.Module):
             raise RuntimeError(
                 "Expected `weight_scb` to have type float, but got bfloat16. "
                 "When using quantized models, care should be taken not to change the dtype of "
-                "the model once initialized.")
+                "the model once initialized."
+            )
         assert state.SCB.dtype == torch.float, state.SCB.dtype
         state.has_fp16_weights = False
         y = bnb.matmul(x.half(), state.CB, state=state)  # pyright: ignore

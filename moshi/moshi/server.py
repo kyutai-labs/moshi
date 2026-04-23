@@ -44,8 +44,16 @@ class ServerState:
     lm_gen: LMGen
     lock: asyncio.Lock
 
-    def __init__(self, model_type: str, mimi: MimiModel, text_tokenizer: sentencepiece.SentencePieceProcessor,
-                 lm: LMModel, cfg_coef: float, device: str | torch.device, **kwargs):
+    def __init__(
+        self,
+        model_type: str,
+        mimi: MimiModel,
+        text_tokenizer: sentencepiece.SentencePieceProcessor,
+        lm: LMModel,
+        cfg_coef: float,
+        device: str | torch.device,
+        **kwargs,
+    ):
         self.model_type = model_type
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
@@ -64,7 +72,7 @@ class ServerState:
             chunk = torch.zeros(1, 1, self.frame_size, dtype=torch.float32, device=self.device)
             codes = self.mimi.encode(chunk)
             for c in range(codes.shape[-1]):
-                tokens = self.lm_gen.step(codes[:, :, c: c + 1])
+                tokens = self.lm_gen.step(codes[:, :, c : c + 1])
                 if tokens is None:
                     continue
                 _ = self.mimi.decode(tokens[:, 1:])
@@ -72,10 +80,7 @@ class ServerState:
         torch.cuda.synchronize()
 
     async def decode_and_send(
-        self,
-        tokens: torch.Tensor,
-        ws: web.WebSocketResponse,
-        opus_writer: sphn.OpusStreamWriter
+        self, tokens: torch.Tensor, ws: web.WebSocketResponse, opus_writer: sphn.OpusStreamWriter
     ):
         assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
         main_pcm = self.mimi.decode(tokens[:, 1:])
@@ -92,10 +97,7 @@ class ServerState:
             await ws.send_bytes(msg)
 
     async def recv_loop(
-        self,
-        ws: web.WebSocketResponse,
-        opus_reader: sphn.OpusStreamReader,
-        opus_writer: sphn.OpusStreamWriter
+        self, ws: web.WebSocketResponse, opus_reader: sphn.OpusStreamReader, opus_writer: sphn.OpusStreamWriter
     ):
         all_pcm_data = None
         skip_frames = 1
@@ -129,7 +131,7 @@ class ServerState:
                     while all_pcm_data.shape[-1] >= self.frame_size:
                         be = time.time()
                         chunk = all_pcm_data[: self.frame_size]
-                        all_pcm_data = all_pcm_data[self.frame_size:]
+                        all_pcm_data = all_pcm_data[self.frame_size :]
                         chunk = torch.from_numpy(chunk)
                         chunk = chunk.to(device=self.device)[None, None]
                         codes = self.mimi.encode(chunk)
@@ -141,7 +143,7 @@ class ServerState:
                             self.mimi.reset_streaming()
                             skip_frames -= 1
                         for c in range(codes.shape[-1]):
-                            tokens = self.lm_gen.step(codes[:, :, c: c + 1])
+                            tokens = self.lm_gen.step(codes[:, :, c : c + 1])
                             if tokens is None:
                                 continue
                             await self.decode_and_send(tokens, ws, opus_writer)
@@ -174,44 +176,61 @@ def main():
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
     parser.add_argument("--static", type=str)
-    parser.add_argument("--gradio-tunnel", action='store_true', help='Activate a gradio tunnel.')
-    parser.add_argument("--gradio-tunnel-token",
-                        help='Provide a custom (secret) token here to keep getting the same URL.')
+    parser.add_argument("--gradio-tunnel", action="store_true", help="Activate a gradio tunnel.")
+    parser.add_argument(
+        "--gradio-tunnel-token", help="Provide a custom (secret) token here to keep getting the same URL."
+    )
 
     parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
     parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
     parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
-    parser.add_argument("--hf-repo", type=str, default=loaders.DEFAULT_REPO,
-                        help="HF repo to look into, defaults Moshiko. "
-                             "Use this to select a different pre-trained model.")
+    parser.add_argument(
+        "--hf-repo",
+        type=str,
+        default=loaders.DEFAULT_REPO,
+        help="HF repo to look into, defaults Moshiko. Use this to select a different pre-trained model.",
+    )
     parser.add_argument("--lora-weight", type=str, help="Path to a local checkpoint file for LoRA.", default=None)
     parser.add_argument("--config-path", type=str, help="Path to a local config file.", default=None)
-    parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
+    parser.add_argument("--cfg-coef", type=float, default=1.0, help="CFG coefficient.")
     parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
-    parser.add_argument("--no_fuse_lora", action="store_false", dest="fuse_lora", default=True,
-                        help="Do not fuse LoRA layers intot Linear layers.")
-    parser.add_argument("--half", action="store_const", const=torch.float16, default=torch.bfloat16,
-                        dest="dtype", help="Run inference with float16, not bfloat16, better for old GPUs.")
+    parser.add_argument(
+        "--no_fuse_lora",
+        action="store_false",
+        dest="fuse_lora",
+        default=True,
+        help="Do not fuse LoRA layers intot Linear layers.",
+    )
+    parser.add_argument(
+        "--half",
+        action="store_const",
+        const=torch.float16,
+        default=torch.bfloat16,
+        dest="dtype",
+        help="Run inference with float16, not bfloat16, better for old GPUs.",
+    )
     parser.add_argument(
         "--ssl",
         type=str,
         help=(
             "use https instead of http, this flag should point to a directory "
             "that contains valid key.pem and cert.pem files"
-        )
+        ),
     )
 
     args = parser.parse_args()
     seed_all(42424242)
 
     setup_tunnel = None
-    tunnel_token = ''
+    tunnel_token = ""
     if args.gradio_tunnel:
         try:
             from gradio import networking  # type: ignore
         except ImportError:
-            log("error", "Cannot find gradio which is required to activate a tunnel. "
-                         "Please install with `pip install gradio`.")
+            log(
+                "error",
+                "Cannot find gradio which is required to activate a tunnel. Please install with `pip install gradio`.",
+            )
             sys.exit(1)
         setup_tunnel = networking.setup_tunnel
         if args.gradio_tunnel_token is None:
@@ -221,8 +240,13 @@ def main():
 
     log("info", "retrieving checkpoint")
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(
-        args.hf_repo, args.moshi_weight, args.mimi_weight, args.tokenizer,
-        lora_weights=args.lora_weight, config_path=args.config_path)
+        args.hf_repo,
+        args.moshi_weight,
+        args.mimi_weight,
+        args.tokenizer,
+        lora_weights=args.lora_weight,
+        config_path=args.config_path,
+    )
     log("info", "loading mimi")
     mimi = checkpoint_info.get_mimi(device=args.device)
     log("info", "mimi loaded")
@@ -233,8 +257,15 @@ def main():
     lm = checkpoint_info.get_moshi(device=args.device, dtype=args.dtype, fuse_lora=args.fuse_lora)
     log("info", "moshi loaded")
 
-    state = ServerState(checkpoint_info.model_type, mimi, text_tokenizer, lm, args.cfg_coef, args.device,
-                        **checkpoint_info.lm_gen_config)
+    state = ServerState(
+        checkpoint_info.model_type,
+        mimi,
+        text_tokenizer,
+        lm,
+        args.cfg_coef,
+        args.device,
+        **checkpoint_info.lm_gen_config,
+    )
     log("info", "warming up the model")
     state.warmup()
     app = web.Application()
@@ -253,14 +284,13 @@ def main():
         # When set to the "none" string, we don't serve any static content.
         static_path = args.static
     if static_path is not None:
+
         async def handle_root(_):
             return web.FileResponse(os.path.join(static_path, "index.html"))
 
         log("info", f"serving static content from {static_path}")
         app.router.add_get("/", handle_root)
-        app.router.add_static(
-            "/", path=static_path, follow_symlinks=True, name="static"
-        )
+        app.router.add_static("/", path=static_path, follow_symlinks=True, name="static")
     protocol = "http"
     ssl_context = None
     if args.ssl is not None:
@@ -277,10 +307,10 @@ def main():
         tunnel_kwargs = {}
         if "share_server_tls_certificate" in inspect.signature(setup_tunnel).parameters:
             tunnel_kwargs["share_server_tls_certificate"] = None
-        tunnel = setup_tunnel('localhost', args.port, tunnel_token, None, **tunnel_kwargs)  # type: ignore
+        tunnel = setup_tunnel("localhost", args.port, tunnel_token, None, **tunnel_kwargs)  # type: ignore
         log("info", f"Tunnel started, if executing on a remote GPU, you can use {tunnel}.")
         log("info", "Note that this tunnel goes through the US and you might experience high latency in Europe.")
-    web.run_app(app, host=args.host , port=args.port, ssl_context=ssl_context)
+    web.run_app(app, host=args.host, port=args.port, ssl_context=ssl_context)
 
 
 with torch.no_grad():

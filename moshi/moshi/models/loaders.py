@@ -119,9 +119,9 @@ _lm_kwargs = {
 }
 
 
-def hf_get(filename: str | Path, hf_repo: str | None = None,
-           check_local_file_exists: bool = False,
-           revision: str | None = None) -> Path:
+def hf_get(
+    filename: str | Path, hf_repo: str | None = None, check_local_file_exists: bool = False, revision: str | None = None
+) -> Path:
     if isinstance(filename, Path):
         return filename
     if filename.startswith("hf://"):
@@ -284,11 +284,9 @@ class CheckpointInfo:
             num_codebooks = 8
         else:
             num_codebooks = max(self.lm_config["dep_q"], self.lm_config["n_q"] - self.lm_config["dep_q"])
-        if self.tts_config.get('multistream'):
+        if self.tts_config.get("multistream"):
             num_codebooks //= 2
-        return get_mimi(
-            self.mimi_weights, self.mimi_config,
-            num_codebooks=num_codebooks, device=device)
+        return get_mimi(self.mimi_weights, self.mimi_config, num_codebooks=num_codebooks, device=device)
 
     def get_moshi(
         self,
@@ -321,31 +319,29 @@ def _is_safetensors(path: Path | str) -> bool:
 
 
 def get_mimi(
-    filename: str | Path | None, mimi_config: dict | None = None,
-    device: torch.device | str = "cpu", num_codebooks: int = 8
+    filename: str | Path | None,
+    mimi_config: dict | None = None,
+    device: torch.device | str = "cpu",
+    num_codebooks: int = 8,
 ) -> MimiModel:
     """Return a pretrained Mimi model, or unintialized if `filename` is None."""
     if mimi_config is None:
         mimi_config = _mimi_config
-    encoder = SEANetEncoder(**mimi_config['seanet'])
-    decoder = SEANetDecoder(**mimi_config['seanet'])
-    encoder_transformer = transformer.ProjectedTransformer(
-        device=device, **mimi_config['transformer']
-    )
-    decoder_transformer = transformer.ProjectedTransformer(
-        device=device, **mimi_config['transformer']
-    )
+    encoder = SEANetEncoder(**mimi_config["seanet"])
+    decoder = SEANetDecoder(**mimi_config["seanet"])
+    encoder_transformer = transformer.ProjectedTransformer(device=device, **mimi_config["transformer"])
+    decoder_transformer = transformer.ProjectedTransformer(device=device, **mimi_config["transformer"])
     quantizer = SplitResidualVectorQuantizer(
-        **mimi_config['quantizer'],
+        **mimi_config["quantizer"],
     )
     model = MimiModel(
         encoder,
         decoder,
         quantizer,
-        channels=mimi_config['channels'],
-        sample_rate=mimi_config['sample_rate'],
-        frame_rate=mimi_config['frame_rate'],
-        encoder_frame_rate=mimi_config['sample_rate'] / encoder.hop_length,
+        channels=mimi_config["channels"],
+        sample_rate=mimi_config["sample_rate"],
+        frame_rate=mimi_config["frame_rate"],
+        encoder_frame_rate=mimi_config["sample_rate"] / encoder.hop_length,
         causal=True,
         resample_method="conv",
         encoder_transformer=encoder_transformer,
@@ -378,9 +374,7 @@ def get_moshi_lm(
     assert lm_kwargs is not None
 
     if "conditioners" in lm_kwargs:
-        lm_kwargs["condition_provider"] = get_conditioner_provider(
-            lm_kwargs["dim"], device, lm_kwargs
-        )
+        lm_kwargs["condition_provider"] = get_conditioner_provider(lm_kwargs["dim"], device, lm_kwargs)
         del lm_kwargs["conditioners"]
     if lm_kwargs.get("fuser", None) is not None:
         lm_kwargs["fuser"] = get_condition_fuser(lm_kwargs)
@@ -392,8 +386,8 @@ def get_moshi_lm(
     lm_kwargs.pop("depformer_causal", None)
 
     # moved params
-    if 'demux_second_stream' in lm_kwargs:
-        lm_kwargs['demux_second_text_stream'] = lm_kwargs.pop('demux_second_stream')
+    if "demux_second_stream" in lm_kwargs:
+        lm_kwargs["demux_second_text_stream"] = lm_kwargs.pop("demux_second_stream")
 
     # lora params.
     lora = lm_kwargs.pop("lora", False)
@@ -402,19 +396,16 @@ def get_moshi_lm(
 
     init_device = device
     if filename is not None:
-        init_device = torch.device('meta')
+        init_device = torch.device("meta")
 
-    model = LMModel(
-        device=init_device,
-        dtype=dtype,
-        **lm_kwargs)
+    model = LMModel(device=init_device, dtype=dtype, **lm_kwargs)
 
     if filename is not None:
         if _is_safetensors(filename):
             state = load_file(filename, device=str(device))
             for key, value in state.items():
                 if value.dtype.is_floating_point:
-                    if key.startswith('condition_provider.') or key.startswith('fuser.'):
+                    if key.startswith("condition_provider.") or key.startswith("fuser."):
                         value = value.float()
                     else:
                         value = value.to(dtype)
@@ -422,13 +413,14 @@ def get_moshi_lm(
             model.load_state_dict(state, assign=True)
 
         else:
-            pkg = torch.load(filename, "cpu",)
+            pkg = torch.load(
+                filename,
+                "cpu",
+            )
             model.load_state_dict(pkg["fsdp_best_state"]["model"], assign=True)
 
     if lora:
-        assert not lm_kwargs.get("quantize"), (
-            "LoRA and quantization are incompatible for now."
-        )
+        assert not lm_kwargs.get("quantize"), "LoRA and quantization are incompatible for now."
         model = get_lora_moshi(
             model=model,
             lora_rank=lora_rank,
@@ -439,32 +431,28 @@ def get_moshi_lm(
             fuse_lora=fuse_lora,
         )
     else:
-        assert lora_weights is None, (
-            "`lora` is False, but received some lora_weights to load."
-        )
+        assert lora_weights is None, "`lora` is False, but received some lora_weights to load."
     model.eval()
     return model
 
 
-def get_conditioner(
-    output_dim: int, device: torch.device | str, conditioner_cfg: dict
-) -> BaseConditioner:
+def get_conditioner(output_dim: int, device: torch.device | str, conditioner_cfg: dict) -> BaseConditioner:
     conditioner_type = conditioner_cfg["type"]
     conditioner_kwargs = conditioner_cfg[conditioner_type]
     conditioner_kwargs.update({"output_dim": output_dim, "device": device})
     if conditioner_type == "lut":
         from ..conditioners.text import LUTConditioner
+
         return LUTConditioner(**conditioner_kwargs)
     elif conditioner_type == "tensor":
         from ..conditioners.tensors import TensorConditioner
+
         return TensorConditioner(**conditioner_kwargs)
     else:
         raise RuntimeError(f"Unknow conditioner type {conditioner_type}.")
 
 
-def get_conditioner_provider(
-    output_dim: int, device: torch.device | str, cfg: dict
-) -> ConditionProvider:
+def get_conditioner_provider(output_dim: int, device: torch.device | str, cfg: dict) -> ConditionProvider:
     """Instantiate a conditioning model."""
     conditioners: tp.Dict[str, BaseConditioner] = {}
     for cond, cond_cfg in cfg["conditioners"].items():
@@ -494,7 +482,7 @@ def get_lora_moshi(
 ) -> LMModel:
     init_device = device
     if lora_weights is not None:
-        init_device = torch.device('meta')
+        init_device = torch.device("meta")
     replace_all_linear_with_lora(model, lora_rank, lora_scaling, device=init_device)
     if lora_weights is not None:
         assert _is_safetensors(lora_weights), "LoRA weights must be a safetensors file."
@@ -505,9 +493,7 @@ def get_lora_moshi(
             lora_state_dict[key] = value
         res = model.load_state_dict(lora_state_dict, strict=False, assign=True)
         if res.unexpected_keys:
-            raise RuntimeError(
-                f"unexpected_keys in the lora weights: {res.unexpected_keys}"
-            )
+            raise RuntimeError(f"unexpected_keys in the lora weights: {res.unexpected_keys}")
         model = model.to(dtype=dtype, device=device)
         if fuse_lora:
             replace_lora_with_linear(model)

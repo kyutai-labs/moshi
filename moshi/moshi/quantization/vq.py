@@ -73,15 +73,11 @@ class ResidualVectorQuantizer(BaseQuantizer):
         if self.input_dimension == self.dimension and not force_projection:
             self.input_proj = torch.nn.Identity()
         else:
-            self.input_proj = torch.nn.Conv1d(
-                self.input_dimension, self.dimension, 1, bias=False
-            )
+            self.input_proj = torch.nn.Conv1d(self.input_dimension, self.dimension, 1, bias=False)
         if self.output_dimension == self.dimension and not force_projection:
             self.output_proj = torch.nn.Identity()
         else:
-            self.output_proj = torch.nn.Conv1d(
-                self.dimension, self.output_dimension, 1, bias=False
-            )
+            self.output_proj = torch.nn.Conv1d(self.dimension, self.output_dimension, 1, bias=False)
         self.vq = ResidualVectorQuantization(
             dim=self.dimension,
             codebook_size=self.bins,
@@ -185,16 +181,13 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
     ):
         super().__init__()
         assert n_q > n_q_semantic, (
-            f"Number of quantizers {n_q} must be larger "
-            f"than the number of semantic quantizers {n_q_semantic}."
+            f"Number of quantizers {n_q} must be larger than the number of semantic quantizers {n_q_semantic}."
         )
         self.max_n_q = n_q
         self.n_q_semantic = n_q_semantic
         self.n_q_acoustic = n_q - n_q_semantic
         q_dropout = kwargs.pop("q_dropout", False)
-        self.rvq_first = ResidualVectorQuantizer(
-            n_q=n_q_semantic, force_projection=True, q_dropout=False, **kwargs
-        )
+        self.rvq_first = ResidualVectorQuantizer(n_q=n_q_semantic, force_projection=True, q_dropout=False, **kwargs)
         self.rvq_rest = ResidualVectorQuantizer(
             n_q=n_q - n_q_semantic,
             codebook_offset=1,
@@ -240,9 +233,7 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
             return semantic_result
         acoustic_result = self.rvq_rest(x, frame_rate)
         full_quantized_emb = semantic_result.x + acoustic_result.x
-        full_quantized_codes = torch.cat(
-            [semantic_result.codes, acoustic_result.codes], dim=1
-        )
+        full_quantized_codes = torch.cat([semantic_result.codes, acoustic_result.codes], dim=1)
         # This is the actual number of quantizers used,  e.g. taking into account quantizer dropout.
         n_q_semantic = semantic_result.codes.shape[1]
         n_q_acoustic = acoustic_result.codes.shape[1]

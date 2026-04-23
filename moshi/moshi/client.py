@@ -84,9 +84,7 @@ class Connection:
                     continue
                 message = message.data
                 if not isinstance(message, bytes):
-                    self.printer.log(
-                        "warning", f"unsupported message type {type(message)}"
-                    )
+                    self.printer.log("warning", f"unsupported message type {type(message)}")
                     continue
                 if len(message) == 0:
                     self.printer.log("warning", "empty message")
@@ -142,11 +140,11 @@ async def run(printer: AnyPrinter, args):
         uri = f"{proto}://{args.host}:{args.port}/api/chat"
     else:
         proto = "wss"
-        if '://' in args.url:
-            proto, without_proto = args.url.split('://', 1)
-            if proto in ['ws', 'http']:
+        if "://" in args.url:
+            proto, without_proto = args.url.split("://", 1)
+            if proto in ["ws", "http"]:
                 proto = "ws"
-            elif proto in ['wss', 'https']:
+            elif proto in ["wss", "https"]:
                 proto = "wss"
             else:
                 printer.log("error", "The provided URL {args.url} seems to contain a protocol but it is unknown.")
@@ -168,9 +166,8 @@ def main():
     parser = argparse.ArgumentParser("client_opus")
     parser.add_argument("--host", default="localhost", type=str, help="Hostname to connect to.")
     parser.add_argument("--port", default=8998, type=int, help="Port to connect to.")
-    parser.add_argument("--https", action='store_true',
-                        help="Set this flag for using a https connection.")
-    parser.add_argument("--url", type=str, help='Provides directly a URL, e.g. to a gradio tunnel.')
+    parser.add_argument("--https", action="store_true", help="Set this flag for using a https connection.")
+    parser.add_argument("--url", type=str, help="Provides directly a URL, e.g. to a gradio tunnel.")
     args = parser.parse_args()
     printer: AnyPrinter
 

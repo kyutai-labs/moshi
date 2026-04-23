@@ -74,9 +74,7 @@ class MoshiHandler(StreamHandler):
                         self.output_sample_rate,
                         self.all_output_data[: self.output_chunk_size].reshape(1, -1),
                     )
-                    self.all_output_data = np.array(
-                        self.all_output_data[self.output_chunk_size :]
-                    )
+                    self.all_output_data = np.array(self.all_output_data[self.output_chunk_size :])
             elif kind == 2:
                 payload = cast(bytes, message[1:])
                 yield AdditionalOutputs(payload.decode())

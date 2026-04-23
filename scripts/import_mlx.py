@@ -41,7 +41,11 @@ def import_model(
 
     if weights_per_step_schedule is not None:
         if len(weights_per_step_schedule) != out_n_q:
-            raise ValueError("inconsistent weights_per_step_schedule", len(weights_per_step_schedule), out_n_q)
+            raise ValueError(
+                "inconsistent weights_per_step_schedule",
+                len(weights_per_step_schedule),
+                out_n_q,
+            )
 
     depformer_layers: int | None = None
     for idx in range(999):
@@ -91,16 +95,24 @@ def import_model(
             tch_idx = idx
 
         base = f"depformer.slices.{idx}."
-        model[base + "linear_in.weight"] = tch_model[f"depformer_in.{tch_idx}.weight"].clone()
+        model[base + "linear_in.weight"] = tch_model[
+            f"depformer_in.{tch_idx}.weight"
+        ].clone()
         model[base + "linear_out.weight"] = tch_model[f"linears.{idx}.weight"]
         if idx == 0:
             model[base + "emb.weight"] = tch_model["depformer_text_emb.weight"]
             if "depformer_text_emb.low_rank.weight" in tch_model:
-                model[base + "emb.low_rank.weight"] = tch_model["depformer_text_emb.low_rank.weight"].clone()
+                model[base + "emb.low_rank.weight"] = tch_model[
+                    "depformer_text_emb.low_rank.weight"
+                ].clone()
         else:
-            model[base + "emb.weight"] = tch_model[f"depformer_emb.{idx-1}.weight"].clone()
-            if f"depformer_emb.{idx-1}.low_rank.weight" in tch_model:
-                model[base + "emb.low_rank.weight"] = tch_model[f"depformer_emb.{idx-1}.low_rank.weight"].clone()
+            model[base + "emb.weight"] = tch_model[
+                f"depformer_emb.{idx - 1}.weight"
+            ].clone()
+            if f"depformer_emb.{idx - 1}.low_rank.weight" in tch_model:
+                model[base + "emb.low_rank.weight"] = tch_model[
+                    f"depformer_emb.{idx - 1}.low_rank.weight"
+                ].clone()
 
         for layer_idx in range(depformer_layers):
             layer = base + f"transformer.layers.{layer_idx}."
@@ -161,7 +173,7 @@ def main():
             out_path,
             weights_per_step_schedule=wpss,
             silent=args.silent,
-            max_out_n_q=args.max_out_n_q
+            max_out_n_q=args.max_out_n_q,
         )
     print(out_path)
 

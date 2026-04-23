@@ -102,16 +102,17 @@ def pyi_file(obj, indent=""):
 
         body = ""
         if obj.__doc__:
-            body += f'{indent}"""\n{indent}{do_indent(obj.__doc__, indent)}\n{indent}"""\n'
+            body += (
+                f'{indent}"""\n{indent}{do_indent(obj.__doc__, indent)}\n{indent}"""\n'
+            )
 
         fns = inspect.getmembers(obj, fn_predicate)
 
         # Init
         if obj.__text_signature__:
             body += f"{indent}def __init__{obj.__text_signature__}:\n"
-            body += f"{indent+INDENT}pass\n"
+            body += f"{indent + INDENT}pass\n"
             body += "\n"
-
 
         for name, fn in fns:
             body += pyi_file(fn, indent=indent)
@@ -136,7 +137,7 @@ def pyi_file(obj, indent=""):
 
     elif obj.__class__.__name__ == "DType":
         string += f"class {str(obj).lower()}(DType):\n"
-        string += f"{indent+INDENT}pass\n"
+        string += f"{indent + INDENT}pass\n"
     else:
         raise Exception(f"Object {obj} is not supported")
     return string
@@ -171,7 +172,11 @@ def do_black(content, is_pyi):
 
 
 def write(module, directory, origin, check=False):
-    submodules = [(name, member) for name, member in inspect.getmembers(module) if inspect.ismodule(member)]
+    submodules = [
+        (name, member)
+        for name, member in inspect.getmembers(module)
+        if inspect.ismodule(member)
+    ]
 
     filename = os.path.join(directory, "__init__.pyi")
     pyi_content = pyi_file(module)
@@ -180,7 +185,9 @@ def write(module, directory, origin, check=False):
     if check:
         with open(filename, "r") as f:
             data = f.read()
-            assert data == pyi_content, f"The content of {filename} seems outdated, please run `python stub.py`"
+            assert data == pyi_content, (
+                f"The content of {filename} seems outdated, please run `python stub.py`"
+            )
     else:
         with open(filename, "w") as f:
             f.write(pyi_content)
@@ -203,7 +210,9 @@ def write(module, directory, origin, check=False):
         if check:
             with open(filename, "r") as f:
                 data = f.read()
-                assert data == py_content, f"The content of {filename} seems outdated, please run `python stub.py`"
+                assert data == py_content, (
+                    f"The content of {filename} seems outdated, please run `python stub.py`"
+                )
         else:
             with open(filename, "w") as f:
                 f.write(py_content)
@@ -235,4 +244,5 @@ if __name__ == "__main__":
     directory = "py_src/rustymimi/"
 
     import rustymimi
+
     write(rustymimi.rustymimi, directory, "rustymimi", check=args.check)

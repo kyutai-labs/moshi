@@ -5,8 +5,12 @@ from .compile import torch_compile_lazy
 
 @torch_compile_lazy
 def cross_entropy(
-        logits: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor, dtype=torch.float32,
-        logits_soft_clip: float | None = None) -> torch.Tensor:
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    mask: torch.Tensor,
+    dtype=torch.float32,
+    logits_soft_clip: float | None = None,
+) -> torch.Tensor:
     """Compute cross entropy between multi-codebook targets and model's logits.
     The cross entropy is computed per codebook to provide codebook-level cross entropy.
     Valid timesteps for each of the codebook are pulled from the mask, where invalid
