@@ -23,8 +23,7 @@ from ..modules.transformer import StreamingTransformer, create_norm_fn
 from ..utils.compile import CUDAGraphed
 from ..utils.quantize import replace_linear_with_qlinear
 from ..utils.sampling import sample_token
-from .lm_utils import (ScaledEmbedding, _delay_sequence, _init_layer,
-                       _undelay_sequence)
+from .lm_utils import ScaledEmbedding, _delay_sequence, _init_layer, _undelay_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +99,7 @@ class LMModel(StreamingContainer):
         depformer_norm: str | None = None,
         existing_text_padding_id: int = 3,
         existing_text_end_padding_id: int = 0,
+        extra_text_stream_depth: int = 0,
         extra_heads_num_heads: int = 0,
         extra_heads_dim: int = 6,
         context: tp.Optional[int] = None,
@@ -117,6 +117,7 @@ class LMModel(StreamingContainer):
         self.dep_q = dep_q
         self.card = card
         self.text_card = text_card
+        self.extra_text_stream_depth = extra_text_stream_depth
         text_card_out = text_card if text_card_out is None else text_card_out
         assert len(delays) == self.num_codebooks, f"expected {self.num_codebooks} delays, got {len(delays)}."
         self.delays = delays
@@ -139,6 +140,16 @@ class LMModel(StreamingContainer):
         self.text_emb = EmbeddingFactory(text_card + 1, dim, demux_second_stream=demux_second_text_stream)
 
         self.text_linear = nn.Linear(dim, text_card_out, bias=bias_proj)
+        if extra_text_stream_depth > 0:
+            self.extra_text_linears = nn.ModuleList(
+                [nn.Linear(dim, text_card_out, bias=bias_proj) for _ in range(extra_text_stream_depth)]
+            )
+            self.proj_text_embs = nn.ModuleList(
+                [nn.Linear(dim, dim, bias=False) for _ in range(1 + extra_text_stream_depth)]
+            )
+        else:
+            self.extra_text_linears = nn.ModuleList()
+            self.proj_text_embs = nn.ModuleList()
         depformer_prefix = "depformer_"
         main_kwargs = {k: v for k, v in kwargs.items() if not k.startswith(depformer_prefix)}
         self.transformer = StreamingTransformer(
@@ -276,8 +287,12 @@ class LMModel(StreamingContainer):
         return first_param.dtype
 
     @property
+    def num_text_streams(self) -> int:
+        return 1 + self.extra_text_stream_depth
+
+    @property
     def num_codebooks(self) -> int:
-        return self.n_q + 1
+        return self.n_q + self.num_text_streams
 
     @property
     def num_audio_codebooks(self) -> int:
@@ -285,12 +300,8 @@ class LMModel(StreamingContainer):
 
     @property
     def audio_offset(self) -> int:
-        """From which channel does audio start? Always 1 in practice.
-
-        The state has shape [B, text_channels + audio_channels, T] where text_channels=1
-        in practice, but in the future we might want to support >1.
-        """
-        return 1
+        """From which channel does audio start? Equal to `num_text_streams`."""
+        return self.num_text_streams
 
     def _get_initial_token(self) -> torch.Tensor:
         # Returns the initial token that will be fed to the model to predict the very first timestep.
@@ -301,7 +312,7 @@ class LMModel(StreamingContainer):
 
         text_special = torch.full_like(zero, self.text_initial_token_id)
         audio_token = special
-        text_token = text_special
+        text_token = text_special.expand(-1, self.num_text_streams, -1)
         audio_token = audio_token.expand(-1, self.num_audio_codebooks, -1)
         token = torch.cat([text_token, audio_token], dim=1)
         return token
@@ -357,8 +368,10 @@ class LMModel(StreamingContainer):
             self.delays[self.audio_offset : self.audio_offset + self.dep_q], logits, fill_value=float("NaN")
         )
         logits_mask &= codes[:, self.audio_offset : self.audio_offset + self.dep_q] != self.zero_token_id
-        text_logits, text_logits_mask = _undelay_sequence(self.delays[:1], text_logits, fill_value=float("NaN"))
-        text_logits_mask &= codes[:, :1] != self.zero_token_id
+        text_logits, text_logits_mask = _undelay_sequence(
+            self.delays[: self.num_text_streams], text_logits, fill_value=float("NaN")
+        )
+        text_logits_mask &= codes[:, : self.num_text_streams] != self.zero_token_id
         return LMOutput(logits, logits_mask, text_logits, text_logits_mask)
 
     def forward_text(
@@ -374,9 +387,13 @@ class LMModel(StreamingContainer):
         for cb_index in range(self.num_audio_codebooks):
             audio_emb = self.emb[cb_index](input_sequence[:, cb_index + self.audio_offset])
             input_ = audio_emb if input_ is None else input_ + audio_emb
-        text_emb = self.text_emb(input_sequence[:, 0])
-
-        input_ = text_emb if input_ is None else input_ + text_emb
+        if self.proj_text_embs:
+            for i in range(self.num_text_streams):
+                emb = self.proj_text_embs[i](self.text_emb(input_sequence[:, i]))
+                input_ = emb if input_ is None else input_ + emb
+        else:
+            text_emb = self.text_emb(input_sequence[:, 0])
+            input_ = text_emb if input_ is None else input_ + text_emb
         if sum_condition is not None:
             input_ = input_ + sum_condition.to(input_)
         if cross_attention_src is not None:
@@ -385,8 +402,11 @@ class LMModel(StreamingContainer):
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
         assert isinstance(transformer_out, torch.Tensor)
-        text_logits = self.text_linear(transformer_out)
-        text_logits = text_logits[:, None]
+        if self.extra_text_linears:
+            all_text_linears = [self.text_linear, *self.extra_text_linears]
+            text_logits = torch.stack([linear(transformer_out) for linear in all_text_linears], dim=1)
+        else:
+            text_logits = self.text_linear(transformer_out)[:, None]
         return transformer_out, text_logits
 
     def forward_depformer_training(
@@ -543,6 +563,7 @@ class LMGen(StreamingModule[_LMGenState]):
         support_out_of_sync: bool = False,
         cfg_is_masked_until: list[int] | None = None,
         cfg_is_no_text: bool = False,
+        user_text_autoregressive: bool = True,
     ):
         assert not lm_model.training, "generation shouldn't be used in training mode."
         super().__init__()
@@ -565,6 +586,7 @@ class LMGen(StreamingModule[_LMGenState]):
         self.support_out_of_sync = support_out_of_sync
         self.cfg_is_masked_until = cfg_is_masked_until
         self.cfg_is_no_text = cfg_is_no_text
+        self.user_text_autoregressive = user_text_autoregressive
         if self.cfg_coef != 1.0:
             if not self.cfg_is_no_text and not self.cfg_is_masked_until:
                 assert self.lm_model.fuser is not None, "Model has no fuser, cannot do CFG."
@@ -654,7 +676,7 @@ class LMGen(StreamingModule[_LMGenState]):
         B, Ki, S = input_tokens.shape
         assert B == state.batch_size, f"Got a batch size {B}, expected {state.batch_size}"
         assert S == 1, "Only support being given steps one by one."
-        needed_tokens = lm_model.num_codebooks - lm_model.dep_q - 1
+        needed_tokens = lm_model.num_audio_codebooks - lm_model.dep_q
         assert Ki >= needed_tokens, f"We expect {needed_tokens} tokens from the user stream, got {Ki}."
 
         if Ki > needed_tokens:
@@ -662,10 +684,11 @@ class LMGen(StreamingModule[_LMGenState]):
 
         CT = state.cache.shape[2]
 
-        delays = self.delays_cuda[lm_model.dep_q + 1 :]
+        non_gen_start = lm_model.num_text_streams + lm_model.dep_q
+        delays = self.delays_cuda[non_gen_start:]
         write_positions = (state.offsets[:, None, None] + delays[:, None]) % CT
         scatter_with_mask_(
-            state.cache[:, lm_model.dep_q + 1 :], -1, write_positions, input_tokens, state.exec_mask[:, None, None]
+            state.cache[:, non_gen_start:], -1, write_positions, input_tokens, state.exec_mask[:, None, None]
         )
 
         is_init = state.offsets[:, None, None] <= self.delays_cuda[:, None]
@@ -680,8 +703,8 @@ class LMGen(StreamingModule[_LMGenState]):
                 state.offsets,
                 input_,
             )
-            assert (input_[:, lm_model.audio_offset :] <= lm_model.card).all(), input_
-            assert (input_[:, :1] <= lm_model.text_card).all()
+            assert (input_[:, lm_model.num_text_streams :] <= lm_model.card).all(), input_
+            assert (input_[:, : lm_model.num_text_streams] <= lm_model.text_card).all()
 
         zero = torch.full((1,), self.lm_model.zero_token_id, dtype=torch.long, device=input_.device)
         if self.cfg_coef != 1.0:
@@ -703,26 +726,27 @@ class LMGen(StreamingModule[_LMGenState]):
                 text_logits = logits
             else:
                 text_logits = logits_null + (logits - logits_null) * self.cfg_coef
-        # Shape of text_logits should be [B, K_text=1, T=1, Card_text]
+        # Shape of text_logits is [B, num_text_streams, T=1, Card_text].
         if self.on_text_logits_hook:
-            self.on_text_logits_hook(text_logits)
-        text_token = sample_token(
+            self.on_text_logits_hook(text_logits[:, :1])
+        text_tokens = sample_token(
             text_logits.float(),
             self.use_sampling,
             self.temp_text,
             self.top_k_text,
         )
-        assert text_token.dim() == 3, text_token.shape
-        assert text_token.shape[2] == 1
-        assert text_token.shape[1] == 1, "Only one text stream supported."
-        text_token = text_token[:, 0, 0]  # shape is [B]
+        assert text_tokens.dim() == 3, text_tokens.shape
+        assert text_tokens.shape[2] == 1
+        assert text_tokens.shape[1] == lm_model.num_text_streams, text_tokens.shape
+        text_tokens = text_tokens[:, :, 0]  # shape is [B, num_text_streams]
+        inner_text_token = text_tokens[:, 0]  # shape is [B]
         if self.on_text_hook is not None:
-            self.on_text_hook(text_token)
+            self.on_text_hook(inner_text_token)
         if state.graphed_depth is None:
             audio_tokens = None
         else:
             if depformer_replace_tokens is None:
-                audio_tokens = state.graphed_depth(text_token, transformer_out)
+                audio_tokens = state.graphed_depth(inner_text_token, transformer_out)
             else:
                 assert depformer_replace_tokens.dim() == 3
                 audio_tokens = depformer_replace_tokens.squeeze(-1)
@@ -732,11 +756,22 @@ class LMGen(StreamingModule[_LMGenState]):
         state.offsets = torch.where(state.exec_mask, state.offsets + 1, state.offsets)
         state.offset_cpu += 1
         positions = (state.offsets % CT)[:, None, None]
-        scatter_with_mask_(state.cache[:, :1], -1, positions, text_token[:, None, None], state.exec_mask[:, None, None])
+
+        if not self.user_text_autoregressive:
+            text_tokens = text_tokens.clone()
+            text_tokens[:, 1:] = lm_model.zero_token_id
+        text_tokens = text_tokens[:, :, None]
+        scatter_with_mask_(
+            state.cache[:, : lm_model.num_text_streams],
+            -1,
+            positions.expand_as(text_tokens),
+            text_tokens,
+            state.exec_mask[:, None, None],
+        )
         if audio_tokens is not None:
             audio_tokens = audio_tokens[:, :, None]
             scatter_with_mask_(
-                state.cache[:, 1 : lm_model.dep_q + 1, :],
+                state.cache[:, lm_model.num_text_streams : lm_model.num_text_streams + lm_model.dep_q, :],
                 -1,
                 positions.expand_as(audio_tokens),
                 audio_tokens,
@@ -747,9 +782,10 @@ class LMGen(StreamingModule[_LMGenState]):
             # When using out of sync exec, should not rely on this being None.
             return None
         B = state.cache.shape[0]
-        gen_delays_cuda = self.delays_cuda[: lm_model.dep_q + 1]
+        n_out = lm_model.num_text_streams + lm_model.dep_q
+        gen_delays_cuda = self.delays_cuda[:n_out]
         index = (state.offsets[:, None, None] - self.max_delay + gen_delays_cuda[:, None]) % CT
-        out = state.cache.gather(dim=2, index=index)
+        out = state.cache[:, :n_out].gather(dim=2, index=index)
         mask = (state.offsets <= self.max_delay) | ~state.exec_mask
         out[mask, :, :] = lm_model.ungenerated_token_id
         return out, transformer_out

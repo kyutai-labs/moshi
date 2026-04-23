@@ -13,6 +13,7 @@ export const useServerText = () => {
     const message = decodeMessage(dataArray);
     if (message.type === "text") {
       setText(text => [...text, message.data]);
+      setTextColor(textColor => [...textColor, 0]);
       setTotalTextMessages(count => count + 1);
     } else if (message.type === "coloredtext") {
       setText(text => [...text, message.data]);
@@ -27,6 +28,7 @@ export const useServerText = () => {
       return;
     }
     setText([]);
+    setTextColor([]);
     currentSocket.addEventListener("message", onSocketMessage);
     return () => {
       currentSocket.removeEventListener("message", onSocketMessage);

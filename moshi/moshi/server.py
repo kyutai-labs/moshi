@@ -54,13 +54,22 @@ class ServerState:
         lm: LMModel,
         cfg_coef: float,
         device: str | torch.device,
+        user_text_autoregressive: bool,
         **kwargs,
     ):
         self.model_type = model_type
         self.mimi = mimi
         self.text_tokenizer = text_tokenizer
+        self.num_text_streams = lm.num_text_streams
+
         condition_tensors = get_condition_tensors(model_type, lm, batch_size=1, cfg_coef=cfg_coef)
-        self.lm_gen = LMGen(lm, cfg_coef=cfg_coef, condition_tensors=condition_tensors, **kwargs)
+        self.lm_gen = LMGen(
+            lm,
+            cfg_coef=cfg_coef,
+            condition_tensors=condition_tensors,
+            user_text_autoregressive=user_text_autoregressive,
+            **kwargs,
+        )
 
         self.device = device
         self.frame_size = int(self.mimi.sample_rate / self.mimi.frame_rate)
@@ -77,26 +86,36 @@ class ServerState:
                 tokens = self.lm_gen.step(codes[:, :, c : c + 1])
                 if tokens is None:
                     continue
-                _ = self.mimi.decode(tokens[:, 1:])
+                _ = self.mimi.decode(tokens[:, self.num_text_streams :])
 
         torch.cuda.synchronize()
+
+    def _decode_text_token(self, token_id: int) -> str | None:
+        if token_id in (0, 3, -1):
+            return None
+        text = self.text_tokenizer.id_to_piece(token_id)  # type: ignore
+        return text.replace("▁", " ")
 
     async def decode_and_send(
         self, tokens: torch.Tensor, ws: web.WebSocketResponse, opus_writer: sphn.OpusStreamWriter
     ):
-        assert tokens.shape[1] == self.lm_gen.lm_model.dep_q + 1
-        main_pcm = self.mimi.decode(tokens[:, 1:])
+        assert tokens.shape[1] == self.num_text_streams + self.lm_gen.lm_model.dep_q
+        main_pcm = self.mimi.decode(tokens[:, self.num_text_streams :])
         main_pcm = main_pcm.cpu()
         opus_bytes = opus_writer.append_pcm(main_pcm[0, 0].numpy())
         if len(opus_bytes) > 0:
             await ws.send_bytes(b"\x01" + opus_bytes)
-        text_token = tokens[0, 0, 0].item()
-        if text_token not in (0, 3):
-            _text = self.text_tokenizer.id_to_piece(text_token)  # type: ignore
-            _text = _text.replace("▁", " ")
-            msg = b"\x02" + bytes(_text, encoding="utf8")
-            log("info", f"text token '{_text}'")
-            await ws.send_bytes(msg)
+        inner = self._decode_text_token(tokens[0, 0, 0].item())
+        if inner is not None:
+            log("info", f"text token '{inner}'")
+            await ws.send_bytes(b"\x02" + bytes(inner, encoding="utf8"))
+        for stream_idx in range(1, self.num_text_streams):
+            user_text = self._decode_text_token(tokens[0, stream_idx, 0].item())
+            if user_text is not None:
+                log("info", f"user text token (stream {stream_idx}) '{user_text}'")
+                await ws.send_bytes(
+                    b"\x07" + stream_idx.to_bytes(1, "big") + bytes(user_text, encoding="utf8")
+                )
 
     async def recv_loop(
         self, ws: web.WebSocketResponse, opus_reader: sphn.OpusStreamReader, opus_writer: sphn.OpusStreamWriter
@@ -212,6 +231,12 @@ def main():
         help="Run inference with float16, not bfloat16, better for old GPUs.",
     )
     parser.add_argument(
+        "--user-text-autoregressive",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable or disable autoregressive user text stream.",
+    )
+    parser.add_argument(
         "--ssl",
         type=str,
         help=(
@@ -266,6 +291,7 @@ def main():
         lm,
         args.cfg_coef,
         args.device,
+        user_text_autoregressive=args.user_text_autoregressive,
         **checkpoint_info.lm_gen_config,
     )
     log("info", "warming up the model")

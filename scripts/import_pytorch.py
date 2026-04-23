@@ -71,16 +71,24 @@ def import_model(
         "kv_repeat",
         "depformer_kv_repeat",
         "text_card_out",
+        "extra_text_stream_depth",
     ]
     config: dict[str, tp.Any] = {}
     config["card"] = 2048
     config["n_q"] = in_n_q
     config["dep_q"] = out_n_q
     tr_args = omegaconf.OmegaConf.to_object(cfg.transformer_lm)
+    extra_text_stream_depth = tr_args.get("extra_text_stream_depth", 0)
+    num_text_streams = 1 + extra_text_stream_depth
     config["delays"] = tr_args["delays"]
-    if len(config["delays"]) < out_n_q + 1:
+    # Training config delays have 1 text stream; insert extra text stream delays (0) after the first.
+    if extra_text_stream_depth > 0 and len(config["delays"]) == 1 + in_n_q:
+        config["delays"] = (
+            config["delays"][:1] + [0] * extra_text_stream_depth + config["delays"][1:]
+        )
+    if len(config["delays"]) < out_n_q + num_text_streams:
         config["delays"] = config["delays"] + [config["delays"][-1]] * (
-            out_n_q + 1 - len(config["delays"])
+            out_n_q + num_text_streams - len(config["delays"])
         )
     for key in keys:
         if key in cfg.transformer_lm:
