@@ -3,11 +3,12 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-import torch
 from pathlib import Path
+
+import torch
+from huggingface_hub import hf_hub_download
 from safetensors import safe_open
 from safetensors.torch import save_file
-from huggingface_hub import hf_hub_download
 
 
 def import_model(in_path: Path, out_path: Path, silent: bool = False) -> None:

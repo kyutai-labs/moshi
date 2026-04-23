@@ -7,12 +7,9 @@ from dataclasses import dataclass
 import mlx.core as mx
 import mlx.nn as nn
 
-from ..modules.conditioner import (
-    ConditionProvider,
-    ConditionTensor,
-    LutConditionerConfig,
-    TensorConditionerConfig,
-)
+from ..modules.conditioner import (ConditionProvider, ConditionTensor,
+                                   LutConditionerConfig,
+                                   TensorConditionerConfig)
 from ..modules.transformer import LayerCache, Transformer, TransformerConfig
 from ..utils import sampling
 

@@ -5,11 +5,10 @@
 
 import argparse
 import json
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 from huggingface_hub import HfApi, hf_hub_download
-
 
 
 def get_api():

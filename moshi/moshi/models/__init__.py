@@ -6,9 +6,6 @@ Models for the compression model Moshi,
 """
 
 # flake8: noqa
-from .compression import (
-    CompressionModel,
-    MimiModel,
-)
-from .lm import LMModel, LMGen
+from .compression import CompressionModel, MimiModel
+from .lm import LMGen, LMModel
 from .loaders import get_mimi, get_moshi_lm

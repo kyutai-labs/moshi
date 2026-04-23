@@ -3,27 +3,31 @@
 # LICENSE file in the root directory of this source tree.
 """Retrieves the pretrained models for Moshi and Mimi."""
 
-from dataclasses import dataclass, field
 import json
-from pathlib import Path
 import warnings
+from dataclasses import dataclass, field
+from pathlib import Path
+
 from huggingface_hub import hf_hub_download
 
 try:
     from huggingface_hub.errors import EntryNotFoundError
 except ImportError:
     from huggingface_hub.utils import EntryNotFoundError  # pyright: ignore
-from safetensors.torch import load_file
+
+import typing as tp
+
 import sentencepiece
 import torch
-import typing as tp
-from .compression import MimiModel
-from ..conditioners import BaseConditioner, ConditionProvider, ConditionFuser
-from .lm import LMModel
-from ..modules import SEANetEncoder, SEANetDecoder, transformer
-from ..quantization import SplitResidualVectorQuantizer
-from ..modules.lora import replace_all_linear_with_lora, replace_lora_with_linear
+from safetensors.torch import load_file
 
+from ..conditioners import BaseConditioner, ConditionFuser, ConditionProvider
+from ..modules import SEANetDecoder, SEANetEncoder, transformer
+from ..modules.lora import (replace_all_linear_with_lora,
+                            replace_lora_with_linear)
+from ..quantization import SplitResidualVectorQuantizer
+from .compression import MimiModel
+from .lm import LMModel
 
 SAMPLE_RATE = 24000
 FRAME_RATE = 12.5

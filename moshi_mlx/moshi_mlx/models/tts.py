@@ -21,13 +21,9 @@ import mlx.core as mx
 import sphn
 from sentencepiece import SentencePieceProcessor
 
-from ..modules.conditioner import (
-    ConditionAttributes,
-    ConditionTensor,
-    LutConditioner,
-    TensorCondition,
-    dropout_all_conditions,
-)
+from ..modules.conditioner import (ConditionAttributes, ConditionTensor,
+                                   LutConditioner, TensorCondition,
+                                   dropout_all_conditions)
 from ..utils.loaders import hf_get
 from ..utils.sampling import Sampler
 from . import Lm, LmGen

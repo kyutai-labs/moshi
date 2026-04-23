@@ -13,11 +13,13 @@ Streaming module API that should be implemented by all Streaming components,
 """
 
 import abc
+import typing as tp
 from contextlib import ExitStack
 from dataclasses import dataclass
-import typing as tp
-from torch import nn
+
 import torch
+from torch import nn
+
 from ..utils.compile import CUDAGraphed
 
 

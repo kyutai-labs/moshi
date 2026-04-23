@@ -6,8 +6,8 @@
 Conditioners
 """
 
-from dataclasses import dataclass, field
 import typing as tp
+from dataclasses import dataclass, field
 
 import mlx.core as mx
 import mlx.nn as nn

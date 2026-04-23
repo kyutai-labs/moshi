@@ -4,8 +4,8 @@
 
 import typing as tp
 
-from einops import rearrange
 import torch
+from einops import rearrange
 from torch import nn
 
 from .conv import StreamingConv1d, StreamingConvTranspose1d

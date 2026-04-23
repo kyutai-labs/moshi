@@ -8,9 +8,7 @@ import typing as tp
 import torch
 from torch import nn
 
-
-from .base import _BaseTextConditioner, ConditionType
-
+from .base import ConditionType, _BaseTextConditioner
 
 logger = logging.getLogger(__name__)
 

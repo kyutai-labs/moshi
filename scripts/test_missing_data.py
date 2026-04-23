@@ -2,6 +2,7 @@
 can advance at its own pace, while retaining full compat with CUDA Graph."""
 
 import sys
+
 import sphn
 import torch
 

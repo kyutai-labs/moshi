@@ -4,18 +4,18 @@
 
 import argparse
 import asyncio
-import queue
 import json
-import time
-import numpy as np
-from pathlib import Path
-import sentencepiece
-import typing as tp
 import os
+import queue
 import shutil
+import time
+import typing as tp
+from pathlib import Path
 
 import mlx.core as mx
 import mlx.nn as nn
+import numpy as np
+import sentencepiece
 from mlx.utils import tree_map_with_path
 
 import moshi_mlx

@@ -3,11 +3,12 @@
 # LICENSE file in the root directory of this source tree.
 
 from contextlib import ExitStack
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-from ..utils.compile import torch_compile_lazy, no_compile
+from ..utils.compile import no_compile, torch_compile_lazy
 
 
 @torch_compile_lazy

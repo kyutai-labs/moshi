@@ -23,7 +23,8 @@ from ..modules.transformer import StreamingTransformer, create_norm_fn
 from ..utils.compile import CUDAGraphed
 from ..utils.quantize import replace_linear_with_qlinear
 from ..utils.sampling import sample_token
-from .lm_utils import ScaledEmbedding, _delay_sequence, _init_layer, _undelay_sequence
+from .lm_utils import (ScaledEmbedding, _delay_sequence, _init_layer,
+                       _undelay_sequence)
 
 logger = logging.getLogger(__name__)
 

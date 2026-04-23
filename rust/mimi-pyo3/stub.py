@@ -2,11 +2,11 @@
 import argparse
 import inspect
 import os
-from typing import Optional
-import black
-from pathlib import Path
 import re
+from pathlib import Path
+from typing import Optional
 
+import black
 
 INDENT = " " * 4
 GENERATED_COMMENT = "# Generated content DO NOT EDIT\n"

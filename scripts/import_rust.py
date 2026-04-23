@@ -1,8 +1,8 @@
 import argparse
 from pathlib import Path
-from safetensors.torch import save_file
 
 import torch
+from safetensors.torch import save_file
 
 
 def import_model(

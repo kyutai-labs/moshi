@@ -4,17 +4,10 @@
 # flake8: noqa
 """Modules used for building the models."""
 
-from .conv import (
-    Conv1d,
-    ConvTranspose1d,
-    StreamableConv1d,
-    StreamableConvTranspose1d,
-    NormConv1d,
-    NormConvTranspose1d,
-    ConvDownsample1d,
-    ConvTrUpsample1d,
-)
-from .quantization import SplitResidualVectorQuantizer, EuclideanCodebook
-from .seanet import SeanetConfig, SeanetEncoder, SeanetDecoder
+from .conv import (Conv1d, ConvDownsample1d, ConvTranspose1d, ConvTrUpsample1d,
+                   NormConv1d, NormConvTranspose1d, StreamableConv1d,
+                   StreamableConvTranspose1d)
 from .kv_cache import KVCache, RotatingKVCache
-from .transformer import Transformer, TransformerConfig, ProjectedTransformer
+from .quantization import EuclideanCodebook, SplitResidualVectorQuantizer
+from .seanet import SeanetConfig, SeanetDecoder, SeanetEncoder
+from .transformer import ProjectedTransformer, Transformer, TransformerConfig

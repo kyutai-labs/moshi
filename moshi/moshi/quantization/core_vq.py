@@ -11,11 +11,10 @@
 import math
 import typing as tp
 
-from einops import rearrange, repeat
 import torch
-from torch import nn
-from torch import distributed
 import torch.nn.functional as F
+from einops import rearrange, repeat
+from torch import distributed, nn
 
 
 class _CodebookForwardResult(tp.NamedTuple):

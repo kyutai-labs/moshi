@@ -23,7 +23,8 @@ import tqdm.auto
 from safetensors.torch import load_file
 from sentencepiece import SentencePieceProcessor
 
-from ..conditioners import ConditionAttributes, TensorCondition, dropout_all_conditions
+from ..conditioners import (ConditionAttributes, TensorCondition,
+                            dropout_all_conditions)
 from ..conditioners.text import LUTConditioner
 from . import LMGen, LMModel, MimiModel, loaders
 from .lm_utils import ScaledEmbedding

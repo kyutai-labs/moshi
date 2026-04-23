@@ -3,10 +3,11 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass
-from .conv import StreamableConv1d, StreamableConvTranspose1d
 
 import mlx.core as mx
 import mlx.nn as nn
+
+from .conv import StreamableConv1d, StreamableConvTranspose1d
 
 
 @dataclass

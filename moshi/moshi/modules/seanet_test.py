@@ -1,10 +1,10 @@
 import functools
+
+import pytest
 import torch
 import torch.nn as nn
-import pytest
 
-from .seanet import SEANetResnetBlock, SEANetDecoder
-
+from .seanet import SEANetDecoder, SEANetResnetBlock
 
 torch.backends.cudnn.enabled = False  # Disable cuDNN for deterministic behavior and for numerical stability
 

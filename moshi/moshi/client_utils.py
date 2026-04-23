@@ -3,8 +3,8 @@
 # LICENSE file in the root directory of this source tree.
 """Utilities for the command line client, in particular for handling interactions with the terminal."""
 
-from dataclasses import dataclass
 import sys
+from dataclasses import dataclass
 
 
 def colorize(text, color):

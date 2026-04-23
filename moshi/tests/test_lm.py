@@ -1,6 +1,7 @@
 from pathlib import Path
-from safetensors.torch import load_file
+
 import torch
+from safetensors.torch import load_file
 
 from moshi.models import lm
 from moshi.utils.utils import cross_entropy

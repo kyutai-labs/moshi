@@ -9,15 +9,14 @@ Provides a simple activation checkpointing that is compatible with FSDP and torc
 Finally, provides some utilities for CUDA graphing functions.
 """
 
-from contextlib import contextmanager
-from functools import wraps
 import inspect
 import os
 import typing as tp
+from contextlib import contextmanager
+from functools import wraps
 
 import torch
 from torch import cuda
-
 
 _compile_disabled: bool = False
 

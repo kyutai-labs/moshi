@@ -9,10 +9,9 @@ import time
 import numpy as np
 import sphn
 import torch
-from torch.profiler import profile, ProfilerActivity
+from torch.profiler import ProfilerActivity, profile
 
-from moshi.models import loaders, LMGen
-
+from moshi.models import LMGen, loaders
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")

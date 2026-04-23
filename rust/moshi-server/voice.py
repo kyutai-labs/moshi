@@ -4,20 +4,19 @@
 #
 
 
-from pathlib import Path
-from moshi.models import loaders
-import numpy as np
-from pydantic import BaseModel
-
-
 import math
 import time
+from pathlib import Path
 
 import julius
+import numpy as np
 import torch
+import torchaudio.transforms
+from pydantic import BaseModel
 from torch import nn
 from torch.nn import functional as F
-import torchaudio.transforms
+
+from moshi.models import loaders
 
 
 def normalize_loudness(

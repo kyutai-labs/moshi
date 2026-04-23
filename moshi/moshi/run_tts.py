@@ -5,17 +5,18 @@
 This uses Delayed Streams Modeling for TTS, as implemented in `moshi/models/tts.py`."""
 
 import argparse
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import time
+from dataclasses import dataclass
+from pathlib import Path
 
-from safetensors.torch import save_file
 import sphn
 import torch
+from safetensors.torch import save_file
 
-from .models.tts import TTSModel, DEFAULT_DSM_TTS_REPO, DEFAULT_DSM_TTS_VOICE_REPO
 from .models.loaders import CheckpointInfo
+from .models.tts import (DEFAULT_DSM_TTS_REPO, DEFAULT_DSM_TTS_VOICE_REPO,
+                         TTSModel)
 
 
 @dataclass

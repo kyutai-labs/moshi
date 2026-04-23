@@ -8,7 +8,8 @@ from numpy.typing import NDArray
 try:
     import gradio as gr  # type: ignore
     import websockets.sync.client
-    from gradio_webrtc import AdditionalOutputs, StreamHandler, WebRTC  # type: ignore
+    from gradio_webrtc import (AdditionalOutputs,  # type: ignore
+                               StreamHandler, WebRTC)
 except ImportError:
     raise ImportError("Please install gradio-webrtc>=0.0.18 to run this script.")
 

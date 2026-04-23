@@ -6,13 +6,7 @@
 Models for EnCodec, AudioGen, MusicGen, as well as the generic LMModel.
 """
 
-from .lm import (
-    Lm,
-    LmConfig,
-    config_v0_1,
-    config1b_202412,
-    config1b_202412_16rvq,
-    config_helium_1_preview_2b,
-)
 from .generate import LmGen
-from .mimi import mimi_202407, MimiConfig
+from .lm import (Lm, LmConfig, config1b_202412, config1b_202412_16rvq,
+                 config_helium_1_preview_2b, config_v0_1)
+from .mimi import MimiConfig, mimi_202407

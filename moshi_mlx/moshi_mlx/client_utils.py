@@ -2,8 +2,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from dataclasses import dataclass
 import sys
+from dataclasses import dataclass
 
 
 def colorize(text, color):

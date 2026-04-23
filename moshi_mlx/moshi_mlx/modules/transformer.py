@@ -4,10 +4,10 @@
 
 from dataclasses import dataclass
 
-from .kv_cache import KVCache, RotatingKVCache
-
 import mlx.core as mx
 import mlx.nn as nn
+
+from .kv_cache import KVCache, RotatingKVCache
 
 
 @dataclass

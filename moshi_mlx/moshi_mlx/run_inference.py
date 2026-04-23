@@ -4,18 +4,18 @@
 
 import argparse
 import json
-import numpy as np
 import time
 
-from huggingface_hub import hf_hub_download
 import mlx.core as mx
 import mlx.nn as nn
+import numpy as np
 import rustymimi
 import sentencepiece
 import sphn
+from huggingface_hub import hf_hub_download
 
-from .client_utils import make_log
 from . import models, utils
+from .client_utils import make_log
 
 
 def log(level: str, msg: str):

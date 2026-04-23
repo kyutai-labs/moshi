@@ -3,9 +3,9 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-import numpy as np
 import time
 
+import numpy as np
 import rustymimi
 
 

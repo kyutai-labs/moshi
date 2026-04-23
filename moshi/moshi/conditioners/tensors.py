@@ -1,7 +1,7 @@
 # Copyright (c) Kyutai, all rights reserved.
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-from .base import _BaseTensorConditioner, TensorCondition, ConditionType
+from .base import ConditionType, TensorCondition, _BaseTensorConditioner
 
 
 class TensorConditioner(_BaseTensorConditioner[TensorCondition]):

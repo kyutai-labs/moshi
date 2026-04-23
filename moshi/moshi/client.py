@@ -10,8 +10,8 @@ import sys
 
 import aiohttp
 import numpy as np
-import sphn
 import sounddevice as sd
+import sphn
 
 from .client_utils import AnyPrinter, Printer, RawPrinter
 

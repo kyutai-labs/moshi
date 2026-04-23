@@ -12,8 +12,8 @@
 Base class for all quantizers.
 """
 
-from dataclasses import dataclass, field
 import typing as tp
+from dataclasses import dataclass, field
 
 import torch
 from torch import nn

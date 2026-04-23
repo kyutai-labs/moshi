@@ -13,26 +13,21 @@
 for Mimi. Also defines the main interface that a model must follow to be usable as an audio tokenizer.
 """
 
-from abc import abstractmethod
-from dataclasses import dataclass
 import logging
 import typing as tp
+from abc import abstractmethod
+from dataclasses import dataclass
 
 import torch
 from torch import nn
 
-
-from ..quantization import (
-    QuantizedResult,
-    BaseQuantizer,
-    SplitResidualVectorQuantizer,
-    ResidualVectorQuantizer,
-)
 from ..modules.conv import pad_for_conv1d
 from ..modules.resample import ConvDownsample1d, ConvTrUpsample1d
-from ..modules.streaming import StreamingModule, State, StateT
+from ..modules.streaming import State, StateT, StreamingModule
+from ..quantization import (BaseQuantizer, QuantizedResult,
+                            ResidualVectorQuantizer,
+                            SplitResidualVectorQuantizer)
 from ..utils.compile import CUDAGraphed
-
 
 logger = logging.getLogger()
 

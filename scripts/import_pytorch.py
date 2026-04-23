@@ -6,12 +6,12 @@ with low rank embeddings and weight sharing for some codebooks."""
 
 import argparse
 import json
-from pathlib import Path
 import typing as tp
+from pathlib import Path
 
 import omegaconf
-from safetensors.torch import save_file
 import torch
+from safetensors.torch import save_file
 
 
 def import_model(

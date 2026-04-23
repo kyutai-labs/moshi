@@ -4,13 +4,13 @@
 """Import Mimi codecs."""
 
 import argparse
-from functools import partial
 import json
+from functools import partial
 from pathlib import Path
 
 import omegaconf
-from safetensors.torch import save_file
 import torch
+from safetensors.torch import save_file
 
 
 def import_model(

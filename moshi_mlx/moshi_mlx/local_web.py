@@ -5,29 +5,28 @@
 import argparse
 import asyncio
 import json
-import queue
+import multiprocessing
 import os
+import queue
+import sys
 import tarfile
 import time
-import sys
-import numpy as np
-import multiprocessing
-from pathlib import Path
-import sentencepiece
-from enum import Enum
 import typing as tp
-import sphn
-import aiohttp
-from aiohttp import web
 import webbrowser
+from enum import Enum
+from pathlib import Path
 
+import aiohttp
+import huggingface_hub
 import mlx.core as mx
 import mlx.nn as nn
-
+import numpy as np
 import rustymimi
-from moshi_mlx import models, utils
+import sentencepiece
+import sphn
+from aiohttp import web
 
-import huggingface_hub
+from moshi_mlx import models, utils
 
 SAMPLE_RATE = 24000
 FRAME_SIZE = 1920

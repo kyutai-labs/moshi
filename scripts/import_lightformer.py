@@ -6,10 +6,10 @@ with low rank embeddings and weight sharing for some codebooks."""
 
 import argparse
 from pathlib import Path
-from safetensors.torch import save_file
 
 import omegaconf
 import torch
+from safetensors.torch import save_file
 
 
 def import_model(

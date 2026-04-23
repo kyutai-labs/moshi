@@ -2,12 +2,13 @@
 can advance at its own pace, while retaining full compat with CUDA Graph."""
 
 import sys
+
 import sphn
 import torch
 
+from moshi.conditioners import ConditionAttributes
 from moshi.models import loaders
 from moshi.models.lm import LMGen
-from moshi.conditioners import ConditionAttributes
 
 device = "cuda"
 wnp, sr = sphn.read(sys.argv[1], start_sec=0, duration_sec=8, sample_rate=24000)

@@ -1,28 +1,26 @@
 # Copyright (c) Kyutai, all rights reserved.
 
 import argparse
-from dataclasses import dataclass, field
-from enum import Enum
-import huggingface_hub
-from pathlib import Path
 import random
 import time
 import typing as tp
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
 
+import huggingface_hub
 import numpy as np
-from safetensors.torch import load_file
 import torch
-
-from moshi.conditioners import (
-    ConditionAttributes,
-    dropout_all_conditions,
-    TensorCondition,
-)
-from moshi.models import loaders
-from moshi.models.lm import _LMGenState, LMGen
-from moshi.models.tts import TTSModel, Entry, State, StateMachine, DEFAULT_DSM_TTS_REPO
-from moshi.modules.transformer import StreamingMultiheadAttention
 from pydantic import BaseModel
+from safetensors.torch import load_file
+
+from moshi.conditioners import (ConditionAttributes, TensorCondition,
+                                dropout_all_conditions)
+from moshi.models import loaders
+from moshi.models.lm import LMGen, _LMGenState
+from moshi.models.tts import (DEFAULT_DSM_TTS_REPO, Entry, State, StateMachine,
+                              TTSModel)
+from moshi.modules.transformer import StreamingMultiheadAttention
 
 
 class MaskFlags(Enum):

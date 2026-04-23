@@ -3,10 +3,12 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-from huggingface_hub import hf_hub_download
-import numpy as np
+
 import mlx.core as mx
+import numpy as np
 import sphn
+from huggingface_hub import hf_hub_download
+
 import moshi_mlx
 
 

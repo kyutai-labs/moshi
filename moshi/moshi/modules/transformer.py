@@ -9,21 +9,23 @@ Optimized for inference.
 See `StreamingTransformer` for more information.
 """
 
+import typing as tp
 from contextlib import ExitStack
 from dataclasses import dataclass
-import typing as tp
-from einops import rearrange
+
 import torch
 import torch.nn as nn
+from einops import rearrange
 from torch.nn import functional as F
-from ..utils.compile import no_compile, torch_compile_lazy
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
+
 from ..utils import quantize
+from ..utils.compile import no_compile, torch_compile_lazy
 from ..utils.quantize import replace_linear_with_qlinear
 from .gating import make_gating
-from .rope import RotaryEmbedding
-from .streaming import StreamingModule, StreamingContainer, State
 from .lora import LoRALinear
-from torch.utils.checkpoint import checkpoint as torch_checkpoint
+from .rope import RotaryEmbedding
+from .streaming import State, StreamingContainer, StreamingModule
 
 
 class LayerNormF32(nn.LayerNorm):

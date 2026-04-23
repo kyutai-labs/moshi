@@ -1,6 +1,4 @@
 # Generated content DO NOT EDIT
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Sequence
-from os import PathLike
 
 @staticmethod
 def write_wav(filename, data, sample_rate):

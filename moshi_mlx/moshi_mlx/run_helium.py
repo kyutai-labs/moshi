@@ -3,10 +3,12 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-import sentencepiece
+
 import huggingface_hub
 import mlx.core as mx
 import mlx.nn as nn
+import sentencepiece
+
 from moshi_mlx import models, utils
 
 

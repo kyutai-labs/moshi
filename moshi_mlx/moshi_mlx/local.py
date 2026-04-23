@@ -5,24 +5,24 @@
 import argparse
 import asyncio
 import json
-import queue
 import multiprocessing
+import queue
 import sys
 import time
 import typing as tp
 from enum import Enum
 
-import numpy as np
+import huggingface_hub
 import mlx.core as mx
 import mlx.nn as nn
+import numpy as np
+import rustymimi
 import sentencepiece
 import sounddevice as sd
 
-from .client_utils import AnyPrinter, Printer, RawPrinter
-import rustymimi
 from moshi_mlx import models, utils
 
-import huggingface_hub
+from .client_utils import AnyPrinter, Printer, RawPrinter
 
 SAMPLE_RATE = 24000
 CHANNELS = 1

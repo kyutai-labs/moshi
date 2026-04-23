@@ -8,18 +8,10 @@ from dataclasses import dataclass
 import mlx.core as mx
 import mlx.nn as nn
 
-from ..modules import (
-    ConvDownsample1d,
-    ConvTranspose1d,
-    ConvTrUpsample1d,
-    EuclideanCodebook,
-    ProjectedTransformer,
-    SeanetConfig,
-    SeanetDecoder,
-    SeanetEncoder,
-    SplitResidualVectorQuantizer,
-    TransformerConfig,
-)
+from ..modules import (ConvDownsample1d, ConvTranspose1d, ConvTrUpsample1d,
+                       EuclideanCodebook, ProjectedTransformer, SeanetConfig,
+                       SeanetDecoder, SeanetEncoder,
+                       SplitResidualVectorQuantizer, TransformerConfig)
 
 
 @dataclass

@@ -4,11 +4,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-import moshi.models
 import numpy as np
 import torch
-from moshi.models import LMModel, MimiModel, loaders
 from pydantic import BaseModel
+
+import moshi.models
+from moshi.models import LMModel, MimiModel, loaders
 
 
 class MaskFlags(Enum):

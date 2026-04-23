@@ -3,10 +3,12 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-from moshi.models import loaders
 from pathlib import Path
+
 import torch
 from safetensors.torch import save_file
+
+from moshi.models import loaders
 
 
 def import_model(

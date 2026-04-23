@@ -3,10 +3,10 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+from pathlib import Path
 
 import torch
-from pathlib import Path
-from safetensors.torch import save_file, load_file
+from safetensors.torch import load_file, save_file
 
 
 def import_model(
