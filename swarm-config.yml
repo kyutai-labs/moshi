@@ -1,0 +1,116 @@
+services:
+  traefik:
+    image: traefik:v3.6.7
+    command:
+      # Swarm provider configuration
+      - "--providers.swarm.endpoint=unix:///var/run/docker.sock"
+      - "--providers.swarm.exposedByDefault=false"
+
+      # EntryPoints for HTTP and HTTPS
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+
+      # Redirect HTTP to HTTPS
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+
+      # Let's Encrypt configuration
+      - "--certificatesResolvers.letsencrypt.acme.httpChallenge.entryPoint=web"
+      - "--certificatesResolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesResolvers.letsencrypt.acme.email=gabriel@kyutai.org"
+      - "--certificatesResolvers.letsencrypt.acme.httpChallenge=true"
+      - "--log.level=TRACE"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - letsencrypt:/letsencrypt
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
+  frontend:
+    image: rg.fr-par.scw.cloud/namespace-unruffled-tereshkova/moshi-chat-frontend:${COMMIT_SHA}
+    build:
+      context: client/
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.frontend.rule=Host(`moshi-chat.kyutai.org`) && PathPrefix(`/`)"
+        - "traefik.http.routers.frontend.entrypoints=websecure"
+        - "traefik.http.routers.frontend.tls=true"
+        - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+        - "traefik.http.services.frontend.loadbalancer.server.port=5173"
+        - "traefik.http.routers.frontend.priority=10"
+
+  backend:
+    image: rg.fr-par.scw.cloud/namespace-unruffled-tereshkova/moshi-chat-backend:${COMMIT_SHA}
+    build:
+      context: moshi/
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+      - uv-cache:/root/.cache/uv
+    environment:
+      - NO_TORCH_COMPILE=1
+    deploy:
+      resources:
+        reservations:
+          generic_resources:
+            - discrete_resource_spec:
+                kind: gpu
+                value: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.backend.rule=Host(`moshi-chat.kyutai.org`) && PathPrefix(`/api`)"
+        - "traefik.http.routers.backend.entrypoints=websecure"
+        - "traefik.http.routers.backend.tls=true"
+        - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
+        - "traefik.http.services.backend.loadbalancer.server.port=8998"
+        - "traefik.http.routers.backend.priority=100"
+
+# -----------------------------------------------------
+# Monitoring
+
+  agent:
+    image: portainer/agent:lts
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/volumes:/var/lib/docker/volumes
+    networks:
+      - agent_network
+    deploy:
+      mode: global
+
+  portainer:
+    image: portainer/portainer-ce:lts
+    command: -H tcp://tasks.agent:9001 --tlsskipverify
+    ports:
+      - "9443:9443"
+    volumes:
+      - portainer_data:/data
+    networks:
+      - agent_network
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+volumes:
+  letsencrypt:
+  portainer_data:
+  hf-cache:
+  uv-cache:
+
+
+networks:
+  agent_network:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"
+  default:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"
