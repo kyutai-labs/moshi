@@ -3,7 +3,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use crate::AsrStreamingQuery as Query;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use axum::extract::ws;
 use candle::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
@@ -19,6 +19,28 @@ pub enum InMsg {
     Marker { id: i64 },
     Audio { pcm: Vec<f32> },
     OggOpus { data: Vec<u8> },
+}
+
+impl InMsg {
+    /// Decode a websocket binary payload into an `InMsg` using the requested encoding.
+    pub fn from_ws_payload(payload: &[u8], expect_pcm16le: bool) -> Result<Self> {
+        if expect_pcm16le {
+            return Self::from_pcm16le(payload);
+        }
+        Ok(rmp_serde::from_slice(payload)?)
+    }
+
+    fn from_pcm16le(payload: &[u8]) -> Result<Self> {
+        if payload.len() % 2 != 0 {
+            bail!("received PCM16LE payload with odd length {}", payload.len());
+        }
+        let mut pcm = Vec::with_capacity(payload.len() / 2);
+        for chunk in payload.chunks_exact(2) {
+            let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+            pcm.push(sample as f32 / 32768.0);
+        }
+        Ok(Self::Audio { pcm })
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -129,6 +151,7 @@ impl Asr {
         let asr_delay_in_tokens = self.asr_delay_in_tokens;
         let conditions = self.conditions.clone();
         let mut ogg_opus_decoder = kaudio::ogg_opus::Decoder::new(24000, 1920)?;
+        let expect_pcm16le = query.pcm16le;
         let recv_loop = crate::utils::spawn("recv_loop", async move {
             let dev = state.device().clone();
             // Store the markers in a double ended queue
@@ -141,7 +164,7 @@ impl Asr {
                     ws::Message::Ping(_) | ws::Message::Pong(_) | ws::Message::Text(_) => continue,
                     ws::Message::Close(_) => break,
                 };
-                let msg: InMsg = rmp_serde::from_slice(&msg)?;
+                let msg = InMsg::from_ws_payload(&msg, expect_pcm16le)?;
                 let pcm = match msg {
                     // Init is only used in batched mode.
                     InMsg::Init => None,
