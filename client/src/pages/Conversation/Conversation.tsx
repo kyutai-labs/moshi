@@ -129,7 +129,7 @@ export const Conversation: FC<ConversationProps> = ({
     stopRecording();
   }, [setIsOver]);
 
-  const { isConnected, sendMessage, socket, start, stop } = useSocket({
+  const { isConnected, isWaitingForHandshake, sendMessage, socket, start, stop } = useSocket({
     // onMessage,
     uri: WSURL,
     onDisconnect,
@@ -295,7 +295,7 @@ export const Conversation: FC<ConversationProps> = ({
               )
               }
               {
-                (!isOver || isBypass) && (
+                (!isOver || isBypass) && !isWaitingForHandshake && (
                   <Button
                     onClick={() => {
                       audioContext.current.resume();
@@ -307,6 +307,9 @@ export const Conversation: FC<ConversationProps> = ({
                 )
               }
               <div className={`h-4 w-4 rounded-full ${isConnected ? 'bg-green-700' : 'bg-red-700'}`} />
+              {isWaitingForHandshake && (
+                <span className="text-sm italic">Waiting for a slot, this gpu might be busy.</span>
+              )}
             </div>
             <div className="relative player h-full max-h-full w-full justify-between gap-3 border-2 border-white md:p-12"
               style={{

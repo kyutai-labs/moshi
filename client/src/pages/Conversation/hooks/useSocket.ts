@@ -13,6 +13,7 @@ export const useSocket = ({
 }) => {
   const lastMessageTime = useRef<null|number>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [isWaitingForHandshake, setIsWaitingForHandshake] = useState(false);
   const [socket, setSocket] = useState<WebSocket | null>(null);
 
   const sendMessage = useCallback(
@@ -28,8 +29,8 @@ export const useSocket = ({
 
   const onConnect = useCallback(() => {
     console.log("connected, now waiting for handshake.");
-    // setIsConnected(true);
-  }, [setIsConnected]);
+    setIsWaitingForHandshake(true);
+  }, [setIsWaitingForHandshake]);
 
   const onDisconnect = useCallback(() => {
     console.log("disconnected");
@@ -37,6 +38,7 @@ export const useSocket = ({
       onDisconnectProp();
     }
     setIsConnected(false);
+    setIsWaitingForHandshake(false);
   }, [onDisconnectProp]);
 
   const onMessageEvent = useCallback(
@@ -47,6 +49,7 @@ export const useSocket = ({
       if (message.type == "handshake") {
         console.log("Handshake received, let's rocknroll.");
         setIsConnected(true);
+        setIsWaitingForHandshake(false);
       }
       if (!onMessage) {
         return;
@@ -69,6 +72,7 @@ export const useSocket = ({
 
   const stop = useCallback(() => {
       setIsConnected(false);
+      setIsWaitingForHandshake(false);
       if (onDisconnectProp) {
         onDisconnectProp();
       }
@@ -97,6 +101,7 @@ export const useSocket = ({
 
   return {
     isConnected,
+    isWaitingForHandshake,
     socket,
     sendMessage,
     start,
