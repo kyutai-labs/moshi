@@ -110,12 +110,10 @@ class ServerState:
             log("info", f"text token '{inner}'")
             await ws.send_bytes(b"\x02" + bytes(inner, encoding="utf8"))
         for stream_idx in range(1, self.num_text_streams):
-            user_text = self._decode_text_token(tokens[0, stream_idx, 0].item())
-            if user_text is not None:
-                log("info", f"user text token (stream {stream_idx}) '{user_text}'")
-                await ws.send_bytes(
-                    b"\x07" + stream_idx.to_bytes(1, "big") + bytes(user_text, encoding="utf8")
-                )
+            text = self._decode_text_token(tokens[0, stream_idx, 0].item())
+            if text is not None:
+                log("info", f"Stream text token idx {stream_idx}) '{text}'")
+                await ws.send_bytes(b"\x07" + stream_idx.to_bytes(1, "big") + bytes(text, encoding="utf8"))
 
     async def recv_loop(
         self, ws: web.WebSocketResponse, opus_reader: sphn.OpusStreamReader, opus_writer: sphn.OpusStreamWriter
