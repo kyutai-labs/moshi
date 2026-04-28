@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-14T15:22:23.113849Z",
+  "depends_on": [
+    "fn-1-complete-moshi-on-device-voice.1"
+  ],
+  "epic": "fn-1-complete-moshi-on-device-voice",
+  "id": "fn-1-complete-moshi-on-device-voice.4",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-1-complete-moshi-on-device-voice.4.md",
+  "status": "todo",
+  "title": "Write macOS test harness for inference verification",
+  "updated_at": "2026-02-14T16:02:29.429086Z"
+}
