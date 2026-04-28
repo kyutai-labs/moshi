@@ -112,8 +112,44 @@ class ServerState:
         for stream_idx in range(1, self.num_text_streams):
             text = self._decode_text_token(tokens[0, stream_idx, 0].item())
             if text is not None:
-                log("info", f"Stream text token idx {stream_idx}) '{text}'")
+                log("info", f"Stream text token idx ({stream_idx}) '{text}'")
                 await ws.send_bytes(b"\x07" + stream_idx.to_bytes(1, "big") + bytes(text, encoding="utf8"))
+
+    def prepend_prompt(self, prompt: str) -> None:
+        lm_model = self.lm_gen.lm_model
+        if lm_model.end_of_prompt_id is None:
+            raise RuntimeError(
+                "This checkpoint was not trained with an end-of-prompt token; "
+                "set `end_of_prompt_id` in the model config to use prompt prefixing."
+            )
+        state = self.lm_gen._streaming_state
+        assert state is not None, "lm_gen must be in streaming mode before calling prepend_prompt"
+
+        prompt_tokens: list[int] = self.text_tokenizer.encode(prompt.strip())  # type: ignore[no-untyped-call]
+        prompt_tokens.append(lm_model.end_of_prompt_id)
+
+        num_user_codebooks = lm_model.num_audio_codebooks - lm_model.dep_q
+        audio_pad = torch.full(
+            (1, num_user_codebooks, 1),
+            lm_model.zero_token_id,
+            dtype=torch.long,
+            device=self.device,
+        )
+        extra_text_pad = (
+            lm_model.text_padding_token_id if self.lm_gen.user_text_autoregressive else lm_model.zero_token_id
+        )
+        cache_len = state.cache.shape[2]
+
+        self.lm_gen.step(audio_pad)
+
+        for tok in prompt_tokens:
+            pos = int(state.offsets[0].item()) % cache_len
+            state.cache[:, 0, pos] = tok
+            if lm_model.num_text_streams > 1:
+                state.cache[:, 1 : lm_model.num_text_streams, pos] = extra_text_pad
+            self.lm_gen.step(audio_pad)
+
+        log("info", f"primed LM with {len(prompt_tokens)} prompt tokens (incl. EOP)")
 
     async def recv_loop(
         self, ws: web.WebSocketResponse, opus_reader: sphn.OpusStreamReader, opus_writer: sphn.OpusStreamWriter
@@ -172,6 +208,26 @@ class ServerState:
         finally:
             log("info", "connection closed")
 
+    async def recv_prompt(self, ws: web.WebSocketResponse) -> str | None:
+        """First text message from the client defines the prompt"""
+        async for message in ws:
+            if message.type == aiohttp.WSMsgType.ERROR:
+                log("error", f"{ws.exception()}")
+                return None
+            elif message.type == aiohttp.WSMsgType.CLOSED:
+                return None
+            elif message.type != aiohttp.WSMsgType.BINARY:
+                log("error", f"unexpected message type {message.type}")
+                return None
+            data = message.data
+            if not isinstance(data, bytes) or len(data) == 0:
+                continue
+            kind = data[0]
+            if kind != 2:
+                log("error", f"first message after handshake is expected to be text message (kind 2), got kind {kind}")
+                return None
+            return data[1:].decode("utf8")
+
     async def handle_chat(self, request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
@@ -185,6 +241,9 @@ class ServerState:
             self.lm_gen.reset_streaming()
             # Send the handshake.
             await ws.send_bytes(b"\x00")
+            prompt = await self.recv_prompt(ws)
+            if prompt:
+                self.prepend_prompt(prompt)
             await self.recv_loop(ws, opus_reader, opus_writer)
         log("info", "done with connection")
         return ws

@@ -99,6 +99,7 @@ class LMModel(StreamingContainer):
         depformer_norm: str | None = None,
         existing_text_padding_id: int = 3,
         existing_text_end_padding_id: int = 0,
+        end_of_prompt_id: int | None = None,
         extra_text_stream_depth: int = 0,
         extra_heads_num_heads: int = 0,
         extra_heads_dim: int = 6,
@@ -124,6 +125,7 @@ class LMModel(StreamingContainer):
         self.dim = dim
         self.existing_text_padding_id = existing_text_padding_id
         self.existing_text_end_padding_id = existing_text_end_padding_id
+        self.end_of_prompt_id = end_of_prompt_id
         self.context = context
         self.depformer_weights_per_step_schedule = depformer_weights_per_step_schedule
         if depformer_weights_per_step_schedule is not None:

@@ -25,6 +25,7 @@ type ConversationProps = {
   worklet: MutableRefObject<AudioWorkletNode>;
   onConversationEnd?: () => void;
   isBypass?: boolean;
+  prompt?: string;
 } & Partial<ModelParamsValues>;
 
 
@@ -84,6 +85,7 @@ export const Conversation: FC<ConversationProps> = ({
   onConversationEnd,
   isBypass = false,
   email,
+  prompt,
   ...params
 }) => {
   const getAudioStats = useRef<() => AudioStats>(() => ({
@@ -134,6 +136,18 @@ export const Conversation: FC<ConversationProps> = ({
     uri: WSURL,
     onDisconnect,
   });
+
+  const promptSent = useRef(false);
+  useEffect(() => {
+    if (!isConnected) {
+      promptSent.current = false;
+      return;
+    }
+    if (!promptSent.current) {
+      sendMessage({ type: "text", data: prompt ?? "" });
+      promptSent.current = true;
+    }
+  }, [isConnected, prompt, sendMessage]);
   useEffect(() => {
     audioRecorder.current.ondataavailable = (e) => {
       audioChunks.current.push(e.data);

@@ -28,6 +28,7 @@ export const Queue: FC = () => {
   const [shouldConnect, setShouldConnect] = useState<boolean>(false);
   const startAsImage = getBooleanFromStorage(localStorage.getItem("isImageMode"));
   const [isImageMode, setisImageMode] = useState<boolean>(startAsImage == undefined ? false : startAsImage);
+  const [prompt, setPrompt] = useState<string>(localStorage.getItem("prompt") ?? "");
   const modelParams = useModelParams({
     textTemperature: getFloatFromStorage(localStorage.getItem("textTemperature")),
     textTopk: getIntFromStorage(localStorage.getItem("textTopk")),
@@ -99,6 +100,7 @@ export const Queue: FC = () => {
         workerAddr={overrideWorkerAddr ?? ""}
         audioContext={audioContext as MutableRefObject<AudioContext>}
         worklet={worklet as MutableRefObject<AudioWorkletNode>}
+        prompt={prompt}
         {...modelParams}
       />
     );
@@ -136,7 +138,18 @@ export const Queue: FC = () => {
         {isImageMode ?
           <ImageGallery numImages={9} size={110} paramsSetter={modelParams.setImageUrl} clickAction={onConnect}></ImageGallery>
           :
-          <Button onClick={async () => await onConnect()}>Connect</Button>}
+          <>
+            <textarea
+              className="bg-black text-white border-2 border-white rounded-none p-2 mb-4 w-80 h-24 text-sm"
+              placeholder="Optional prompt..."
+              value={prompt}
+              onChange={(e) => {
+                setPrompt(e.target.value);
+                localStorage.setItem("prompt", e.target.value);
+              }}
+            />
+            <Button onClick={async () => await onConnect()}>Connect</Button>
+          </>}
       </div>
       <div className="flex flex-grow justify-center items-center flex-col">
         <>

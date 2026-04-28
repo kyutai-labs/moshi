@@ -102,6 +102,11 @@ def import_model(
     config["fuser"].pop("streaming_sum", None)
     config["cross_attention"] = bool(config["fuser"].get("cross"))
 
+    if hasattr(cfg, "interleaver"):
+        end_of_prompt = getattr(cfg.interleaver, "end_of_prompt", None)
+        if end_of_prompt is not None:
+            config["end_of_prompt_id"] = int(end_of_prompt)
+
     if hasattr(cfg, "interleaver") and cfg.interleaver.variant == "tts_delay":
         kw_interleaver = dict(cfg.interleaver)
         kw_interleaver.update(cfg.interleaver.tts_delay)
