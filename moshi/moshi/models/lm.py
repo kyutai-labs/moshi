@@ -731,12 +731,21 @@ class LMGen(StreamingModule[_LMGenState]):
         # Shape of text_logits is [B, num_text_streams, T=1, Card_text].
         if self.on_text_logits_hook:
             self.on_text_logits_hook(text_logits[:, :1])
+        text_logits = text_logits.float()
+        probas = torch.softmax(text_logits / 1, dim=-1)
+        pad_proba = probas[..., 3]
+        print(pad_proba[:, :1].squeeze())
+        uni = torch.rand_like(pad_proba)
+        is_pad = uni <= pad_proba
+        text_logits[..., 3] = float('-inf')
         text_tokens = sample_token(
             text_logits.float(),
             self.use_sampling,
-            self.temp_text,
+            0.5,
             self.top_k_text,
         )
+        pad = torch.full_like(text_tokens, 3)
+        text_tokens = torch.where(is_pad, pad, text_tokens)
         assert text_tokens.dim() == 3, text_tokens.shape
         assert text_tokens.shape[2] == 1
         assert text_tokens.shape[1] == lm_model.num_text_streams, text_tokens.shape
