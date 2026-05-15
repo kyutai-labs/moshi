@@ -459,7 +459,7 @@ def get_conditioner(
         from ..conditioners.tensors import TensorConditioner
         return TensorConditioner(**conditioner_kwargs)
     else:
-        raise RuntimeError(f"Unknow conditioner type {conditioner_type}.")
+        raise RuntimeError(f"Unknown conditioner type {conditioner_type}.")
 
 
 def get_conditioner_provider(

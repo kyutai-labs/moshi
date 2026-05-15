@@ -533,7 +533,7 @@ async fn main_() -> Result<()> {
             tracing_subscriber::fmt().init();
             for config in configs.iter() {
                 let _ = Config::load(config)?;
-                tracing::info!(?config, "loaded succesfully")
+                tracing::info!(?config, "loaded successfully")
             }
         }
         Command::Worker(args) => {
