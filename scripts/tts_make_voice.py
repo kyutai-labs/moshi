@@ -74,7 +74,7 @@ def main():
     parser.add_argument(
         "--clean",
         action="store_true",
-        help="Apply noise suppresion to clean up the audio.",
+        help="Apply noise suppression to clean up the audio.",
     )
     parser.add_argument(
         "--save-clean",

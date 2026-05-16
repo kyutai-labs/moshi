@@ -73,7 +73,7 @@ def main():
 
     parser.add_argument("--only-wav", action='store_true',
                         help='Only save the audio. Otherwise, a .safetensors file with raw tokens is saved, '
-                             'along with a .json file with various informations on the generation.')
+                             'along with a .json file with various information on the generation.')
     parser.add_argument("jsonl", type=Path, help="JSONL file containing the stuff to TTS.")
 
     args = parser.parse_args()

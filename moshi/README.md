@@ -153,7 +153,7 @@ python scripts/mimi_streaming_test.py
 
 ```
 
-Similary, Moshi can be tested (with a GPU) with
+Similarly, Moshi can be tested (with a GPU) with
 ```bash
 python scripts/moshi_benchmark.py
 ```
