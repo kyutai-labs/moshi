@@ -32,6 +32,10 @@ class StreamingAdd(nn.Module):
         self._lhs = None
         self._rhs = None
 
+    def reset_state(self):
+        self._lhs = None
+        self._rhs = None
+
     def step(self, lhs: mx.array, rhs: mx.array) -> mx.array:
         if self._lhs is not None:
             lhs = mx.concat([self._lhs, lhs], axis=-1)
@@ -94,6 +98,7 @@ class SeanetResnetBlock(nn.Module):
             self.shortcut.reset_state()
         for b in self.block:
             b.reset_state()
+        self.streaming_add.reset_state()
 
     def __call__(self, xs: mx.array) -> mx.array:
         residual = xs
