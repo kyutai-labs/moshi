@@ -6,7 +6,6 @@ dependencies = [
     "numpy >= 1.26, < 2.3",
     "safetensors >= 0.4.0, < 0.8.0",
     "huggingface-hub >= 0.24, < 1.0.0",
-    "bitsandbytes >= 0.45, < 0.50.0; sys_platform == 'linux'",
     "einops >= 0.7, < 0.9",
     "sentencepiece >= 0.2.0, < 0.3",
     "sounddevice == 0.5",
@@ -41,6 +40,15 @@ dev = [
     "flake8",
     "pre-commit",
     "gradio-webrtc>=0.0.18"
+]
+# `bitsandbytes` is only required when constructing quantized models via
+# `moshi.utils.quantize.QLinear` (used in lm.py / transformer.py when `quantize=True`).
+# It only ships x86_64 / Windows wheels (no aarch64 Linux), so keeping it as a
+# hard dependency made `pip install moshi` fail on aarch64 Linux even for users
+# who don't use quantization. Install as `pip install moshi[quant]` when needed.
+# Fixes #385.
+quant = [
+    "bitsandbytes >= 0.45, < 0.50.0; sys_platform == 'linux'",
 ]
 
 # Ruff is not enforced atm, but if you want to use it on your code
