@@ -10,10 +10,25 @@ import torch
 from torch import nn
 
 
+_BITSANDBYTES_INSTALL_HINT = (
+    "bitsandbytes is required for quantized linear layers but is not installed. "
+    "Install it via `pip install \"moshi[quant]\"`. "
+    "Note: bitsandbytes only ships x86_64 Linux / Windows wheels; aarch64 Linux is unsupported upstream."
+)
+
+
+def _import_bitsandbytes():
+    try:
+        import bitsandbytes  # type: ignore
+    except ImportError as e:
+        raise ImportError(_BITSANDBYTES_INSTALL_HINT) from e
+    return bitsandbytes
+
+
 class QLinear(nn.Module):
     def __init__(self, linear: nn.Linear):
         super().__init__()
-        from bitsandbytes import functional as bnbF  # type: ignore
+        bnbF = _import_bitsandbytes().functional  # type: ignore
         weight = linear.weight
         assert weight.data.dtype.is_floating_point
         assert linear.bias is None
@@ -22,7 +37,7 @@ class QLinear(nn.Module):
         self.weight_scb = nn.Parameter(SCB, requires_grad=False)
 
     def forward(self, x):
-        import bitsandbytes as bnb  # type: ignore
+        bnb = _import_bitsandbytes()
         state = bnb.MatmulLtState()  # pyright: ignore
         state.CB = self.weight  # type: ignore
         assert isinstance(state.CB, torch.Tensor)
