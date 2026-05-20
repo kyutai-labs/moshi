@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-1-complete-moshi-on-device-voice",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
+  "created_at": "2026-02-14T12:22:25.566969Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-1-complete-moshi-on-device-voice",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-1-complete-moshi-on-device-voice.md",
+  "status": "open",
+  "title": "Complete Moshi on-device voice inference for iOS",
+  "updated_at": "2026-02-14T13:22:31.409030Z"
+}

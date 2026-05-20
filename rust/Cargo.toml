@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "moshi-ios",
     "mimi-pyo3",
     "moshi-backend",
     "moshi-cli",
@@ -85,3 +86,4 @@ debug = true
 [profile.release-no-debug]
 inherits = "release"
 debug = false
+strip = "symbols"

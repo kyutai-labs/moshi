@@ -1,0 +1,15 @@
+{
+  "memory": {
+    "enabled": true
+  },
+  "planSync": {
+    "crossEpic": false,
+    "enabled": true
+  },
+  "review": {
+    "backend": null
+  },
+  "scouts": {
+    "github": false
+  }
+}
