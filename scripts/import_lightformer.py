@@ -16,7 +16,7 @@ def import_model(
     in_path: str,
     out_path: str,
 ) -> None:
-    pkg = torch.load(in_path, map_location=torch.device("cpu"))
+    pkg = torch.load(in_path, map_location=torch.device("cpu"), weights_only=True)
     if 'xp.cfg' in pkg:
         cfg = pkg['xp.cfg']
     else:
