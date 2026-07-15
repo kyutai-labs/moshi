@@ -20,6 +20,14 @@ from .conditioners import ConditionAttributes, ConditionTensors
 from .models import LMGen, LMModel, MimiModel, loaders
 
 
+def _get_default_device():
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def seed_all(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -239,8 +247,8 @@ def main():
     parser.add_argument(
         "--device",
         type=str,
-        default="cuda",
-        help="Device on which to run, defaults to 'cuda'.",
+        default=_get_default_device(),
+        help="Device on which to run, defaults to the best available (cuda > mps > cpu).",
     )
     parser.add_argument(
         "--half",
