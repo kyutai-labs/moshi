@@ -25,6 +25,14 @@ from .models import loaders, MimiModel, LMModel, LMGen
 from .run_inference import get_condition_tensors
 
 
+def _get_default_device():
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def seed_all(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -69,7 +77,8 @@ class ServerState:
                     continue
                 _ = self.mimi.decode(tokens[:, 1:])
 
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
     async def decode_and_send(
         self,
@@ -187,7 +196,8 @@ def main():
     parser.add_argument("--lora-weight", type=str, help="Path to a local checkpoint file for LoRA.", default=None)
     parser.add_argument("--config-path", type=str, help="Path to a local config file.", default=None)
     parser.add_argument("--cfg-coef", type=float, default=1., help="CFG coefficient.")
-    parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
+    parser.add_argument("--device", type=str, default=_get_default_device(),
+                        help="Device on which to run, defaults to the best available (cuda > mps > cpu).")
     parser.add_argument("--no_fuse_lora", action="store_false", dest="fuse_lora", default=True,
                         help="Do not fuse LoRA layers intot Linear layers.")
     parser.add_argument("--half", action="store_const", const=torch.float16, default=torch.bfloat16,

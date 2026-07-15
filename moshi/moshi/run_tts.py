@@ -18,6 +18,14 @@ from .models.tts import TTSModel, DEFAULT_DSM_TTS_REPO, DEFAULT_DSM_TTS_VOICE_RE
 from .models.loaders import CheckpointInfo
 
 
+def _get_default_device():
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 @dataclass
 class TTSRequest:
     """Format for a single TTS request in the provided JSONL file.
@@ -67,7 +75,8 @@ def main():
     parser.add_argument("--padding-between", type=int, default=1,
                         help="Forces a minimal amount of fixed padding between words.")
 
-    parser.add_argument("--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'.")
+    parser.add_argument("--device", type=str, default=_get_default_device(),
+                        help="Device on which to run, defaults to the best available (cuda > mps > cpu).")
     parser.add_argument("--half", action="store_const", const=torch.float16, default=torch.bfloat16,
                         dest="dtype", help="Run inference with float16, not bfloat16, better for old GPUs.")
 
