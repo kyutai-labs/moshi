@@ -115,6 +115,33 @@ To compile GPU support, you will also need the [CUDA](https://developer.nvidia.c
 The PyTorch based API can be found in the `moshi` directory. It provides a streaming
 version of the audio tokenizer (mimi) and the language model (moshi).
 
+### Local PyTorch demo (no Rust required)
+
+From the repository root, create a Python 3.12 environment, install a CUDA-enabled
+PyTorch build, and install the local PyTorch package in editable mode:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install 'torch==2.9.1' --index-url https://download.pytorch.org/whl/cu128
+.venv/bin/python -m pip install -e ./moshi
+```
+
+`run.sh` starts the PyTorch server with Kyutai's experimental q8 checkpoint in
+float16 mode (required by its quantized linear layers); it forwards any
+additional server arguments unchanged:
+
+```bash
+./run.sh
+# for remote access:
+./run.sh --host 0.0.0.0
+```
+
+The first invocation downloads the checkpoint into the Hugging Face cache. Once the
+server prints the Web UI address, open <http://localhost:8998>. For microphone access
+to a remote host, forward port 8998 to localhost or use HTTPS. The q8 checkpoint is
+the lower-memory PyTorch option; the bf16 checkpoint needs roughly 24 GB of GPU memory.
+
 In order to run in interactive mode, you need to start a server which will
 run the model, you can then use either the web UI or a command line client.
 
