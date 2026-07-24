@@ -414,7 +414,8 @@ def get_moshi_lm(
             state = load_file(filename, device=str(device))
             for key, value in state.items():
                 if value.dtype.is_floating_point:
-                    if key.startswith('condition_provider.') or key.startswith('fuser.'):
+                    if (key.startswith('condition_provider.') or key.startswith('fuser.')
+                            or key.endswith('weight_scb')):
                         value = value.float()
                     else:
                         value = value.to(dtype)
