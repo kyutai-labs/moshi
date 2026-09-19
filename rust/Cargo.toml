@@ -1,15 +1,12 @@
 [workspace]
 members = [
     "mimi-pyo3",
-    "moshi-backend",
-    "moshi-cli",
     "moshi-core",
-    "moshi-server",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.6.4"
+version = "0.6.5"
 edition = "2021"
 license = "MIT/Apache-2.0"
 description = "moshi, a real-time voice AI"
@@ -42,14 +39,14 @@ http = "1.1.0"
 kaudio = "0.2.1"
 lazy_static = "1.5.0"
 log = "0.4.20"
-moshi = { path = "./moshi-core", version = "0.6.4" }
+moshi = { path = "./moshi-core", version = "0.6.5" }
 native-tls = "0.2.11"
-numpy = "0.23.0"
+numpy = "0.26.0"
 ogg = { version = "0.9.1", features = ["async"] }
 opus = "0.3.0"
 prometheus = "0.13.4"
-pyo3 = "0.23.0"
-pyo3-ffi = "0.23.0"
+pyo3 = "0.26.0"
+pyo3-ffi = "0.26.0"
 rand = { version = "0.8.5", features = ["getrandom"] }
 rand_chacha = "0.3.1"
 ratatui = "0.27.0"
