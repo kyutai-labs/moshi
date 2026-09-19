@@ -131,7 +131,7 @@ impl Tokenizer {
         Ok(Self { mimi, device, dtype })
     }
 
-    fn encode(&mut self, pcm_data: numpy::PyReadonlyArray3<f32>) -> PyResult<PyObject> {
+    fn encode(&mut self, pcm_data: numpy::PyReadonlyArray3<f32>) -> PyResult<Py<PyAny>> {
         let py = pcm_data.py();
         let pcm_data = pcm_data.as_array();
         let pcm_shape = pcm_data.shape().to_vec();
@@ -140,7 +140,7 @@ impl Tokenizer {
             Some(data) => data,
         };
         let codes = py
-            .allow_threads(|| {
+            .detach(|| {
                 let pcm_data = candle::Tensor::from_slice(pcm_data, pcm_shape, &self.device)?
                     .to_dtype(self.dtype)?;
                 let codes = self.mimi.encode(&pcm_data)?;
@@ -151,7 +151,7 @@ impl Tokenizer {
         Ok(codes.into_any().unbind())
     }
 
-    fn encode_step(&mut self, pcm_data: numpy::PyReadonlyArray3<f32>) -> PyResult<PyObject> {
+    fn encode_step(&mut self, pcm_data: numpy::PyReadonlyArray3<f32>) -> PyResult<Py<PyAny>> {
         let py = pcm_data.py();
         let pcm_data = pcm_data.as_array();
         let pcm_shape = pcm_data.shape().to_vec();
@@ -160,7 +160,7 @@ impl Tokenizer {
             Some(data) => data,
         };
         let codes = py
-            .allow_threads(|| {
+            .detach(|| {
                 let pcm_data = candle::Tensor::from_slice(pcm_data, pcm_shape, &self.device)?
                     .to_dtype(self.dtype)?;
                 let codes = self.mimi.encode_step(&pcm_data.into(), &().into())?;
@@ -179,7 +179,7 @@ impl Tokenizer {
         }
     }
 
-    fn decode(&mut self, codes: numpy::PyReadonlyArray3<u32>, py: Python) -> PyResult<PyObject> {
+    fn decode(&mut self, codes: numpy::PyReadonlyArray3<u32>, py: Python) -> PyResult<Py<PyAny>> {
         let codes = codes.as_array();
         let codes_shape = codes.shape().to_vec();
         let codes = match codes.to_slice() {
@@ -187,7 +187,7 @@ impl Tokenizer {
             Some(data) => data,
         };
         let pcm = py
-            .allow_threads(|| {
+            .detach(|| {
                 let codes = candle::Tensor::from_slice(codes, codes_shape, &self.device)?;
                 let pcm = self.mimi.decode(&codes)?.to_dtype(candle::DType::F32)?;
                 pcm.to_vec3::<f32>()
@@ -201,7 +201,7 @@ impl Tokenizer {
         &mut self,
         codes: numpy::PyReadonlyArray3<u32>,
         py: Python,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let codes = codes.as_array();
         let codes_shape = codes.shape().to_vec();
         let codes = match codes.to_slice() {
@@ -209,7 +209,7 @@ impl Tokenizer {
             Some(data) => data,
         };
         let pcm = py
-            .allow_threads(|| {
+            .detach(|| {
                 let codes = candle::Tensor::from_slice(codes, codes_shape, &self.device)?;
                 let pcm = self.mimi.decode_step(&codes.into(), &().into())?;
                 match pcm.as_option() {
@@ -331,7 +331,7 @@ impl StreamTokenizer {
         Ok(())
     }
 
-    fn get_encoded(&mut self, py: Python) -> PyResult<PyObject> {
+    fn get_encoded(&mut self, py: Python) -> PyResult<Py<PyAny>> {
         match self.encoder_rx.lock().unwrap().try_recv() {
             Ok(codes) => {
                 let codes = numpy::PyArray2::from_vec2(py, &codes)?;
@@ -344,7 +344,7 @@ impl StreamTokenizer {
         }
     }
 
-    fn get_decoded(&mut self, py: Python) -> PyResult<PyObject> {
+    fn get_decoded(&mut self, py: Python) -> PyResult<Py<PyAny>> {
         match self.decoder_rx.lock().unwrap().try_recv() {
             Ok(pcm) => {
                 let pcm = numpy::PyArray1::from_vec(py, pcm);

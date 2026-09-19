@@ -1,6 +1,6 @@
 [package]
 name = "mimi-pyo3"
-version.workspace = true
+version = "0.6.5"
 edition.workspace = true
 description.workspace = true
 repository.workspace = true
