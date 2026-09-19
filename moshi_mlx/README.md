@@ -1,6 +1,6 @@
 # Moshi - MLX
 
-See the [top-level README.md][main_repo] for more information on Moshi.
+This package is the standalone MLX implementation for Moshi.
 
 [Moshi][moshi] is a speech-text foundation model and full-duplex spoken dialogue framework.
 It uses [Mimi][moshi], a state-of-the-art streaming neural audio codec. Mimi operates at a framerate of 12.5 Hz, and compresses
@@ -10,17 +10,18 @@ This is the MLX implementation for Moshi. For Mimi, this uses our Rust based imp
 
 ## Requirements
 
-You will need at least Python 3.10, we recommend Python 3.12.
+You will need Python 3.10 or newer on macOS. Python 3.14 is supported.
 
 ```bash
-pip install moshi_mlx  # moshi MLX, from PyPI, best with Python 3.12.
-# Or the bleeding edge versions for Moshi and Moshi-MLX.
-pip install -e "git+https://git@github.com/kyutai-labs/moshi#egg=moshi_mlx&subdirectory=moshi_mlx"
+# Builds the local rustymimi extension from ../rust/mimi-pyo3.
+uv sync
+# Or install the built wheel:
+uv build
+uv pip install dist/*.whl
 ```
 We have tested the MLX version with MacBook Pro M3.
 
-If you are not using Python 3.12, you might get an error when installing
-`moshi_mlx` or `rustymimi` (which `moshi_mlx` depends on). Then,you will need to install the [Rust toolchain](https://rustup.rs/), or switch to Python 3.12.
+The package requires Apple Silicon macOS because MLX is used for inference.
 
 ## Usage
 
@@ -66,4 +67,3 @@ If you use either Mimi or Moshi, please cite the following paper,
 ```
 
 [moshi]: https://kyutai.org/Moshi.pdf
-[main_repo]: https://github.com/kyutai-labs/moshi
