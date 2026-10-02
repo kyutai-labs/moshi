@@ -414,7 +414,11 @@ def get_moshi_lm(
             state = load_file(filename, device=str(device))
             for key, value in state.items():
                 if value.dtype.is_floating_point:
-                    if key.startswith('condition_provider.') or key.startswith('fuser.'):
+                    # `*scb` are the float32 int8 scale buffers of quantized (q8)
+                    # checkpoints, dotted (`weight_scb`) or fused (`in_proj_weight_scb`).
+                    if (key.startswith('condition_provider.')
+                            or key.startswith('fuser.')
+                            or key.lower().endswith('scb')):
                         value = value.float()
                     else:
                         value = value.to(dtype)
