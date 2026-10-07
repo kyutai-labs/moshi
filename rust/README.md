@@ -56,6 +56,23 @@ You will get some warnings about the site being unsafe. When using chrome you
 can bypass it by selecting "Details" or "Advanced", then "Visit this unsafe
 site" or "Proceed to localhost (unsafe)".
 
+### Converting a PyTorch checkpoint to Candle Q8
+
+The Candle backend uses a different depformer tensor layout than the PyTorch
+implementation. A full PyTorch Moshi checkpoint (with any LoRA adapters already
+merged) can be converted and quantized to a Candle-compatible Q8_0 GGUF file
+with:
+
+```bash
+cargo run --release -p moshi-backend --bin convert-moshi-candle-q8 -- \
+  --input /path/to/model.safetensors \
+  --output /path/to/model.q8.gguf
+```
+
+The conversion runs on CPU. Use `--validate-only` to check the tensor names and
+shapes without performing quantization or writing an output file. The generated
+GGUF can be used as the `lm_model_file` in the backend configuration.
+
 ## Rust client
 
 We recommend using the web UI as it provides some echo cancellation that helps
