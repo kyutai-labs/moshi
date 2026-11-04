@@ -280,8 +280,8 @@ class MimiModel(CompressionModel[_MimiState]):
     def _to_encoder_framerate(self, x: torch.Tensor):
         # Convert from overall framerate to the encoder frame rate.
         _, _, length = x.shape
-        frame_rate = self.encoder_frame_rate
-        new_frame_rate = self.frame_rate
+        frame_rate = self.frame_rate
+        new_frame_rate = self.encoder_frame_rate
         if frame_rate == new_frame_rate:
             return x
         if self.resample_method == "interpolate":
