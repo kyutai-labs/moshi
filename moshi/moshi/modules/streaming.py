@@ -86,24 +86,14 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
         self._streaming_detached = streaming_detached
 
     def _apply_named_streaming(self, fn: tp.Any):
-        def _handle_module(prefix: str, module: nn.Module):
-            if isinstance(module, StreamingModule):
-                # If prefix is empty, we are the direct receiver of the streaming request,
-                # otherwise, we are inheriting from a parent and will stop if detached.
-                if module._streaming_detached and prefix != "":
-                    return
-                assert self._cached_children is not None
-                self._cached_children.append((prefix, module))
-            for name, child in module.named_children():
-                if prefix:
-                    new_prefix = prefix + "." + name
-                else:
-                    new_prefix = name
-                _handle_module(new_prefix, child)
-
+        # `self` is not stored in `_cached_children`, and the recursion is not a closure over `self`:
+        # either would form a reference cycle, keeping the module and its tensors alive until the
+        # cyclic garbage collector runs (e.g. one `LMGen` per `TTSModel.generate()` call).
         if self._cached_children is None:
             self._cached_children = []
-            _handle_module("", self)
+            for name, child in self.named_children():
+                _collect_streaming_children(name, child, self._cached_children)
+        fn("", self)
         for name, child in self._cached_children:
             fn(name, child)
 
@@ -209,6 +199,16 @@ class StreamingModule(abc.ABC, nn.Module, tp.Generic[StateT]):
             state._set_exec_mask_graphed = CUDAGraphed(_set_exec_mask, disable=disable)
 
         state._set_exec_mask_graphed(exec_mask)
+
+
+def _collect_streaming_children(prefix: str, module: nn.Module, out: list) -> None:
+    if isinstance(module, StreamingModule):
+        # We are inheriting the streaming request from a parent, so stop if detached.
+        if module._streaming_detached:
+            return
+        out.append((prefix, module))
+    for name, child in module.named_children():
+        _collect_streaming_children(prefix + "." + name, child, out)
 
 
 class StreamingContainer(StreamingModule[State]):
