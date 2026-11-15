@@ -31,11 +31,16 @@ def replace_lora_with_linear(module):
                 child.scaling * (child.lora_B.weight @ child.lora_A.weight)
             # Create a standard Linear layer with the same in/out features
             new_linear = nn.Linear(child.frozen_W.in_features,
-                                   child.frozen_W.out_features, bias=False,
+                                   child.frozen_W.out_features,
+                                   bias=child.frozen_W.bias is not None,
                                    device=torch.device('meta'),
                                    dtype=merged_weight.dtype)
             new_linear.weight = nn.Parameter(
                 merged_weight, requires_grad=merged_weight.requires_grad)  # Transfer merged weights
+            if child.frozen_W.bias is not None:
+                new_linear.bias = nn.Parameter(
+                    child.frozen_W.bias.detach().clone(),
+                    requires_grad=child.frozen_W.bias.requires_grad)
             setattr(module, name, new_linear)  # Replace the module
         else:
             replace_lora_with_linear(child)  # Recursively process submodules
